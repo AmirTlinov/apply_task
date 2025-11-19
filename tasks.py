@@ -1161,7 +1161,6 @@ class ColumnLayout:
     prog_w: int = 7
     subt_w: int = 9
     ctx_w: int = 18
-    check_w: int = 12
 
     def has_column(self, name: str) -> bool:
         return name in self.columns
@@ -1173,7 +1172,6 @@ class ColumnLayout:
             'progress': self.prog_w,
             'subtasks': self.subt_w,
             'path': self.ctx_w,
-            'checks': self.check_w,
         }
 
         # Подсчёт фиксированных колонок
@@ -1194,13 +1192,13 @@ class ResponsiveLayoutManager:
     """Управляет адаптивными layout в зависимости от ширины терминала"""
 
     LAYOUTS = [
-        ColumnLayout(min_width=200, columns=['stat', 'title', 'progress', 'subtasks', 'checks', 'path']),
-        ColumnLayout(min_width=150, columns=['stat', 'title', 'progress', 'subtasks', 'checks', 'path']),
+        ColumnLayout(min_width=200, columns=['stat', 'title', 'progress', 'subtasks', 'path']),
+        ColumnLayout(min_width=150, columns=['stat', 'title', 'progress', 'subtasks', 'path']),
         ColumnLayout(min_width=120, columns=['stat', 'title', 'progress', 'subtasks', 'path']),
-        ColumnLayout(min_width=95, columns=['stat', 'title', 'progress', 'path']),
-        ColumnLayout(min_width=75, columns=['stat', 'title', 'progress']),
-        ColumnLayout(min_width=55, columns=['stat', 'title', 'progress']),
-        ColumnLayout(min_width=0, columns=['stat', 'progress', 'title'], stat_w=3, prog_w=6),
+        ColumnLayout(min_width=95, columns=['stat', 'title', 'progress', 'subtasks']),
+        ColumnLayout(min_width=75, columns=['stat', 'title', 'progress', 'subtasks']),
+        ColumnLayout(min_width=55, columns=['stat', 'title', 'progress', 'subtasks']),
+        ColumnLayout(min_width=0, columns=['stat', 'progress', 'title', 'subtasks'], stat_w=3, prog_w=6),
     ]
 
     @classmethod
@@ -1771,7 +1769,6 @@ class TaskTrackerTUI:
             'title': ('Задача', widths.get('title', 20)),
             'progress': ('Прогр', widths.get('progress', 6)),
             'subtasks': ('Подзадач', widths.get('subtasks', 9)),
-            'checks': ('Чекпоинт', widths.get('checks', 8)),
             'path': ('Путь', widths.get('path', 12)),
         }
 
@@ -1795,9 +1792,7 @@ class TaskTrackerTUI:
 
             if 'stat' in layout.columns:
                 if compact_status_mode:
-                    marker = status_text if status_class != 'class:icon.check' else '⚑'
-                    if status_class == 'class:status.unknown':
-                        marker = '○'
+                    marker = status_text if status_class != 'class:status.unknown' else '○'
                     stat_width = widths['stat']
                     marker_text = marker.center(stat_width) if stat_width > 1 else marker
                     cell_data['stat'] = (marker_text, status_class)
@@ -1824,33 +1819,6 @@ class TaskTrackerTUI:
                 components = [comp for comp in (task.domain, task.phase, task.component) if comp]
                 path_text = '/'.join(components) if components else "-"
                 cell_data['path'] = (self._format_cell(path_text, widths['path']), 'class:text.dim')
-
-            if 'checks' in layout.columns:
-                detail = getattr(task, 'detail', None)
-                if detail and detail.subtasks:
-                    target = next((st for st in detail.subtasks if not st.completed), detail.subtasks[-1])
-                    c_ready = target.criteria_confirmed
-                    t_ready = target.tests_confirmed
-                    b_ready = target.blockers_resolved
-                    if not target.criteria_confirmed:
-                        pending_text = " Крит"
-                    elif not target.tests_confirmed:
-                        pending_text = " Тест"
-                    elif not target.blockers_resolved:
-                        pending_text = " Блок"
-                    else:
-                        pending_text = " OK"
-                else:
-                    c_ready = t_ready = b_ready = False
-                    pending_text = " —"
-                glyphs = [
-                    '✓' if c_ready else '·',
-                    '✓' if t_ready else '·',
-                    '✓' if b_ready else '·',
-                ]
-                checks_text = '[' + ' '.join(glyphs) + ']' + pending_text
-                style = 'class:icon.check' if (c_ready and t_ready and b_ready) else 'class:text.dim'
-                cell_data['checks'] = (self._format_cell(checks_text, widths['checks']), style)
 
             # Рендер строки
             if idx == self.selected_index:
