@@ -5,7 +5,7 @@ import pytest
 import json
 
 from projects_sync import ProjectsSync
-from tasks import SubTask
+from tasks import SubTask, TaskFileParser
 import yaml
 
 
@@ -112,3 +112,68 @@ fields:
     assert updated.endswith("TASK-001.task")
     metadata = yaml.safe_load(task_file.read_text().split("---", 2)[1])
     assert metadata["status"] == "OK"
+
+
+def test_pull_task_fields_updates_local_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    tasks_dir = tmp_path / ".tasks"
+    tasks_dir.mkdir()
+    task_file = tasks_dir / "TASK-050.task"
+    task_file.write_text(
+        "---\n"
+        "id: TASK-050\n"
+        "status: FAIL\n"
+        "progress: 0\n"
+        "domain: legacy\n"
+        "project_item_id: ITEM-50\n"
+        "---\n# Demo\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / ".apply_task_projects.yaml"
+    cfg.write_text(
+        """
+project:
+  type: repository
+  owner: dummy
+  repo: demo
+  number: 1
+fields:
+  status:
+    name: Status
+    options:
+      OK: Done
+  progress:
+    name: Progress
+  domain:
+    name: Domain
+"""
+    )
+    monkeypatch.setenv("APPLY_TASK_GITHUB_TOKEN", "token")
+    sync = ProjectsSync(config_path=cfg)
+    sync.project_id = "proj"
+    sync.project_fields = {
+        "status": {"id": "F_STATUS", "typename": "ProjectV2SingleSelectField", "options": {}, "reverse": {"opt-done": "OK"}},
+        "progress": {"id": "F_PROGRESS", "typename": "ProjectV2NumberField"},
+        "domain": {"id": "F_DOMAIN", "typename": "ProjectV2TextField"},
+    }
+
+    task = TaskFileParser.parse(task_file)
+
+    def fake_graphql(query, variables):
+        return {
+            "node": {
+                "status": {"optionId": "opt-done"},
+                "progress": {"number": 80},
+                "domain": {"text": "new/core"},
+            }
+        }
+
+    monkeypatch.setattr(sync, "_graphql", fake_graphql)
+    changed = sync.pull_task_fields(task)
+    assert changed is True
+    new_file = Path(".tasks/new/core/TASK-050.task")
+    assert new_file.exists()
+    metadata = yaml.safe_load(new_file.read_text().split("---", 2)[1])
+    assert metadata["status"] == "OK"
+    assert metadata["progress"] == 80
+    assert metadata["domain"] == "new/core"

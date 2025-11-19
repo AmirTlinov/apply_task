@@ -22,6 +22,7 @@ import yaml
 import textwrap
 
 from projects_sync import get_projects_sync
+from config import get_user_token, set_user_token
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M"
 
@@ -421,6 +422,7 @@ class TaskFileParser:
             project_item_id=metadata.get("project_item_id"),
             project_draft_id=metadata.get("project_draft_id"),
         )
+        task._source_path = filepath
 
         section = None
         buffer: List[str] = []
@@ -623,6 +625,9 @@ class TaskManager:
                 if prog == 100 and not task.blocked and task.status != "OK":
                     task.status = "OK"
                     self.save_task(task)
+            sync = get_projects_sync()
+            if sync.enabled and task.project_item_id:
+                sync.pull_task_fields(task)
         return task
 
     def list_tasks(self, domain: str = "") -> List[TaskDetail]:
@@ -639,6 +644,9 @@ class TaskManager:
                     if prog == 100 and not parsed.blocked and parsed.status != "OK":
                         parsed.status = "OK"
                         self.save_task(parsed)
+                sync = get_projects_sync()
+                if sync.enabled and parsed.project_item_id:
+                    sync.pull_task_fields(parsed)
                 tasks.append(parsed)
         return tasks
 
@@ -2278,7 +2286,22 @@ class TaskTrackerTUI:
         result.append(('class:border', '+' + '='*content_width + '+\n'))
         result.append(('class:border', '| '))
         back_label = '[← Назад]'
-        result.append(('class:header', back_label.ljust(content_width - 2), back_handler))
+        settings_label = '[⚙ Настройки]'
+
+        def settings_handler(event: MouseEvent):
+            if event.event_type == MouseEventType.MOUSE_UP and event.button == MouseButton.LEFT:
+                self.open_settings_dialog()
+                return None
+            return NotImplemented
+
+        slot = content_width - 2
+        spacing = "  "
+        remainder = max(0, slot - len(back_label) - len(settings_label) - len(spacing))
+        result.append(('class:header', back_label, back_handler))
+        result.append(('class:text', spacing))
+        result.append(('class:header', settings_label, settings_handler))
+        if remainder:
+            result.append(('class:text', ' ' * remainder))
         result.append(('class:border', ' |\n'))
         result.append(('class:border', '+' + '-'*content_width + '+\n'))
         result.append(('class:border', '| '))
@@ -2545,7 +2568,22 @@ class TaskTrackerTUI:
 
         lines.append(('class:border', '| '))
         back_label = '[← Назад]'
-        lines.append(('class:header', back_label.ljust(content_width - 2), back_handler))
+        settings_label = '[⚙ Настройки]'
+
+        def settings_handler(event: MouseEvent):
+            if event.event_type == MouseEventType.MOUSE_UP and event.button == MouseButton.LEFT:
+                self.open_settings_dialog()
+                return None
+            return NotImplemented
+
+        slot = content_width - 2
+        spacing = "  "
+        remainder = max(0, slot - len(back_label) - len(settings_label) - len(spacing))
+        lines.append(('class:header', back_label, back_handler))
+        lines.append(('class:text', spacing))
+        lines.append(('class:header', settings_label, settings_handler))
+        if remainder:
+            lines.append(('class:text', ' ' * remainder))
         lines.append(('class:border', ' |\n'))
         lines.append(('class:border', '+' + '-'*content_width + '+\n'))
 
@@ -2728,14 +2766,23 @@ class TaskTrackerTUI:
         if not self.editing_mode:
             return
 
-        new_value = self.edit_buffer.text.strip()
-        if not new_value:
-            # Пустое значение - отменяем
+        context = self.edit_context
+        task = self.current_task_detail
+        raw_value = self.edit_buffer.text
+        new_value = raw_value.strip()
+
+        if context == 'token':
+            set_user_token(new_value)
+            if new_value:
+                self.set_status_message("PAT сохранён")
+            else:
+                self.set_status_message("PAT очищен")
             self.cancel_edit()
             return
 
-        context = self.edit_context
-        task = self.current_task_detail
+        if not new_value:
+            self.cancel_edit()
+            return
 
         if context == 'task_title' and task:
             task.title = new_value
@@ -2913,6 +2960,7 @@ class TaskTrackerTUI:
             'criterion': 'Редактирование критерия',
             'test': 'Редактирование теста',
             'blocker': 'Редактирование блокера',
+            'token': 'GitHub PAT',
         }
         label = context_labels.get(self.edit_context, 'Редактирование')
 
@@ -2949,6 +2997,15 @@ class TaskTrackerTUI:
     def get_content_text(self) -> FormattedText:
         """Deprecated - use get_body_content instead."""
         return self.get_body_content()
+
+    def open_settings_dialog(self):
+        token = get_user_token()
+        if token:
+            self.set_status_message("PAT сохранён. Введи новый для обновления или оставь пустым")
+        else:
+            self.set_status_message("Вставь PAT со scope project")
+        self.start_editing('token', '', None)
+        self.edit_buffer.cursor_position = 0
 
     def run(self):
         self.app.run()
@@ -3972,6 +4029,26 @@ def cmd_clean(args) -> int:
     )
 
 
+def cmd_projects_auth(args) -> int:
+    if args.unset:
+        set_user_token("")
+        return structured_response(
+            "projects-auth",
+            status="OK",
+            message="PAT cleared",
+            payload={"token": None},
+        )
+    if not args.token:
+        return structured_error("projects-auth", "Укажи --token или --unset")
+    set_user_token(args.token)
+    return structured_response(
+        "projects-auth",
+        status="OK",
+        message="PAT saved",
+        payload={"token": "***"},
+    )
+
+
 def cmd_projects_webhook(args) -> int:
     sync = get_projects_sync()
     if not sync.enabled:
@@ -4439,6 +4516,11 @@ def build_parser() -> argparse.ArgumentParser:
     webhook_srv.add_argument("--port", type=int, default=8787)
     webhook_srv.add_argument("--secret", help="Shared secret для проверки подписи")
     webhook_srv.set_defaults(func=cmd_projects_webhook_serve)
+
+    auth = sub.add_parser("projects-auth", help="Сохранить GitHub PAT для Projects sync")
+    auth.add_argument("--token", help="PAT со scope project")
+    auth.add_argument("--unset", action="store_true", help="Удалить сохранённый PAT")
+    auth.set_defaults(func=cmd_projects_auth)
 
     # checkpoint wizard
     ckp = sub.add_parser(

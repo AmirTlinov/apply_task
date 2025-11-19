@@ -11,6 +11,8 @@ from typing import Any, Dict, Optional
 import requests
 import yaml
 
+from config import get_user_token
+
 GRAPHQL_URL = "https://api.github.com/graphql"
 CONFIG_PATH = Path(".apply_task_projects.yaml")
 logger = logging.getLogger("apply_task.projects")
@@ -35,7 +37,7 @@ class ProjectsSync:
     def __init__(self, config_path: Optional[Path] = None) -> None:
         self.config_path = config_path or CONFIG_PATH
         self.config: Optional[ProjectConfig] = self._load_config()
-        self.token = os.getenv("APPLY_TASK_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN")
+        self.token = os.getenv("APPLY_TASK_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or get_user_token()
         self.session = requests.Session()
         self.project_id: Optional[str] = None
         self.project_fields: Dict[str, Dict[str, Any]] = {}
@@ -283,7 +285,13 @@ class ProjectsSync:
 
     def _persist_metadata(self, task) -> None:
         try:
-            task.filepath.write_text(task.to_file_content(), encoding="utf-8")
+            new_path = task.filepath
+            old_path = getattr(task, "_source_path", new_path)
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            new_path.write_text(task.to_file_content(), encoding="utf-8")
+            if old_path != new_path and Path(old_path).exists():
+                Path(old_path).unlink()
+            task._source_path = new_path
         except Exception as exc:  # pragma: no cover
             logger.warning("Unable to persist project metadata: %s", exc)
 
@@ -310,6 +318,83 @@ class ProjectsSync:
         if getattr(task, "risks", None):
             lines += ["", "## Risks", *[f"- {r}" for r in task.risks]]
         return "\n".join(lines).strip()
+
+    # ------------------------------------------------------------------
+    # Pull from GitHub → local files
+    # ------------------------------------------------------------------
+
+    def pull_task_fields(self, task) -> bool:
+        if not self.enabled or not getattr(task, "project_item_id", None):
+            return False
+        try:
+            self._ensure_project_metadata()
+        except Exception as exc:  # pragma: no cover
+            logger.warning("projects metadata unavailable: %s", exc)
+            return False
+        data = self._fetch_remote_state(task.project_item_id)
+        if not data:
+            return False
+        changed = False
+        if data.get("status") and data["status"] != task.status:
+            task.status = data["status"]
+            changed = True
+        if data.get("progress") is not None and data["progress"] != task.progress:
+            task.progress = data["progress"]
+            changed = True
+        if data.get("domain") and data["domain"] != task.domain:
+            task.domain = data["domain"]
+            changed = True
+        if changed:
+            self._persist_metadata(task)
+        return changed
+
+    def _fetch_remote_state(self, item_id: str) -> Dict[str, Any]:
+        cfg_fields = self.config.fields if self.config else {}
+        field_aliases = []
+        variables: Dict[str, Any] = {"item": item_id}
+        query_sections = []
+        if "status" in cfg_fields:
+            variables["statusName"] = cfg_fields["status"].name
+            query_sections.append(
+                "status: fieldValueByName(name:$statusName){ ... on ProjectV2ItemFieldSingleSelectValue { optionId } }"
+            )
+        if "progress" in cfg_fields:
+            variables["progressName"] = cfg_fields["progress"].name
+            query_sections.append(
+                "progress: fieldValueByName(name:$progressName){ ... on ProjectV2ItemFieldNumberValue { number } }"
+            )
+        if "domain" in cfg_fields:
+            variables["domainName"] = cfg_fields["domain"].name
+            query_sections.append(
+                "domain: fieldValueByName(name:$domainName){ ... on ProjectV2ItemFieldTextValue { text } }"
+            )
+        if not query_sections:
+            return {}
+        query = (
+            "query($item:ID!,$statusName:String,$progressName:String,$domainName:String){"
+            "  node(id:$item){"
+            "    ... on ProjectV2Item {"
+            f"      {' '.join(query_sections)}"
+            "    }"
+            "  }"
+            "}"
+        )
+        data = self._graphql(query, variables)
+        node = data.get("node") or {}
+        result: Dict[str, Any] = {}
+        status_field = node.get("status")
+        if status_field and cfg_fields.get("status"):
+            option_id = status_field.get("optionId")
+            status = (self.project_fields.get("status") or {}).get("reverse", {}).get(option_id)
+            if status:
+                result["status"] = status
+        progress_field = node.get("progress")
+        if progress_field and progress_field.get("number") is not None:
+            result["progress"] = int(progress_field.get("number"))
+        domain_field = node.get("domain")
+        if domain_field and domain_field.get("text"):
+            result["domain"] = domain_field.get("text").strip()
+        return result
 
     # ------------------------------------------------------------------
     # Webhook handling

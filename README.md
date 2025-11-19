@@ -149,7 +149,8 @@ apply_task tui
 
 `apply_task` can mirror every task into a GitHub Projects v2 board:
 
-1. Copy `apply_task_projects.example.yaml` to `.apply_task_projects.yaml` and edit it:
+1. Save your GitHub PAT once (either run `apply_task projects-auth --token <PAT>` or click `[⚙ Настройки]` next to `[← Назад]` inside the TUI detail pane). The token lives in `~/.apply_task_config.yaml` and is reused across every repository.
+2. Copy `apply_task_projects.example.yaml` to `.apply_task_projects.yaml` and edit it:
    ```yaml
    project:
      type: repository
@@ -170,9 +171,9 @@ apply_task tui
      subtasks:
        name: Subtasks
    ```
-2. Provide a token via `APPLY_TASK_GITHUB_TOKEN` (or `GITHUB_TOKEN`) with `project` scope.
-3. Any `apply_task` save automatically creates/updates the corresponding Project draft item, including status, percentage, domain text, and a Markdown checklist of subtasks.
-4. Optional reverse sync: expose the webhook endpoint and every board edit updates the `.task` metadata.
+3. `APPLY_TASK_GITHUB_TOKEN` / `GITHUB_TOKEN` override the stored PAT (useful for CI runners); otherwise the saved token is used automatically.
+4. Any `apply_task` save automatically creates/updates the corresponding Project draft item, including status, percentage, domain text, and a Markdown checklist of subtasks.
+5. Optional reverse sync: expose the webhook endpoint (or rely on the bundled GitHub Action) and every board edit updates the `.task` metadata.
 
 If the config or token is missing, the sync layer silently disables itself. Existing tasks will update as soon as they are touched; for older ones just run `apply_task show TASK-ID` → edit/save to trigger a sync.
 
