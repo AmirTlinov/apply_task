@@ -1161,9 +1161,9 @@ class ResponsiveLayoutManager:
         ColumnLayout(min_width=150, columns=['stat', 'title', 'progress', 'subtasks', 'checks', 'path']),
         ColumnLayout(min_width=120, columns=['stat', 'title', 'progress', 'subtasks', 'path']),
         ColumnLayout(min_width=95, columns=['stat', 'title', 'progress', 'path']),
-        ColumnLayout(min_width=75, columns=['stat', 'title', 'path']),
-        ColumnLayout(min_width=55, columns=['stat', 'title']),
-        ColumnLayout(min_width=0, columns=['stat', 'title'], stat_w=8),
+        ColumnLayout(min_width=75, columns=['stat', 'title', 'progress']),
+        ColumnLayout(min_width=55, columns=['stat', 'title', 'progress']),
+        ColumnLayout(min_width=0, columns=['stat', 'progress', 'title'], stat_w=8, prog_w=6),
     ]
 
     @classmethod
