@@ -2482,7 +2482,7 @@ class TaskTrackerTUI:
             if len(lines) == 2:
                 break
         parts: List[Tuple[str, str]] = []
-        parts.append(("class:text.dim", " Путь: "))
+        parts.append(("class:text.dim", " Домен: "))
         parts.extend(path_display)
         desc_header = " Описание: "
         if lines:
