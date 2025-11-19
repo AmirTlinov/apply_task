@@ -1726,11 +1726,11 @@ class TaskTrackerTUI:
         """Возвращает символ статуса, CSS класс и короткое название"""
         status_char = task.status.value[0].lower()
         if status_char == 'ok':
-            return '✓', 'class:icon.check', '[OK]'
+            return '◉', 'class:icon.check', '[OK]'
         elif status_char == 'warn':
-            return '●', 'class:icon.warn', '[~]'
+            return '◉', 'class:icon.warn', '[~]'
         elif status_char == 'fail':
-            return '●', 'class:icon.fail', '[X]'
+            return '◎', 'class:icon.fail', '[X]'
         else:
             return '○', 'class:status.unknown', '?'
 
