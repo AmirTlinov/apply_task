@@ -1918,10 +1918,10 @@ class TaskTrackerTUI:
         end_idx = min(len(self.filtered_tasks), start_idx + visible_rows)
 
         selection_styles = {
-            Status.OK: 'class:selected-ok',
-            Status.WARN: 'class:selected-warn',
-            Status.FAIL: 'class:selected-fail',
-            Status.UNKNOWN: 'class:selected-unknown',
+            Status.OK: 'selected-ok',
+            Status.WARN: 'selected-warn',
+            Status.FAIL: 'selected-fail',
+            Status.UNKNOWN: 'selected-unknown',
         }
 
         for idx in range(start_idx, end_idx):
@@ -1964,8 +1964,9 @@ class TaskTrackerTUI:
                     if col in cell_data:
                         line_parts.append(cell_data[col][0])
                 line = '|' + '|'.join(line_parts) + '|'
-                style_class = selection_styles.get(task.status, 'class:selected')
-                result.append((style_class, line))
+                style_key = selection_styles.get(task.status, 'selected')
+                style_name = f"class:{style_key} {status_class}"
+                result.append((style_name, line))
             else:
                 # Обычная строка
                 result.append(('class:border', '|'))
