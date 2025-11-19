@@ -1339,17 +1339,17 @@ class TaskTrackerTUI:
 
         @kb.add("2")
         def _(event):
-            self.current_filter = Status.OK
+            self.current_filter = Status.WARN  # IN PROGRESS
             self.selected_index = 0
 
         @kb.add("3")
         def _(event):
-            self.current_filter = Status.WARN
+            self.current_filter = Status.FAIL  # BACKLOG
             self.selected_index = 0
 
         @kb.add("4")
         def _(event):
-            self.current_filter = Status.FAIL
+            self.current_filter = Status.OK  # DONE
             self.selected_index = 0
 
         @kb.add("?")
