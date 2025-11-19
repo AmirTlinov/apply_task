@@ -1827,6 +1827,18 @@ class TaskTrackerTUI:
                     max_sub = max(max_sub, 1)
             widths['subtasks'] = max(max_sub, 3)
 
+        # растягиваем таблицу на ширину терминала
+        terminal_width = max(40, self.get_terminal_width())
+        total_columns = sum(widths.get(col, 0) for col in layout.columns)
+        separators = len(layout.columns) + 1  # '|' и '+'
+        target_total = max(total_columns, terminal_width - separators)
+        extra = max(0, target_total - total_columns)
+        if extra and 'title' in layout.columns:
+            widths['title'] = widths.get('title', 0) + extra
+        elif extra and layout.columns:
+            first = layout.columns[0]
+            widths[first] = widths.get(first, 0) + extra
+
         # Построение header line
         header_parts = []
         for col in layout.columns:
@@ -1916,7 +1928,35 @@ class TaskTrackerTUI:
             result.append(('', '\n'))
 
         result.append(('class:border', header_line))
-        return FormattedText(result)
+
+        # Дополняем каждую строку до ширины терминала
+        table_width = max(40, self.get_terminal_width())
+        lines: List[List[Tuple[str, str]]] = []
+        current_line: List[Tuple[str, str]] = []
+        for style, text in result:
+            parts = text.split('\n')
+            for i, part in enumerate(parts):
+                if part:
+                    current_line.append((style, part))
+                if i < len(parts) - 1:
+                    lines.append(current_line)
+                    current_line = []
+            if parts and parts[-1] == '':
+                lines.append(current_line)
+                current_line = []
+        if current_line:
+            lines.append(current_line)
+
+        padded: List[Tuple[str, str]] = []
+        for idx, line in enumerate(lines):
+            plain = ''.join(fragment for _, fragment in line)
+            padding = max(0, table_width - len(plain))
+            padded.extend(line)
+            if padding:
+                padded.append(('class:text', ' ' * padding))
+            if idx < len(lines) - 1:
+                padded.append(('', '\n'))
+        return FormattedText(padded)
 
     def get_side_preview_text(self) -> FormattedText:
         """Описание выбранной задачи (без подзадач) в правой колонке."""
