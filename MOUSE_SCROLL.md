@@ -1,77 +1,38 @@
-# Горизонтальный скроллинг - Инструкция
+# Mouse & scrolling guide
 
-## ✓ Работающие способы управления
+## Vertical scrolling
 
-> Вертикальный скролл выполняется обычным вращением колёсика мыши — выделение смещается в списке задач или в деталях без дополнительных клавиш. Далее описаны только варианты горизонтального скролла текста.
+- Wheel — scrolls the viewport in the task list or detail view. The selection stays within the visible window; the list itself moves.
+- In detail/subtask view the wheel moves the selected row (because the viewport already matches the sublist).
 
-### 1. Клавиши `[` и `]` (РЕКОМЕНДУЕТСЯ)
+## Horizontal scrolling shortcuts
+
+| Shortcut    | Effect                              |
+|-------------|-------------------------------------|
+| `Shift + wheel` | Scroll left/right (5 characters per tick) |
+| `[` / `]`   | Scroll left/right (3 characters)     |
+| `Ctrl+← / Ctrl+→` | Scroll left/right (5 characters) |
+| `Home`      | Reset offset to zero                 |
+
+Hold Shift while using the mouse wheel anywhere inside the TUI to move content horizontally. If your terminal does not propagate Shift for scroll events, fallback to the bracket or Ctrl+arrow shortcuts.
+
+## Implementation notes
+
+- `self.horizontal_offset` tracks the global offset.
+- Rendering helpers trim content: `text = text[self.horizontal_offset:]`.
+- Table borders never move; only cell content scrolls.
+- The footer shows `Offset: N` when the value is non-zero.
+
+## Testing
+
 ```
-[  - скролл влево на 3 символа
-]  - скролл вправо на 3 символа
-```
-**Работает везде, всегда надёжно**
-
-### 2. Ctrl + Стрелки
-```
-Ctrl + ←  - скролл влево на 5 символов
-Ctrl + →  - скролл вправо на 5 символов
-```
-
-### 3. Home
-```
-Home - сброс скроллинга (offset = 0)
-```
-
-## Проблема с Shift+Scroll мыши
-
-К сожалению, обработка комбинации **Shift + Scroll мыши** имеет ограничения:
-
-1. **Терминалы не передают модификаторы для scroll**
-   Большинство терминалов (включая многие Linux терминалы) не передают информацию о нажатом Shift при событии scroll мыши.
-
-2. **Ограничения prompt_toolkit**
-   Библиотека prompt_toolkit не всегда корректно определяет модификаторы для mouse scroll events из-за особенностей ANSI escape sequences.
-
-3. **Зависит от эмулятора терминала**
-   - **Работает**: некоторые версии iTerm2, Windows Terminal с расширенными настройками
-   - **Не работает**: gnome-terminal, xterm, многие Linux терминалы
-
-## Решение
-
-**Используйте клавиши** `[` и `]` - это простой, надёжный и быстрый способ.
-
-Код обработчика мыши реализован в `tasks.py` (строки 752-764), но из-за ограничений терминалов может не работать в вашем окружении.
-
-## Как это работает
-
-При нажатии `]` или `Ctrl+→`:
-1. Увеличивается `horizontal_offset`
-2. При рендере каждое текстовое поле обрезается:
-   ```python
-   if self.horizontal_offset > 0:
-       text = text[self.horizontal_offset:]
-   ```
-3. Границы таблицы остаются на месте
-4. В footer отображается `Offset: N`
-
-## Тестирование
-
-```bash
 ./tasks.py tui
-
-# 1. Нажмите Enter на задаче
-# 2. Нажмите ] несколько раз
-# 3. Текст сдвинется влево, offset увеличится
-# 4. Нажмите [ чтобы вернуться
-# 5. Нажмите Home для сброса
+# Select a task → press Enter
+# Use ] or Shift+wheel to scroll titles/descriptions.
+# Use Home to reset when leaving detail view.
 ```
 
-## Альтернатива для продвинутых пользователей
+## Terminal compatibility
 
-Если ваш терминал поддерживает расширенные mouse events, можно попробовать включить:
-
-1. Установить терминал с полной поддержкой мыши (iTerm2, WezTerm)
-2. Включить mouse reporting в настройках
-3. Shift+Scroll может заработать
-
-Но **клавиатурное управление надёжнее**.
+- Works out of the box in modern terminals (WezTerm, iTerm2, Windows Terminal, most 24-bit terminals).
+- Legacy terminals that drop Shift modifiers can still use the keyboard shortcuts listed above.

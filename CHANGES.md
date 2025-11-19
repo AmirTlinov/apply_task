@@ -1,54 +1,49 @@
-# Изменения: Горизонтальный скроллинг
+# Changes: Horizontal Scrolling
 
-## Что изменилось
+## What changed
 
-### ✓ Реализован горизонтальный скроллинг содержимого
+### ✓ Horizontal scrolling for cell content
 
-**Управление:**
-- Shift + Scroll колесика мыши вверх → скролл влево
-- Shift + Scroll колесика мыши вниз → скролл вправо
-- Esc → автоматический сброс при выходе из detail view
+**Controls**
+- `Shift + wheel up` → scroll left
+- `Shift + wheel down` → scroll right
+- `Esc` → resets the offset whenever you leave detail view
 
-**Особенности:**
-- Скроллится **только содержимое** ячеек, границы таблицы неподвижны
-- Таблица не ломается, структура сохраняется
-- Работает во всех режимах (список задач и detail view)
-- Все цвета и форматирование сохраняются
-- Индикатор offset в footer
+**Behavior**
+- Only the cell content scrolls; table borders stay anchored.
+- Works in both task list and detail/subtask views.
+- Colors and formatting remain untouched.
+- Footer shows the active offset and shortcut reminder.
 
-**Что скроллится:**
-- Title (заголовки задач)
-- Description (описания)
-- Notes (заметки)
-- Subtasks (подзадачи)
+**Scrollable sections**
+- Task titles
+- Descriptions and notes
+- Subtask rows
 - Dependencies, Next Steps, Success Criteria, Problems, Risks
 
-## Технические детали
+## Technical notes
 
-**Изменённые файлы:**
-- `tasks.py` - основная реализация
-- `SCROLLING.md` - документация
-- `CHANGES.md` - этот файл
+**Touched files**
+- `tasks.py` — implementation
+- `SCROLLING.md` — documentation
+- `CHANGES.md` — this summary
 
-**Изменения в tasks.py:**
+**Key code updates**
+1. Added `self.horizontal_offset` to track scroll position.
+2. Mouse handler captures `Shift+wheel` events.
+3. Rendering helpers apply the offset per cell.
+4. Footer now displays the offset indicator.
+5. Enabled `mouse_support=True` for the application.
 
-1. Добавлен `self.horizontal_offset = 0` для отслеживания позиции скролла
-2. Обработчики мыши для Shift+ScrollUp/Down
-3. Скроллинг применяется на уровне данных при создании ячеек
-4. Footer обновлён с подсказками и индикатором offset
-5. Поддержка мыши включена (`mouse_support=True`)
+~30 LOC changed across rendering helpers.
 
-**Количество строк кода:** ~30 изменений в методах отображения
-
-## Использование
+## Usage
 
 ```bash
-# Запустить TUI
-./tasks.py tui
-
-# В TUI:
-# 1. Навести мышь на интерфейс
-# 2. Зажать Shift
-# 3. Крутить колесико мыши для скроллинга содержимого
-# 4. При выходе (Esc) offset сбрасывается автоматически
+./tasks.py tui        # launch the TUI
+# inside the TUI:
+# 1. Move focus to the table
+# 2. Hold Shift
+# 3. Scroll wheel to move content horizontally
+# 4. Press Esc to reset the offset when exiting details
 ```

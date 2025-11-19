@@ -1,51 +1,50 @@
-## Доменные правила (Hexagonal Monolith)
+## Domain rules (Hexagonal Monolith)
 
-Проект ведётся как «hexagonal monolith» с вертикальными фич-срезами. Чтобы задачи, код и инфраструктура не расползались хаотично, придерживайся следующей структуры:
+The project follows a “hexagonal monolith with vertical feature slices”. To keep backlog, code, and infra aligned, follow the layout below:
 
 ```
 .tasks/
-  domain/
-    feature/
+  <domain>/
+    <feature>/
       TASK-xxx.task
 core/
   <domain>/<feature>/application/...
+  <domain>/<feature>/domain/...
   <domain>/<feature>/infrastructure/...
   <domain>/<feature>/interface/...
 ```
 
-### Основные принципы
+### Core principles
 
-1. **Домен = папка**. Любая задача создаётся с `--domain=<domain>/<feature>` (флаг `-F`). Путь совпадает с фактической подпапкой в `.tasks/` и с пакетом в коде.  
-2. **Вертикальные срезы**. Сначала выбирай домен (`payments`, `chat`, `analytics`), затем фичу (`refunds`, `session-runtime`).  
-3. **Слои hexagonal**:
-   - `application` — сценарии и orchestration.
-   - `domain`/`core` — сущности и политики.
-   - `infrastructure` — адаптеры, сети, БД.
-   - `interface` — CLI/TUI/API входы.
-4. **Задачи → артефакты**. Каждое `TASK-xxx` в `.tasks/domain/feature` должно иметь кодовые изменения в соответствующем пакете.  
-5. **Фаза и компонент** используются для итераций/техдолга (фильтры TUI), но не заменяют `--domain`.
+1. **Domain = folder.** Every task must be created with `--domain=<domain>/<feature>` (`-F`). The path matches both the `.tasks/` subfolder and the corresponding package in code.
+2. **Vertical slices.** Choose the domain first (`payments`, `chat`, `analytics`), then the feature (`refunds`, `session-runtime`).
+3. **Hexagonal layers**
+   - `application` – orchestration/use-cases.
+   - `domain`/`core` – entities and policies.
+   - `infrastructure` – adapters, storage, external IO.
+   - `interface` – CLI/TUI/API entry points.
+4. **Tasks map to artefacts.** Each `.tasks/domain/feature/TASK-xxx.task` must have code changes under the same package. No anonymous catch-all folders.
+5. **Phase and component** help filtering in the TUI but never replace `--domain`.
 
-### Как выбирать `--domain`
+### Choosing `--domain`
 
-1. Ознакомься с существующими подпапками `.tasks/*`.
-2. Если домен нов, создай подпапку и обнови документацию (README/DOMAIN_STRUCTURE).
-3. Помни, что TUI показывает колонку «Домен» — проверяй, что твои задачи отображаются в нужной ветке.
+1. Inspect existing folders inside `.tasks/`.
+2. If a domain is new, create the folder and update this file + README.
+3. The TUI shows the domain path column; verify your tasks appear under the expected branch.
 
-### Пример создания задачи
+### Task creation example
 
 ```bash
 apply_task "Implement refunds API #feature @TASK-042" \
   --domain payments/refunds \
   --parent TASK-010 \
-  --description "Add refund orchestration flow на русском" \
+  --description "Add refund orchestration flow" \
   --tests "pytest -q tests/payments/test_refunds.py" \
   --risks "pci scope;manual approval" \
-  --subtasks '@path/to/refunds_subtasks.json'
+  --subtasks @payload/refunds_subtasks.json
 ```
 
-Следи за тем, чтобы описание/подзадачи были на русском, а домен соответствовал архитектурной структуре.
+### Active domains
 
-### Активные домены
-
-- `desktop/font-tuning` — настройка рендеринга шрифтов и визуального стека рабочей станции.
-- `desktop/devtools` — обслуживание и обновление инструментов разработчика (CLI, SDK, SDK-драйверы) на рабочей станции.
+- `desktop/font-tuning` – font rendering and display pipeline.
+- `desktop/devtools` – CLI/SDK/tooling for the developer workstation.

@@ -1,182 +1,75 @@
-# Исправление приоритетов колонок
+# Column priority fix
 
-## Проблема
+## Problem
 
-При уменьшении окна первой исчезала колонка **Notes** (с важными описаниями задач), а **Context** (часто показывает "-") оставалась.
+When the terminal width shrank, the **Notes** column disappeared before **Context**, even though Notes contained critical descriptions while Context usually displayed `-`.
 
-### Старые приоритеты скрытия:
-
+### Old hide order
 ```
-180px → Все колонки
-  ↓
-140px → Скрыть Notes (❌ ПЛОХО - важная информация!)
-  ↓
-110px → Скрыть Context
-  ↓
-90px → Скрыть Subtasks
-  ↓
-70px → Только Stat + Title + Progress
+180px → Stat | Title | Progress | Subtasks | Context | Notes
+140px → Notes removed ❌
+110px → Context removed
+ 90px → Subtasks removed
+ 70px → Stat + Title + Progress only
 ```
 
-## Решение
+## Solution
 
-Изменён порядок приоритетов — **Notes** сохраняется дольше.
+Make Context the first column to hide so that Notes stays visible longer.
 
-### Новые приоритеты скрытия:
-
+### New hide order
 ```
-180px → Все колонки: Stat | Title | Prog | Subt | Context | Notes
-  ↓
-150px → Скрыть Context первым (часто "-")
-      → Остаются: Stat | Title | Prog | Subt | Notes ✓
-  ↓
-120px → Скрыть Subtasks
-      → Остаются: Stat | Title | Prog | Notes ✓
-  ↓
-90px → Скрыть Notes
-      → Остаются: Stat | Title | Prog
-  ↓
-70px → Компактный режим
-      → Остаются: Stat | Title | Prog
-  ↓
-<70px → Минимум
-      → Остаются: Stat | Title
+180px → Stat | Title | Progress | Subtasks | Context | Notes
+150px → hide Context → Stat | Title | Progress | Subtasks | Notes ✓
+120px → hide Subtasks → Stat | Title | Progress | Notes ✓
+ 90px → hide Notes → Stat | Title | Progress
+ <70px → compact mode → Stat | Title
 ```
 
-## Визуальное сравнение
+## Visual comparison (140px)
 
-### Экран 140px
-
-**Было:**
 ```
-+----+------------------------+-----+------+----------+
-|Stat|Title                   |Prog |Subt  |Context   |
-+----+------------------------+-----+------+----------+
-| OK |Scrollback & search     |100% |5/5   |-         |
-|WARN|Text shaping            | 40% |2/5   |-         |
-+----+------------------------+-----+------+----------+
-       ❌ Notes исчезла!
+Before:                                          After:
++----+------------------------+-----+------+----+      +----+------------------------+-----+------+-----------------+
+|Stat|Title                   |Prog |Subt  |Ctx |      |Stat|Title                   |Prog |Subt  |Notes            |
++----+------------------------+-----+------+----+      +----+------------------------+-----+------+-----------------+
+| OK |Scrollback & search     |100% |5/5   |-   |      | OK |Scrollback & search     |100% |5/5   |Scrolling impl...|
+|WARN|Text shaping            | 40% |2/5   |-   |      |WARN|Text shaping            | 40% |2/5   |Advanced text... |
 ```
 
-**Стало:**
-```
-+----+------------------------+-----+------+-----------------------------------+
-|Stat|Title                   |Prog |Subt  |Notes                              |
-+----+------------------------+-----+------+-----------------------------------+
-| OK |Scrollback & search     |100% |5/5   |Реализация системы прокрутки...    |
-|WARN|Text shaping            | 40% |2/5   |Продвинутый рендеринг текста...    |
-+----+------------------------+-----+------+-----------------------------------+
-       ✓ Notes сохранена! Context скрыт (был "-")
-```
+Notes stay visible; Context hides first.
 
-### Экран 120px
-
-**Было:**
-```
-+----+------------------------+-----+------+
-|Stat|Title                   |Prog |Subt  |
-+----+------------------------+-----+------+
-       ❌ Notes и Context исчезли
-```
-
-**Стало:**
-```
-+----+------------------------+-----+-----------------------------------+
-|Stat|Title                   |Prog |Notes                              |
-+----+------------------------+-----+-----------------------------------+
-| OK |Scrollback & search     |100% |Реализация системы прокрутки...    |
-|WARN|Text shaping            | 40% |Продвинутый рендеринг текста...    |
-+----+------------------------+-----+-----------------------------------+
-       ✓ Notes сохранена даже на среднем экране!
-       Context и Subtasks скрыты
-```
-
-## Технические изменения
-
-### tasks.py (строки 774-781)
+## Code changes
 
 ```python
-# Было:
 LAYOUTS = [
     ColumnLayout(min_width=180, columns=['stat', 'title', 'progress', 'subtasks', 'context', 'notes']),
-    ColumnLayout(min_width=140, columns=['stat', 'title', 'progress', 'subtasks', 'context']),  # ❌ Notes исчезла
-    ColumnLayout(min_width=110, columns=['stat', 'title', 'progress', 'subtasks']),
-    ...
-]
-
-# Стало:
-LAYOUTS = [
-    ColumnLayout(min_width=180, columns=['stat', 'title', 'progress', 'subtasks', 'context', 'notes']),
-    ColumnLayout(min_width=150, columns=['stat', 'title', 'progress', 'subtasks', 'notes']),  # ✓ Context скрыт первым
-    ColumnLayout(min_width=120, columns=['stat', 'title', 'progress', 'notes']),              # ✓ Notes сохранена!
+    ColumnLayout(min_width=150, columns=['stat', 'title', 'progress', 'subtasks', 'notes']),
+    ColumnLayout(min_width=120, columns=['stat', 'title', 'progress', 'notes']),
     ColumnLayout(min_width=90, columns=['stat', 'title', 'progress']),
-    ...
+    ColumnLayout(min_width=70, columns=['stat', 'title'])
 ]
 ```
 
-## Обоснование приоритетов
+## Rationale
 
-### 1. Context (скрывается первым)
-- **Частота использования:** Низкая
-- **Полезность:** Обычно пустое ("-") или дублирует информацию
-- **Альтернатива:** Видно в detail view
+1. **Context** – low signal, often empty, available inside the detail view.
+2. **Subtasks** – nice-to-have counter; progress already shows percentage.
+3. **Notes** – critical summary of the task; no fast alternative, so we keep it longest.
+4. **Progress / Title / Stat** – must always be visible.
 
-### 2. Subtasks (скрывается вторым)
-- **Частота использования:** Средняя
-- **Полезность:** Счётчик подзадач полезен, но не критичен
-- **Альтернатива:** Прогресс показан в колонке Progress
+## Validation
 
-### 3. Notes (сохраняется долго!)
-- **Частота использования:** Высокая
-- **Полезность:** Содержит описание задачи — критически важно для понимания
-- **Альтернатива:** Нет быстрой альтернативы (detail view требует дополнительного клика)
-
-### 4. Progress (всегда виден)
-- **Частота использования:** Очень высокая
-- **Полезность:** Ключевая метрика состояния задачи
-
-### 5. Title (всегда виден)
-- **Частота использования:** Обязательная
-- **Полезность:** Основной идентификатор задачи
-
-### 6. Stat (всегда виден)
-- **Частота использования:** Обязательная
-- **Полезность:** Визуальный индикатор статуса (OK/WARN/FAIL)
-
-## Результаты
-
-### Тесты
-
-```bash
-$ python3 test_responsive.py
-✓ Layout Selection               | ✓ PASSED
-✓ Width Calculation              | ✓ PASSED
-✓ Detail View Width              | ✓ PASSED
+```
+python3 test_responsive.py
+# Layout selection / width calculation / detail width → PASSED
 ```
 
-### Метрики
+| Metric | Value |
+|--------|-------|
+| New breakpoints | 2 (150px, 120px) |
+| Extra pixels where Notes stay visible | +60px |
 
-| Метрика | Значение |
-|---------|----------|
-| Новых breakpoints | 2 (150px, 120px) |
-| Изменённых строк кода | 4 |
-| Breakpoint Context→скрыт | 150px (было 180px) |
-| Breakpoint Notes→видна до | 120px (было 180px!) |
-| Выигрыш для Notes | +60px видимости |
-
-## Проверка
-
-Теперь при уменьшении окна:
-
-1. **180px+** → Все колонки
-2. **150-179px** → Context исчезает (первым!)
-3. **120-149px** → Subtasks исчезает, **Notes остаётся** ✓
-4. **90-119px** → Notes исчезает
-5. **70-89px** → Компактный режим
-6. **<70px** → Минимум
-
----
-
-**Дата:** 2025-01-17
-**Тикет:** UI Priority Fix
-**Версия:** 2.9.1
+**Date:** 2025‑01‑17
+**Ticket:** UI Priority Fix
+**Version:** 2.9.1
