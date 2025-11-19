@@ -1224,10 +1224,10 @@ THEMES: Dict[str, Dict[str, str]] = {
         "text.dim": "#97a0a9",
         "text.dimmer": "#6d717a",
         "selected": "bg:#3c4c35 #eef7dc bold",  # глобальный селект (резерв)
-        "selected-ok": "bg:#1d4125 #f6fff6 bold",
-        "selected-warn": "bg:#4b3717 #fff4df bold",
-        "selected-fail": "bg:#4d1f23 #ffecec bold",
-        "selected-unknown": "bg:#303236 #f0f0f0 bold",
+        "selected.ok": "bg:#1d4125 #f6fff6 bold",
+        "selected.warn": "bg:#4b3717 #fff4df bold",
+        "selected.fail": "bg:#4d1f23 #ffecec bold",
+        "selected.unknown": "bg:#303236 #f0f0f0 bold",
         "header": "#ffb347 bold",
         "border": "#4b525a",
         "icon.check": "#9ad974 bold",
@@ -1244,10 +1244,10 @@ THEMES: Dict[str, Dict[str, str]] = {
         "text.dim": "#a7b0ba",
         "text.dimmer": "#6f757d",
         "selected": "bg:#23452f #f4ffe8 bold",  # глобальный селект (резерв)
-        "selected-ok": "bg:#1f4f2a #f4ffe8 bold",
-        "selected-warn": "bg:#4c3517 #fff2d9 bold",
-        "selected-fail": "bg:#4f1d1f #ffe7e7 bold",
-        "selected-unknown": "bg:#33363b #e8eaec bold",
+        "selected.ok": "bg:#1f4f2a #f4ffe8 bold",
+        "selected.warn": "bg:#4c3517 #fff2d9 bold",
+        "selected.fail": "bg:#4f1d1f #ffe7e7 bold",
+        "selected.unknown": "bg:#33363b #e8eaec bold",
         "header": "#ffb347 bold",
         "border": "#5a6169",
         "icon.check": "#b8f171 bold",
@@ -1927,10 +1927,10 @@ class TaskTrackerTUI:
         end_idx = min(len(self.filtered_tasks), start_idx + visible_rows)
 
         selection_styles = {
-            Status.OK: 'selected-ok',
-            Status.WARN: 'selected-warn',
-            Status.FAIL: 'selected-fail',
-            Status.UNKNOWN: 'selected-unknown',
+            Status.OK: 'selected.ok',
+            Status.WARN: 'selected.warn',
+            Status.FAIL: 'selected.fail',
+            Status.UNKNOWN: 'selected.unknown',
         }
 
         for idx in range(start_idx, end_idx):
@@ -1976,7 +1976,7 @@ class TaskTrackerTUI:
                 if self.mono_select:
                     result.append(('class:selected', line))
                 else:
-                    style_key = selection_styles.get(task.status, 'selected')
+                    style_key = selection_styles.get(task.status, 'selected.ok')
                     result.append((f"class:{style_key}", line))
             else:
                 # Обычная строка
