@@ -16,10 +16,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 import textwrap
+
+TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M"
+
+
+def current_timestamp() -> str:
+    """Возвращает локальное время с точностью до минут для метаданных задач."""
+    return datetime.now().strftime(TIMESTAMP_FORMAT)
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition
@@ -30,7 +37,7 @@ from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import HSplit, Layout, Window, VSplit
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.controls import FormattedTextControl, BufferControl
-from prompt_toolkit.mouse_events import MouseEventType, MouseEvent
+from prompt_toolkit.mouse_events import MouseEventType, MouseEvent, MouseButton, MouseModifier
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import TextArea
 
@@ -157,8 +164,8 @@ class TaskDetail:
             "component": self.component or None,
             "parent": self.parent,
             "priority": self.priority,
-            "created": self.created or datetime.now().strftime("%Y-%m-%d"),
-            "updated": datetime.now().strftime("%Y-%m-%d"),
+            "created": self.created or current_timestamp(),
+            "updated": current_timestamp(),
             "tags": self.tags,
             "assignee": self.assignee,
             "progress": self.calculate_progress(),
@@ -332,6 +339,15 @@ class Status(Enum):
             if status.value[0] == val:
                 return status
         return cls.UNKNOWN
+
+
+def subtask_status_value(subtask: "SubTask") -> Status:
+    """Определить итоговый статус подзадачи единообразно для всех UI."""
+    if subtask.completed:
+        return Status.OK
+    if subtask.ready_for_completion():
+        return Status.WARN
+    return Status.FAIL
 
 
 @dataclass
@@ -535,6 +551,7 @@ class TaskManager:
 
     def create_task(self, title: str, status: str = "FAIL", priority: str = "MEDIUM", parent: Optional[str] = None, domain: str = "", phase: str = "", component: str = "") -> TaskDetail:
         domain = self.sanitize_domain(domain)
+        now_value = current_timestamp()
         task = TaskDetail(
             id=self._next_id(),
             title=title,
@@ -544,14 +561,14 @@ class TaskManager:
             component=component,
             parent=parent,
             priority=priority,
-            created=datetime.now().strftime("%Y-%m-%d"),
-            updated=datetime.now().strftime("%Y-%m-%d"),
+            created=now_value,
+            updated=now_value,
         )
         # НЕ сохраняем здесь - валидация должна пройти первой
         return task
 
     def save_task(self, task: TaskDetail) -> None:
-        task.updated = datetime.now().strftime("%Y-%m-%d")
+        task.updated = current_timestamp()
         prog = task.calculate_progress()
         if prog == 100 and not task.blocked:
             task.status = "OK"
@@ -1223,11 +1240,11 @@ THEMES: Dict[str, Dict[str, str]] = {
         "text": "#d7dfe6",
         "text.dim": "#97a0a9",
         "text.dimmer": "#6d717a",
-        "selected": "bg:#3c4c35 #eef7dc bold",  # глобальный селект (резерв)
-        "selected.ok": "bg:#1d4125 #f6fff6 bold",
-        "selected.warn": "bg:#4b3717 #fff4df bold",
-        "selected.fail": "bg:#4d1f23 #ffecec bold",
-        "selected.unknown": "bg:#303236 #f0f0f0 bold",
+        "selected": "bg:#3b3b3b #d7dfe6 bold",  # мягкий серый селект для моно-режима
+        "selected.ok": "bg:#3b3b3b #9ad974 bold",
+        "selected.warn": "bg:#3b3b3b #f0c674 bold",
+        "selected.fail": "bg:#3b3b3b #ff6b6b bold",
+        "selected.unknown": "bg:#3b3b3b #e8eaec bold",
         "header": "#ffb347 bold",
         "border": "#4b525a",
         "icon.check": "#9ad974 bold",
@@ -1243,11 +1260,11 @@ THEMES: Dict[str, Dict[str, str]] = {
         "text": "#e8eaec",
         "text.dim": "#a7b0ba",
         "text.dimmer": "#6f757d",
-        "selected": "bg:#23452f #f4ffe8 bold",  # глобальный селект (резерв)
-        "selected.ok": "bg:#1f4f2a #f4ffe8 bold",
-        "selected.warn": "bg:#4c3517 #fff2d9 bold",
-        "selected.fail": "bg:#4f1d1f #ffe7e7 bold",
-        "selected.unknown": "bg:#33363b #e8eaec bold",
+        "selected": "bg:#3d4047 #e8eaec bold",  # мягкий серый селект для моно-режима
+        "selected.ok": "bg:#3d4047 #b8f171 bold",
+        "selected.warn": "bg:#3d4047 #f0c674 bold",
+        "selected.fail": "bg:#3d4047 #ff6b6b bold",
+        "selected.unknown": "bg:#3d4047 #e8eaec bold",
         "header": "#ffb347 bold",
         "border": "#5a6169",
         "icon.check": "#b8f171 bold",
@@ -1259,7 +1276,27 @@ THEMES: Dict[str, Dict[str, str]] = {
 DEFAULT_THEME = "dark-olive"
 
 
+class InteractiveFormattedTextControl(FormattedTextControl):
+    def __init__(self, *args, mouse_handler=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._external_mouse_handler = mouse_handler
+
+    def mouse_handler(self, mouse_event: MouseEvent):
+        if self._external_mouse_handler:
+            result = self._external_mouse_handler(mouse_event)
+            if result is not NotImplemented:
+                return result
+        return super().mouse_handler(mouse_event)
+
+
 class TaskTrackerTUI:
+    SELECTION_STYLE_BY_STATUS: Dict[Status, str] = {
+        Status.OK: "selected.ok",
+        Status.WARN: "selected.warn",
+        Status.FAIL: "selected.fail",
+        Status.UNKNOWN: "selected.unknown",
+    }
+
     @staticmethod
     def get_theme_palette(theme: str) -> Dict[str, str]:
         base = THEMES.get(theme)
@@ -1297,6 +1334,12 @@ class TaskTrackerTUI:
         self.list_view_offset: int = 0
         self.footer_height: int = 9
         self.mono_select = mono_select
+        self.task_row_map: List[Tuple[int, int]] = []
+        self.subtask_row_map: List[Tuple[int, int]] = []
+        self._last_click_index: Optional[int] = None
+        self._last_click_time: float = 0.0
+        self._last_subtask_click_index: Optional[int] = None
+        self._last_subtask_click_time: float = 0.0
 
         # Editing mode
         self.editing_mode = False
@@ -1385,20 +1428,7 @@ class TaskTrackerTUI:
                 # В режиме редактирования - отменить
                 self.cancel_edit()
             elif self.detail_mode:
-                if hasattr(self, "single_subtask_view") and self.single_subtask_view:
-                    self.single_subtask_view = None
-                    return
-                if self.navigation_stack:
-                    prev = self.navigation_stack.pop()
-                    self.current_task = prev["task"]
-                    self.current_task_detail = prev["detail"]
-                    self.detail_selected_index = 0
-                else:
-                    self.detail_mode = False
-                    self.current_task = None
-                    self.current_task_detail = None
-                    self.detail_selected_index = 0
-                self.horizontal_offset = 0  # Reset scroll on exit
+                self.exit_detail_view()
 
         @kb.add("delete")
         @kb.add("c-d")
@@ -1461,29 +1491,11 @@ class TaskTrackerTUI:
             """Home - reset scroll"""
             self.horizontal_offset = 0
 
-        # Store reference to self for mouse handler
-        tui_self = self
-
-        # Create mouse handler for horizontal scrolling
-        def handle_mouse(mouse_event: MouseEvent):
-            """Handle mouse events for horizontal scrolling"""
-            if mouse_event.event_type == MouseEventType.SCROLL_UP:
-                # Shift+Scroll Up = scroll left
-                if hasattr(mouse_event, 'modifiers') and mouse_event.modifiers.shift:
-                    tui_self.horizontal_offset = max(0, tui_self.horizontal_offset - 3)
-                    return None
-            elif mouse_event.event_type == MouseEventType.SCROLL_DOWN:
-                # Shift+Scroll Down = scroll right
-                if hasattr(mouse_event, 'modifiers') and mouse_event.modifiers.shift:
-                    tui_self.horizontal_offset = min(200, tui_self.horizontal_offset + 3)
-                    return None
-            return NotImplemented
-
-        self.status_bar = Window(content=FormattedTextControl(self.get_status_text), height=1)
+        self.status_bar = Window(content=FormattedTextControl(self.get_status_text), height=1, always_hide_cursor=True)
         self.task_list = Window(content=FormattedTextControl(self.get_task_list_text), always_hide_cursor=True, wrap_lines=False)
         self.side_preview = Window(content=FormattedTextControl(self.get_side_preview_text), always_hide_cursor=True, wrap_lines=True, width=Dimension(weight=2))
         self.detail_view = Window(content=FormattedTextControl(self.get_detail_text), always_hide_cursor=True, wrap_lines=True)
-        self.footer = Window(content=FormattedTextControl(self.get_footer_text), height=Dimension(min=self.footer_height, max=self.footer_height))
+        self.footer = Window(content=FormattedTextControl(self.get_footer_text), height=Dimension(min=self.footer_height, max=self.footer_height), always_hide_cursor=True)
 
         self.normal_body = VSplit(
             [
@@ -1495,8 +1507,9 @@ class TaskTrackerTUI:
         )
 
         # Main content window
+        self.body_control = InteractiveFormattedTextControl(self.get_body_content, show_cursor=False, focusable=False, mouse_handler=self._handle_body_mouse)
         self.main_window = Window(
-            content=FormattedTextControl(self.get_body_content),
+            content=self.body_control,
             always_hide_cursor=True,
             wrap_lines=True,
         )
@@ -1538,6 +1551,23 @@ class TaskTrackerTUI:
             self.list_view_offset = self.selected_index - visible + 1
         self.list_view_offset = max(0, min(self.list_view_offset, max_offset))
 
+    def _scroll_task_view(self, delta: int) -> None:
+        total = len(self.filtered_tasks)
+        visible = self._visible_row_limit()
+        if total <= visible:
+            self.list_view_offset = 0
+            self.selected_index = min(self.selected_index, max(0, total - 1))
+            return
+        max_offset = max(0, total - visible)
+        self.list_view_offset = max(0, min(self.list_view_offset + delta, max_offset))
+        if total:
+            min_visible = self.list_view_offset
+            max_visible = min(total - 1, self.list_view_offset + visible - 1)
+            if self.selected_index < min_visible:
+                self.selected_index = min_visible
+            elif self.selected_index > max_visible:
+                self.selected_index = max_visible
+
     @staticmethod
     def _merge_styles(base: str, extra: Optional[str]) -> str:
         if not extra:
@@ -1546,14 +1576,142 @@ class TaskTrackerTUI:
             return extra
         return f"{base} {extra}"
 
-    def _selection_style_for_status(self, status: Status) -> str:
-        selection_styles = {
-            Status.OK: 'selected.ok',
-            Status.WARN: 'selected.warn',
-            Status.FAIL: 'selected.fail',
-            Status.UNKNOWN: 'selected.unknown',
-        }
-        return selection_styles.get(status, 'selected')
+    @staticmethod
+    def _normalize_status_value(status: Union[Status, str, bool, None]) -> Status:
+        if isinstance(status, Status):
+            return status
+        if isinstance(status, bool):
+            return Status.OK if status else Status.FAIL
+        if isinstance(status, str):
+            return Status.from_string(status)
+        return Status.UNKNOWN
+
+    @staticmethod
+    def _subtask_status(subtask: SubTask) -> Status:
+        return subtask_status_value(subtask)
+
+    def _status_indicator(self, status: Union[Status, str, bool, None]) -> Tuple[str, str]:
+        status_obj = self._normalize_status_value(status)
+        if status_obj == Status.OK:
+            return '●', 'class:icon.check'
+        if status_obj == Status.WARN:
+            return '●', 'class:icon.warn'
+        if status_obj == Status.FAIL:
+            return '○', 'class:icon.fail'
+        return '○', 'class:status.unknown'
+
+    @staticmethod
+    def _status_short_label(status: Status) -> str:
+        if status == Status.OK:
+            return '[OK]'
+        if status == Status.WARN:
+            return '[~]'
+        if status == Status.FAIL:
+            return '[X]'
+        return '?'
+
+    def _selection_style_for_status(self, status: Union[Status, str, None]) -> str:
+        if self.mono_select:
+            return 'selected'
+        status_obj: Status
+        if isinstance(status, Status):
+            status_obj = status
+        elif isinstance(status, str):
+            status_obj = Status.from_string(status)
+        else:
+            status_obj = Status.UNKNOWN
+        return self.SELECTION_STYLE_BY_STATUS.get(status_obj, 'selected')
+
+    def _task_index_from_y(self, y: int) -> Optional[int]:
+        for line_no, idx in self.task_row_map:
+            if line_no == y:
+                return idx
+        return None
+
+    def _subtask_index_from_y(self, y: int) -> Optional[int]:
+        for line_no, idx in self.subtask_row_map:
+            if line_no == y:
+                return idx
+        return None
+
+    def _handle_task_click(self, idx: int) -> None:
+        total = len(self.filtered_tasks)
+        if not total:
+            return
+        idx = max(0, min(idx, total - 1))
+        now = time.time()
+        double_click = self._last_click_index == idx and (now - self._last_click_time) < 0.4
+        self.selected_index = idx
+        self._ensure_selection_visible()
+        if double_click:
+            self._last_click_index = None
+            self._last_click_time = 0.0
+            self.show_task_details(self.filtered_tasks[idx])
+        else:
+            self._last_click_index = idx
+            self._last_click_time = now
+
+    def _handle_subtask_click(self, idx: int) -> None:
+        if not self.current_task_detail or not self.current_task_detail.subtasks:
+            return
+        total = len(self.current_task_detail.subtasks)
+        idx = max(0, min(idx, total - 1))
+        now = time.time()
+        double_click = self._last_subtask_click_index == idx and (now - self._last_subtask_click_time) < 0.4
+        self.detail_selected_index = idx
+        if double_click:
+            st = self.current_task_detail.subtasks[idx]
+            self._last_subtask_click_index = None
+            self._last_subtask_click_time = 0.0
+            self.show_subtask_details(st, idx)
+        else:
+            self._last_subtask_click_index = idx
+            self._last_subtask_click_time = now
+
+    def _handle_body_mouse(self, mouse_event: MouseEvent):
+        if self.editing_mode:
+            return NotImplemented
+        shift = MouseModifier.SHIFT in mouse_event.modifiers
+        vertical_step = 2
+        horizontal_step = 5
+        if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+            if shift:
+                self.horizontal_offset = min(200, self.horizontal_offset + horizontal_step)
+            else:
+                if self.detail_mode:
+                    self.move_vertical_selection(vertical_step)
+                else:
+                    self._scroll_task_view(vertical_step)
+            return None
+        if mouse_event.event_type == MouseEventType.SCROLL_UP:
+            if shift:
+                self.horizontal_offset = max(0, self.horizontal_offset - horizontal_step)
+            else:
+                if self.detail_mode:
+                    self.move_vertical_selection(-vertical_step)
+                else:
+                    self._scroll_task_view(-vertical_step)
+            return None
+        if mouse_event.event_type == MouseEventType.MOUSE_UP and mouse_event.button == MouseButton.LEFT:
+            if self.detail_mode and self.current_task_detail and not getattr(self, "single_subtask_view", None):
+                idx = self._subtask_index_from_y(mouse_event.position.y)
+                if idx is not None:
+                    st = self.current_task_detail.subtasks[idx]
+                    if self.detail_selected_index == idx:
+                        self.show_subtask_details(st, idx)
+                    else:
+                        self.detail_selected_index = idx
+                    return None
+            elif not self.detail_mode:
+                idx = self._task_index_from_y(mouse_event.position.y)
+                if idx is not None:
+                    if self.selected_index == idx:
+                        self.show_task_details(self.filtered_tasks[idx])
+                    else:
+                        self.selected_index = idx
+                        self._ensure_selection_visible()
+                    return None
+        return NotImplemented
 
     def move_vertical_selection(self, delta: int) -> None:
         """
@@ -1840,15 +1998,9 @@ class TaskTrackerTUI:
 
     def _get_status_info(self, task: Task) -> Tuple[str, str, str]:
         """Возвращает символ статуса, CSS класс и короткое название"""
-        status_char = task.status.value[0].lower()
-        if status_char == 'ok':
-            return '◉', 'class:icon.check', '[OK]'
-        elif status_char == 'warn':
-            return '◉', 'class:icon.warn', '[~]'
-        elif status_char == 'fail':
-            return '◎', 'class:icon.fail', '[X]'
-        else:
-            return '○', 'class:status.unknown', '?'
+        symbol, css = self._status_indicator(task.status)
+        status_obj = self._normalize_status_value(task.status)
+        return symbol, css, self._status_short_label(status_obj)
 
     def _apply_scroll(self, text: str) -> str:
         """Применяет горизонтальную прокрутку к тексту"""
@@ -1859,6 +2011,7 @@ class TaskTrackerTUI:
     def get_task_list_text(self) -> FormattedText:
         if not self.filtered_tasks:
             empty_width = min(80, self.get_terminal_width() - 4)
+            self.task_row_map = []
             return FormattedText([
                 ('class:border', '+' + '-' * empty_width + '+\n'),
                 ('class:text.dim', '| ' + 'Нет задач'.ljust(empty_width - 2) + ' |\n'),
@@ -1867,6 +2020,8 @@ class TaskTrackerTUI:
 
         result: List[Tuple[str, str]] = []
         term_width = self.get_terminal_width()
+        self.task_row_map = []
+        line_counter = 0
 
         # Выбор адаптивного layout
         layout = ResponsiveLayoutManager.select_layout(term_width)
@@ -1905,6 +2060,7 @@ class TaskTrackerTUI:
 
         # Рендер заголовка таблицы
         result.append(('class:border', header_line + '\n'))
+        line_counter += 1
         result.append(('class:border', '|'))
 
         column_labels = {
@@ -1927,7 +2083,9 @@ class TaskTrackerTUI:
                 result.append(('class:border', '|'))
 
         result.append(('', '\n'))
+        line_counter += 1
         result.append(('class:border', header_line + '\n'))
+        line_counter += 1
 
         # Рендер строк задач
         compact_status_mode = len(layout.columns) <= 3
@@ -1969,17 +2127,15 @@ class TaskTrackerTUI:
 
 
             # Рендер строки
+            row_line = line_counter
             if idx == self.selected_index:
                 line_parts = []
                 for col in layout.columns:
                     if col in cell_data:
                         line_parts.append(cell_data[col][0])
                 line = '|' + '|'.join(line_parts) + '|'
-                if self.mono_select:
-                    result.append(('class:selected', line))
-                else:
-                    style_key = self._selection_style_for_status(task.status)
-                    result.append((f"class:{style_key}", line))
+                style_key = self._selection_style_for_status(task.status)
+                result.append((f"class:{style_key}", line))
             else:
                 # Обычная строка
                 result.append(('class:border', '|'))
@@ -1989,7 +2145,9 @@ class TaskTrackerTUI:
                         result.append((css_class, text))
                         result.append(('class:border', '|'))
 
+            self.task_row_map.append((row_line, idx))
             result.append(('', '\n'))
+            line_counter += 1
 
         result.append(('class:border', header_line))
 
@@ -2081,22 +2239,26 @@ class TaskTrackerTUI:
             return FormattedText([("class:text.dim", "Задача не выбрана")])
 
         detail = self.current_task_detail
+        self.subtask_row_map = []
         result = []
+
+        def back_handler(event: MouseEvent):
+            if event.event_type == MouseEventType.MOUSE_UP and event.button == MouseButton.LEFT:
+                self.exit_detail_view()
+                return None
+            return NotImplemented
 
         # Get terminal width and calculate adaptive content width
         term_width = self.get_terminal_width()
-        # Адаптивная ширина: используем 90-95% ширины терминала
-        # Минимум 40, максимум не ограничен для больших экранов
-        if term_width < 60:
-            content_width = max(40, term_width - 4)  # Маленький экран - минимальный отступ
-        elif term_width < 100:
-            content_width = term_width - 8  # Средний экран - умеренный отступ
-        else:
-            # Большой экран - используем 92% ширины, но не более 160 символов для читаемости
-            content_width = min(int(term_width * 0.92), 160)
+        content_width = max(40, term_width - 2)
 
         # Header
         result.append(('class:border', '+' + '='*content_width + '+\n'))
+        result.append(('class:border', '| '))
+        back_label = '[← Назад]'
+        result.append(('class:header', back_label.ljust(content_width - 2), back_handler))
+        result.append(('class:border', ' |\n'))
+        result.append(('class:border', '+' + '-'*content_width + '+\n'))
         result.append(('class:border', '| '))
         result.append(('class:header', f'{detail.id} '))
         result.append(('class:text.dim', '| '))
@@ -2191,16 +2353,19 @@ class TaskTrackerTUI:
         # Subtasks with horizontal scroll
         if detail.subtasks:
             completed = sum(1 for st in detail.subtasks if st.completed)
+            line_counter = 0
+            for frag in result:
+                if isinstance(frag, tuple) and len(frag) >= 2:
+                    line_counter += frag[1].count('\n')
+            self.subtask_row_map = []
             result.append(('class:border', '| '))
             header = f'ПОДЗАДАЧИ ({completed}/{len(detail.subtasks)} завершено):'
             result.append(('class:header', header.ljust(content_width - 2)))
             result.append(('class:border', ' |\n'))
+            line_counter += 1
             for i, st in enumerate(detail.subtasks, 1):
-                status_mark = '[OK]' if st.completed else '[  ]'
-                status_class = 'class:icon.check' if st.completed else 'class:text.dim'
                 pointer = '>' if (i - 1) == self.detail_selected_index else ' '
-                prefix = f'{pointer} {i}. {status_mark} '
-                title_width = content_width - 2 - len(prefix)
+                base_prefix = f'{pointer} {i}. '
 
                 # Apply horizontal scroll to subtask title
                 st_title = st.title
@@ -2208,32 +2373,35 @@ class TaskTrackerTUI:
                     st_title = st_title[self.horizontal_offset:] if len(st_title) > self.horizontal_offset else ""
 
                 selected = (i - 1) == self.detail_selected_index
-                sub_status = Status.OK if st.completed else (Status.WARN if st.ready_for_completion() else Status.FAIL)
+                sub_status = self._subtask_status(st)
+                symbol, icon_class = self._status_indicator(sub_status)
                 bg_style = None
                 if selected:
-                    if self.mono_select:
-                        bg_style = 'class:selected'
-                    else:
-                        bg_style = f"class:{self._selection_style_for_status(sub_status)}"
+                    bg_style = f"class:{self._selection_style_for_status(sub_status)}"
+
+                indicator_width = len(symbol) + 1  # символ + пробел
+                prefix_len = len(base_prefix) + indicator_width
 
                 border_style = 'class:border'
                 if selected:
                     border_style = self._merge_styles('class:border', bg_style)
+                row_line = line_counter
                 result.append((border_style, '| '))
-                result.append((self._merge_styles(status_class, bg_style), prefix))
+                result.append((self._merge_styles('class:text', bg_style), base_prefix))
+                result.append((self._merge_styles(icon_class, bg_style), f"{symbol} "))
                 flags = subtask_flags(st)
                 glyphs = [
-                    ('class:icon.check', '✓') if flags['criteria'] else ('class:text.dim', '·'),
-                    ('class:icon.check', '✓') if flags['tests'] else ('class:text.dim', '·'),
-                    ('class:icon.check', '✓') if flags['blockers'] else ('class:text.dim', '·'),
+                    ('class:icon.check', '•') if flags['criteria'] else ('class:text.dim', '·'),
+                    ('class:icon.check', '•') if flags['tests'] else ('class:text.dim', '·'),
+                    ('class:icon.check', '•') if flags['blockers'] else ('class:text.dim', '·'),
                 ]
                 flag_text = []
                 for idx, (cls, symbol) in enumerate(glyphs):
                     flag_text.append((cls, symbol))
                     if idx < 2:
                         flag_text.append(('class:text.dim', ' '))
-                flag_width = len('[✓ ✓ ✓]')
-                title_width = max(5, content_width - 2 - len(prefix) - flag_width)
+                flag_width = len(' [• • •]')
+                title_width = max(5, content_width - 2 - prefix_len - flag_width)
 
                 title_style = 'class:text'
                 if selected:
@@ -2247,7 +2415,10 @@ class TaskTrackerTUI:
                     result.append((style, frag_text))
                 result.append((bracket_style, ']'))
                 result.append((border_style, ' |\n'))
+                line_counter += 1
+                self.subtask_row_map.append((row_line, i - 1))
             result.append(('class:border', '+' + '-'*content_width + '+\n'))
+            line_counter += 1
 
         # Next steps with horizontal scroll
         if detail.next_steps:
@@ -2338,22 +2509,32 @@ class TaskTrackerTUI:
     def show_subtask_details(self, subtask: SubTask, index: int):
         """Render a focused view for a single subtask with full details."""
         term_width = self.get_terminal_width()
-        # Используем ту же логику, что и в get_detail_text
-        if term_width < 60:
-            content_width = max(40, term_width - 4)
-        elif term_width < 100:
-            content_width = term_width - 8
-        else:
-            content_width = min(int(term_width * 0.92), 160)
+        content_width = max(40, term_width - 2)
 
         lines: List[Tuple[str, str]] = []
         lines.append(('class:border', '+' + '='*content_width + '+\n'))
 
-        # Header
-        status_icon = '[X]' if subtask.completed else '[ ]'
-        header = f"SUBTASK {index+1} {status_icon}"
+        # Header с кнопкой назад
+        def back_handler(event: MouseEvent):
+            if event.event_type == MouseEventType.MOUSE_UP and event.button == MouseButton.LEFT:
+                self.exit_detail_view()
+                return None
+            return NotImplemented
+
         lines.append(('class:border', '| '))
-        lines.append(('class:header', header.ljust(content_width - 2)))
+        back_label = '[← Назад]'
+        lines.append(('class:header', back_label.ljust(content_width - 2), back_handler))
+        lines.append(('class:border', ' |\n'))
+        lines.append(('class:border', '+' + '-'*content_width + '+\n'))
+
+        sub_status = self._subtask_status(subtask)
+        symbol, icon_style = self._status_indicator(sub_status)
+        header_label = f"SUBTASK {index+1}"
+        lines.append(('class:border', '| '))
+        lines.append((icon_style, f"{symbol} "))
+        inner_width = content_width - 2
+        remaining = max(0, inner_width - 2)
+        lines.append(('class:header', header_label[:remaining].ljust(remaining)))
         lines.append(('class:border', ' |\n'))
         lines.append(('class:border', '+' + '-'*content_width + '+\n'))
 
@@ -2367,26 +2548,48 @@ class TaskTrackerTUI:
 
         # Checkpoint summary
         lines.append(('class:border', '+' + '-'*content_width + '+\n'))
-        def checkpoint_summary(label: str, confirmed: bool) -> str:
-            icon = '[OK]' if confirmed else '[  ]'
-            return f"{icon} {label}"
 
-        summary = " | ".join([
-            checkpoint_summary("Критерии", subtask.criteria_confirmed),
-            checkpoint_summary("Тесты", subtask.tests_confirmed),
-            checkpoint_summary("Блокеры", subtask.blockers_resolved),
+        def append_indicator_row(entries: List[Tuple[str, bool]]):
+            inner_width = content_width - 2
+            consumed = 0
+
+            def append_fragment(style: str, text: str):
+                nonlocal consumed
+                if consumed >= inner_width or not text:
+                    return
+                available = inner_width - consumed
+                chunk = text[:available]
+                consumed += len(chunk)
+                lines.append((style, chunk))
+
+            lines.append(('class:border', '| '))
+            for idx, (label, flag) in enumerate(entries):
+                status = Status.OK if flag else Status.FAIL
+                symbol, icon_style = self._status_indicator(status)
+                append_fragment(icon_style, symbol)
+                append_fragment('class:text', f' {label}')
+                if idx < len(entries) - 1:
+                    append_fragment('class:text.dim', ' | ')
+            if consumed < inner_width:
+                lines.append(('class:text', ' ' * (inner_width - consumed)))
+            lines.append(('class:border', ' |\n'))
+
+        append_indicator_row([
+            ("Критерии", subtask.criteria_confirmed),
+            ("Тесты", subtask.tests_confirmed),
+            ("Блокеры", subtask.blockers_resolved),
         ])
-        lines.append(('class:border', '| '))
-        lines.append(('class:label', summary[:content_width - 2].ljust(content_width - 2)))
-        lines.append(('class:border', ' |\n'))
 
         def add_section_header(label: str, confirmed: bool):
-            icon = '[OK]' if confirmed else '[  ]'
+            status = Status.OK if confirmed else Status.FAIL
+            symbol, icon_style = self._status_indicator(status)
             style = 'class:status.ok' if confirmed else 'class:status.fail'
-            header = f"{icon} {label}"
             lines.append(('class:border', '+' + '-'*content_width + '+\n'))
             lines.append(('class:border', '| '))
-            lines.append((style, header.ljust(content_width - 2)))
+            inner_width = content_width - 2
+            label_space = max(0, inner_width - 2)
+            lines.append((icon_style, f"{symbol} "))
+            lines.append((style, label[:label_space].ljust(label_space)))
             lines.append(('class:border', ' |\n'))
 
         # Критерии выполнения
@@ -2554,6 +2757,25 @@ class TaskTrackerTUI:
         self.edit_context = None
         self.edit_index = None
         self.edit_buffer.text = ''
+
+    def exit_detail_view(self):
+        if hasattr(self, "single_subtask_view") and self.single_subtask_view:
+            self.single_subtask_view = None
+            self.horizontal_offset = 0
+            return
+        if not self.detail_mode:
+            return
+        if self.navigation_stack:
+            prev = self.navigation_stack.pop()
+            self.current_task = prev["task"]
+            self.current_task_detail = prev["detail"]
+            self.detail_selected_index = 0
+        else:
+            self.detail_mode = False
+            self.current_task = None
+            self.current_task_detail = None
+            self.detail_selected_index = 0
+        self.horizontal_offset = 0
 
     def edit_current_item(self):
         """Редактировать текущий элемент"""
