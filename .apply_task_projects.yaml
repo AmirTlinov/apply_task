@@ -1,0 +1,18 @@
+project:
+  type: user
+  owner: AmirTlinov
+  number: 4
+  enabled: true
+fields:
+  status:
+    name: Status
+    options:
+      OK: Done
+      WARN: "In progress"
+      FAIL: Backlog
+  progress:
+    name: Progress
+  domain:
+    name: Domain
+  subtasks:
+    name: Subtasks

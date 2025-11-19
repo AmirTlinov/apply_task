@@ -1,12 +1,15 @@
+import difflib
 import hashlib
 import hmac
 import json
 import logging
 import os
+import random
+import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 import yaml
@@ -16,6 +19,26 @@ from config import get_user_token
 GRAPHQL_URL = "https://api.github.com/graphql"
 CONFIG_PATH = Path(".apply_task_projects.yaml")
 logger = logging.getLogger("apply_task.projects")
+_PROJECTS_SYNC: Optional["ProjectsSync"] = None
+
+
+def _read_project_file(path: Optional[Path] = None) -> Dict[str, Any]:
+    target = path or CONFIG_PATH
+    if not target.exists():
+        return {}
+    try:
+        return yaml.safe_load(target.read_text()) or {}
+    except Exception:
+        return {}
+
+
+def _write_project_file(data: Dict[str, Any], path: Optional[Path] = None) -> None:
+    target = path or CONFIG_PATH
+    if not data:
+        if target.exists():
+            target.unlink()
+        return
+    target.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
 
 
 @dataclass
@@ -31,6 +54,7 @@ class ProjectConfig:
     number: int
     repo: Optional[str] = None
     fields: Dict[str, FieldConfig] = field(default_factory=dict)
+    enabled: bool = True
 
 
 class ProjectsSync:
@@ -41,10 +65,94 @@ class ProjectsSync:
         self.session = requests.Session()
         self.project_id: Optional[str] = None
         self.project_fields: Dict[str, Dict[str, Any]] = {}
+        self.conflicts_dir = Path(".tasks") / ".projects_conflicts"
+        self._pending_conflicts: List[Dict[str, Any]] = []
+        self._seen_conflicts: Dict[Tuple[str, str], str] = {}
+        self.last_pull: Optional[str] = None
+        self.last_push: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Helpers for conflict detection / reporting
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            if "T" in text:
+                return datetime.fromisoformat(text)
+            return datetime.strptime(text, "%Y-%m-%d %H:%M")
+        except ValueError:
+            return None
+
+    def _local_is_newer(self, local_value: Optional[str], remote_value: Optional[str]) -> bool:
+        remote_dt = self._parse_timestamp(remote_value)
+        local_dt = self._parse_timestamp(local_value)
+        if not remote_dt or not local_dt:
+            return False
+        if remote_dt.tzinfo:
+            remote_dt = remote_dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return local_dt > remote_dt
+
+    def _conflict_key(self, task_id: str, remote_updated: Optional[str], new_text: str) -> Tuple[str, str]:
+        if remote_updated:
+            return task_id, remote_updated
+        digest = hashlib.sha1(new_text.encode()).hexdigest()
+        return task_id, digest
+
+    def _record_conflict(self, task_id: str, file_path: Path, existing_text: str, new_text: str, reason: str, remote_updated: Optional[str], source: str) -> Dict[str, Any]:
+        safe_task = task_id or file_path.stem
+        key = self._conflict_key(safe_task, remote_updated, new_text)
+        report_path = self._seen_conflicts.get(key)
+        if not report_path:
+            self.conflicts_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            report_file = self.conflicts_dir / f"{safe_task}-{stamp}.diff"
+            diff = "\n".join(
+                difflib.unified_diff(
+                    (existing_text or "").splitlines(),
+                    new_text.splitlines(),
+                    fromfile=str(file_path),
+                    tofile=f"remote:{source}",
+                    lineterm="",
+                )
+            )
+            report_text = (
+                f"Задача: {safe_task}\n"
+                f"Источник: {source}\n"
+                f"Причина: {reason}\n"
+                f"Удалённое обновление: {remote_updated or '—'}\n"
+                f"--- DIFF ---\n{diff or 'Нет различий'}\n"
+            )
+            report_file.write_text(report_text, encoding="utf-8")
+            report_path = str(report_file)
+            self._seen_conflicts[key] = report_path
+        info = {
+            "task": safe_task,
+            "file": str(file_path),
+            "diff_path": report_path,
+            "remote_updated": remote_updated,
+            "source": source,
+            "reason": reason,
+        }
+        self._pending_conflicts.append(info)
+        logger.warning("Projects sync conflict for %s (%s). Детали: %s", safe_task, reason, report_path)
+        return info
+
+    def consume_conflicts(self) -> List[Dict[str, Any]]:
+        pending = list(self._pending_conflicts)
+        self._pending_conflicts.clear()
+        return pending
 
     @property
     def enabled(self) -> bool:
-        return bool(self.config and self.token)
+        return bool(self.config and self.config.enabled and self.token)
 
     def sync_task(self, task) -> bool:
         if not self.enabled:
@@ -70,22 +178,21 @@ class ProjectsSync:
 
         if getattr(task, "project_item_id", None):
             self._update_fields(task)
+        repo_changed = self._ensure_repo_issue(task, body)
 
-        if changed:
+        if changed or repo_changed:
             self._persist_metadata(task)
-        return changed
+        if changed or repo_changed:
+            self.last_push = datetime.now().strftime("%Y-%m-%d %H:%M")
+        return changed or repo_changed
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     def _load_config(self) -> Optional[ProjectConfig]:
-        if not self.config_path.exists():
-            return None
-        try:
-            data = yaml.safe_load(self.config_path.read_text()) or {}
-        except Exception as exc:  # pragma: no cover - config errors
-            logger.warning("invalid projects config: %s", exc)
+        data = _read_project_file(self.config_path)
+        if not data:
             return None
         project = data.get("project") or {}
         fields_cfg = {}
@@ -98,7 +205,8 @@ class ProjectsSync:
             repo = project.get("repo")
         except KeyError:
             return None
-        return ProjectConfig(project_type=project_type, owner=owner, number=number, repo=repo, fields=fields_cfg)
+        enabled = project.get("enabled", True)
+        return ProjectConfig(project_type=project_type, owner=owner, number=number, repo=repo, fields=fields_cfg, enabled=bool(enabled))
 
     def _graphql(self, query: str, variables: Dict[str, Any]) -> Dict[str, Any]:
         headers = {"Authorization": f"bearer {self.token}", "Accept": "application/vnd.github+json"}
@@ -145,7 +253,13 @@ class ProjectsSync:
             "  repository(owner:$owner,name:$name){\n"
             "    projectV2(number:$number){\n"
             "      id title\n"
-            "      fields(first:50){nodes{__typename id name dataType ... on ProjectV2SingleSelectField { options(first:50){ id name } }}}\n"
+            "      fields(first:50){\n"
+            "        nodes{\n"
+            "          __typename\n"
+            "          ... on ProjectV2FieldCommon { id name dataType }\n"
+            "          ... on ProjectV2SingleSelectField { options { id name } }\n"
+            "        }\n"
+            "      }\n"
             "    }\n"
             "  }\n"
             "}"
@@ -153,12 +267,38 @@ class ProjectsSync:
 
     def _org_project_query(self) -> str:
         return (
-            "query($login:String!,$number:Int!){ organization(login:$login){ projectV2(number:$number){ id title fields(first:50){nodes{__typename id name dataType ... on ProjectV2SingleSelectField { options(first:50){ id name } }}}}} }"
+            "query($login:String!,$number:Int!){\n"
+            "  organization(login:$login){\n"
+            "    projectV2(number:$number){\n"
+            "      id title\n"
+            "      fields(first:50){\n"
+            "        nodes{\n"
+            "          __typename\n"
+            "          ... on ProjectV2FieldCommon { id name dataType }\n"
+            "          ... on ProjectV2SingleSelectField { options { id name } }\n"
+            "        }\n"
+            "      }\n"
+            "    }\n"
+            "  }\n"
+            "}"
         )
 
     def _user_project_query(self) -> str:
         return (
-            "query($login:String!,$number:Int!){ user(login:$login){ projectV2(number:$number){ id title fields(first:50){nodes{__typename id name dataType ... on ProjectV2SingleSelectField { options(first:50){ id name } }}}}} }"
+            "query($login:String!,$number:Int!){\n"
+            "  user(login:$login){\n"
+            "    projectV2(number:$number){\n"
+            "      id title\n"
+            "      fields(first:50){\n"
+            "        nodes{\n"
+            "          __typename\n"
+            "          ... on ProjectV2FieldCommon { id name dataType }\n"
+            "          ... on ProjectV2SingleSelectField { options { id name } }\n"
+            "        }\n"
+            "      }\n"
+            "    }\n"
+            "  }\n"
+            "}"
         )
 
     def _map_fields(self, nodes: Any) -> Dict[str, Dict[str, Any]]:
@@ -194,17 +334,18 @@ class ProjectsSync:
     def _create_draft_issue(self, task, body: str) -> (Optional[str], Optional[str]):
         mutation = (
             "mutation($projectId:ID!,$title:String!,$body:String!){"
-            "  createProjectV2DraftIssue(input:{projectId:$projectId,title:$title,body:$body}){"
-            "    projectItem{ id } draftIssue{ id }"
+            "  addProjectV2DraftIssue(input:{projectId:$projectId,title:$title,body:$body}){"
+            "    projectItem{ id content{ __typename ... on DraftIssue { id } } }"
             "  }"
             "}"
         )
         variables = {"projectId": self.project_id, "title": f"{task.id}: {task.title}", "body": body}
         try:
-            data = self._graphql(mutation, variables)["createProjectV2DraftIssue"]
+            data = self._graphql(mutation, variables)["addProjectV2DraftIssue"]
             item = (data or {}).get("projectItem") or {}
-            draft = (data or {}).get("draftIssue") or {}
-            return item.get("id"), draft.get("id")
+            draft = (item.get("content") or {}) if item else {}
+            draft_id = draft.get("id") if draft.get("__typename") == "DraftIssue" else None
+            return item.get("id"), draft_id
         except Exception as exc:  # pragma: no cover - network failure
             logger.warning("GitHub draft creation failed: %s", exc)
             return None, None
@@ -283,17 +424,37 @@ class ProjectsSync:
             except Exception as exc:  # pragma: no cover
                 logger.warning("Field update failed (%s): %s", alias, exc)
 
-    def _persist_metadata(self, task) -> None:
+    def _persist_metadata(self, task, remote_updated: Optional[str] = None, source: str = "pull") -> bool:
         try:
             new_path = task.filepath
             old_path = getattr(task, "_source_path", new_path)
+            old_mtime = getattr(task, "_source_mtime", None)
+            existing_text = ""
+            if Path(old_path).exists():
+                existing_text = Path(old_path).read_text(encoding="utf-8")
+            new_text = task.to_file_content()
+            conflict_reason = None
+            if remote_updated and self._local_is_newer(getattr(task, "updated", None), remote_updated):
+                conflict_reason = "Локальные правки новее удалённых"
+            elif existing_text and old_mtime is not None and Path(old_path).exists():
+                current_mtime = Path(old_path).stat().st_mtime
+                if current_mtime > old_mtime + 1e-6:
+                    conflict_reason = "Файл обновлён локально после загрузки"
+            if conflict_reason:
+                self._record_conflict(getattr(task, "id", Path(old_path).stem), Path(old_path), existing_text, new_text, conflict_reason, remote_updated, source)
+                return False
             new_path.parent.mkdir(parents=True, exist_ok=True)
-            new_path.write_text(task.to_file_content(), encoding="utf-8")
+            new_path.write_text(new_text, encoding="utf-8")
             if old_path != new_path and Path(old_path).exists():
                 Path(old_path).unlink()
             task._source_path = new_path
+            task._source_mtime = new_path.stat().st_mtime
+            if remote_updated:
+                task.project_remote_updated = remote_updated
+            return True
         except Exception as exc:  # pragma: no cover
             logger.warning("Unable to persist project metadata: %s", exc)
+        return False
 
     def _build_body(self, task) -> str:
         lines = [
@@ -319,6 +480,57 @@ class ProjectsSync:
             lines += ["", "## Risks", *[f"- {r}" for r in task.risks]]
         return "\n".join(lines).strip()
 
+    def _ensure_repo_issue(self, task, body: str) -> bool:
+        cfg = self.config
+        if not cfg or cfg.project_type != "repository" or not cfg.repo:
+            return False
+        if not self.enabled:
+            return False
+        headers = {"Authorization": f"token {self.token}", "Accept": "application/vnd.github+json"}
+        base_url = f"https://api.github.com/repos/{cfg.owner}/{cfg.repo}/issues"
+        payload = {
+            "title": f"{task.id}: {task.title}",
+            "body": body,
+        }
+        changed = False
+        if not getattr(task, "project_issue_number", None):
+            resp = self._issue_request_with_retry("post", base_url, payload, headers)
+            if resp.status_code >= 400:
+                self._report_issue_error(task, resp)
+                return False
+            data = resp.json()
+            task.project_issue_number = data.get("number")
+            changed = True
+        else:
+            issue_url = f"{base_url}/{task.project_issue_number}"
+            payload["state"] = "closed" if task.status == "OK" else "open"
+            resp = self._issue_request_with_retry("patch", issue_url, payload, headers)
+            if resp.status_code >= 400:
+                self._report_issue_error(task, resp)
+                return False
+        return changed
+
+    def _report_issue_error(self, task, response):
+        message = f"GitHub issue error ({response.status_code}): {response.text[:120]}"
+        logger.warning(message)
+        setattr(task, "_sync_error", message)
+        self._record_conflict(task.id, Path(task.filepath), task.to_file_content(), task.to_file_content(), message, None, "issues")
+
+    def _issue_request_with_retry(self, method: str, url: str, payload: Dict[str, Any], headers: Dict[str, str]) -> requests.Response:
+        attempt = 0
+        delay = 1.0
+        while True:
+            attempt += 1
+            resp = getattr(self.session, method)(url, json=payload, headers=headers, timeout=30)
+            if resp.status_code < 500 or attempt >= 3:
+                if resp.status_code >= 500:
+                    logger.warning("issue sync retry #%s failed: %s %s", attempt, resp.status_code, resp.text)
+                return resp
+            logger.warning("issue sync retry #%s due to %s", attempt, resp.status_code)
+            jitter = random.uniform(0, delay)
+            time.sleep(delay + jitter)
+            delay *= 2
+
     # ------------------------------------------------------------------
     # Pull from GitHub → local files
     # ------------------------------------------------------------------
@@ -334,19 +546,32 @@ class ProjectsSync:
         data = self._fetch_remote_state(task.project_item_id)
         if not data:
             return False
-        changed = False
+        updates: Dict[str, Any] = {}
         if data.get("status") and data["status"] != task.status:
-            task.status = data["status"]
-            changed = True
+            updates["status"] = data["status"]
         if data.get("progress") is not None and data["progress"] != task.progress:
-            task.progress = data["progress"]
-            changed = True
+            updates["progress"] = data["progress"]
         if data.get("domain") and data["domain"] != task.domain:
-            task.domain = data["domain"]
-            changed = True
-        if changed:
-            self._persist_metadata(task)
-        return changed
+            updates["domain"] = data["domain"]
+        if not updates:
+            return False
+        remote_updated = data.get("remote_updated")
+        snapshot = {
+            "status": task.status,
+            "progress": task.progress,
+            "domain": task.domain,
+            "project_remote_updated": getattr(task, "project_remote_updated", None),
+        }
+        for key, value in updates.items():
+            setattr(task, key, value)
+        task.project_remote_updated = remote_updated or snapshot["project_remote_updated"]
+        persisted = self._persist_metadata(task, remote_updated, source="pull")
+        if not persisted:
+            for key, value in snapshot.items():
+                setattr(task, key, value)
+            return False
+        self.last_pull = datetime.now().strftime("%Y-%m-%d %H:%M")
+        return True
 
     def _fetch_remote_state(self, item_id: str) -> Dict[str, Any]:
         cfg_fields = self.config.fields if self.config else {}
@@ -374,7 +599,7 @@ class ProjectsSync:
             "query($item:ID!,$statusName:String,$progressName:String,$domainName:String){"
             "  node(id:$item){"
             "    ... on ProjectV2Item {"
-            f"      {' '.join(query_sections)}"
+            f"      {' '.join(query_sections)} updatedAt"
             "    }"
             "  }"
             "}"
@@ -382,6 +607,8 @@ class ProjectsSync:
         data = self._graphql(query, variables)
         node = data.get("node") or {}
         result: Dict[str, Any] = {}
+        if node.get("updatedAt"):
+            result["remote_updated"] = node.get("updatedAt")
         status_field = node.get("status")
         if status_field and cfg_fields.get("status"):
             option_id = status_field.get("optionId")
@@ -395,6 +622,15 @@ class ProjectsSync:
         if domain_field and domain_field.get("text"):
             result["domain"] = domain_field.get("text").strip()
         return result
+
+    def _lookup_item_timestamp(self, item_id: str) -> Optional[str]:
+        query = "query($item:ID!){ node(id:$item){ ... on ProjectV2Item { updatedAt } } }"
+        try:
+            data = self._graphql(query, {"item": item_id})
+            node = data.get("node") or {}
+            return node.get("updatedAt")
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------
     # Webhook handling
@@ -457,12 +693,15 @@ class ProjectsSync:
                 updates["domain"] = text.strip()
         if not updates:
             return None
-        return self._update_local_metadata(item_id, updates)
+        remote_updated = item.get("updated_at") or payload.get("updated_at")
+        if not remote_updated:
+            remote_updated = self._lookup_item_timestamp(item_id)
+        return self._update_local_metadata(item_id, updates, remote_updated)
 
-    def _update_local_metadata(self, item_id: str, updates: Dict[str, Any]) -> Optional[str]:
+    def _update_local_metadata(self, item_id: str, updates: Dict[str, Any], remote_updated: Optional[str] = None) -> Dict[str, Any]:
         tasks_dir = Path(".tasks")
         if not tasks_dir.exists():
-            return None
+            return {}
         for file in tasks_dir.rglob("TASK-*.task"):
             content = file.read_text(encoding="utf-8")
             parts = content.split("---", 2)
@@ -482,19 +721,52 @@ class ProjectsSync:
                 metadata["domain"] = updates["domain"]
                 changed = True
             if changed:
-                metadata["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                metadata["project_remote_updated"] = remote_updated or metadata.get("project_remote_updated")
                 header = yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip()
                 body = parts[2].lstrip("\n")
-                file.write_text(f"---\n{header}\n---\n{body}", encoding="utf-8")
-                return str(file)
-            return None
-        return None
+                new_text = f"---\n{header}\n---\n{body}"
+                if self._local_is_newer(metadata.get("updated"), remote_updated):
+                    info = self._record_conflict(metadata.get("id", file.stem), file, content, new_text, "Локальные правки новее удалённых", remote_updated, "webhook")
+                    return {"conflict": info}
+                file.write_text(new_text, encoding="utf-8")
+                return {"updated": str(file)}
+            return {}
+        return {}
 
 
 def get_projects_sync() -> ProjectsSync:
     global _PROJECTS_SYNC
-    try:
-        return _PROJECTS_SYNC
-    except NameError:
+    if _PROJECTS_SYNC is None:
         _PROJECTS_SYNC = ProjectsSync()
-        return _PROJECTS_SYNC
+    return _PROJECTS_SYNC
+
+
+def reload_projects_sync() -> ProjectsSync:
+    global _PROJECTS_SYNC
+    _PROJECTS_SYNC = ProjectsSync()
+    return _PROJECTS_SYNC
+
+
+def update_projects_enabled(enabled: bool) -> bool:
+    data = _read_project_file()
+    project = data.get("project") or {}
+    project["enabled"] = bool(enabled)
+    data["project"] = project
+    _write_project_file(data)
+    reload_projects_sync()
+    return bool(enabled)
+
+
+def update_project_target(project_type: str, owner: str, repo: Optional[str], number: int) -> None:
+    data = _read_project_file()
+    project = data.get("project") or {}
+    project["type"] = project_type
+    project["owner"] = owner
+    project["number"] = int(number)
+    if project_type == "repository":
+        project["repo"] = repo or ""
+    else:
+        project.pop("repo", None)
+    data["project"] = project
+    _write_project_file(data)
+    reload_projects_sync()

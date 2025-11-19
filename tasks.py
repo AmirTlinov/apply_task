@@ -12,24 +12,56 @@ import os
 import re
 import sys
 import time
+import subprocess
+import threading
+import logging
+import requests
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+from contextlib import contextmanager
 
 import yaml
 import textwrap
 
-from projects_sync import get_projects_sync
+from projects_sync import (
+    get_projects_sync,
+    reload_projects_sync,
+    update_projects_enabled,
+    update_project_target,
+)
 from config import get_user_token, set_user_token
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M"
+GITHUB_GRAPHQL = "https://api.github.com/graphql"
 
 
 def current_timestamp() -> str:
     """Возвращает локальное время с точностью до минут для метаданных задач."""
     return datetime.now().strftime(TIMESTAMP_FORMAT)
+
+
+def validate_pat_token_http(token: str, timeout: float = 10.0) -> Tuple[bool, str]:
+    if not token:
+        return False, "PAT отсутствует"
+    query = "query { viewer { login } }"
+    headers = {"Authorization": f"bearer {token}", "Accept": "application/vnd.github+json"}
+    try:
+        resp = requests.post(GITHUB_GRAPHQL, json={"query": query}, headers=headers, timeout=timeout)
+    except requests.RequestException as exc:
+        return False, f"Сеть недоступна: {exc}"
+    if resp.status_code >= 400:
+        return False, f"GitHub ответил {resp.status_code}: {resp.text[:120]}"
+    payload = resp.json()
+    if payload.get("errors"):
+        err = payload["errors"][0].get("message", "Неизвестная ошибка")
+        return False, err
+    login = ((payload.get("data") or {}).get("viewer") or {}).get("login")
+    if not login:
+        return False, "Ответ без viewer"
+    return True, f"PAT активен (viewer={login})"
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition
@@ -38,11 +70,17 @@ from prompt_toolkit.input.ansi_escape_sequences import REVERSE_ANSI_SEQUENCES
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import HSplit, Layout, Window, VSplit
+from prompt_toolkit.layout.containers import DynamicContainer
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.controls import FormattedTextControl, BufferControl
 from prompt_toolkit.mouse_events import MouseEventType, MouseEvent, MouseButton, MouseModifier
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import TextArea
+from prompt_toolkit.clipboard import InMemoryClipboard
+try:  # pragma: no cover - optional dependency
+    from prompt_toolkit.clipboard.pyperclip import PyperclipClipboard
+except Exception:  # pragma: no cover
+    PyperclipClipboard = None
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
@@ -138,6 +176,8 @@ class TaskDetail:
     history: List[str] = field(default_factory=list)
     project_item_id: Optional[str] = None
     project_draft_id: Optional[str] = None
+    project_remote_updated: Optional[str] = None
+    project_issue_number: Optional[int] = None
 
     @property
     def filepath(self) -> Path:
@@ -184,6 +224,10 @@ class TaskDetail:
             metadata["project_item_id"] = self.project_item_id
         if self.project_draft_id:
             metadata["project_draft_id"] = self.project_draft_id
+        if self.project_remote_updated:
+            metadata["project_remote_updated"] = self.project_remote_updated
+        if self.project_issue_number:
+            metadata["project_issue_number"] = self.project_issue_number
         subtask_ids = [st.project_item_id for st in self.subtasks]
         if any(subtask_ids):
             metadata["subtask_project_ids"] = subtask_ids
@@ -291,6 +335,8 @@ def task_to_dict(task: TaskDetail, include_subtasks: bool = False) -> Dict[str, 
         "risks": list(task.risks),
         "history": list(task.history),
         "subtasks_count": len(task.subtasks),
+        "project_remote_updated": task.project_remote_updated,
+        "project_issue_number": task.project_issue_number,
     }
     if include_subtasks:
         data["subtasks"] = [subtask_to_dict(st) for st in task.subtasks]
@@ -421,8 +467,15 @@ class TaskFileParser:
             blockers=metadata.get("blockers", []),
             project_item_id=metadata.get("project_item_id"),
             project_draft_id=metadata.get("project_draft_id"),
+            project_remote_updated=metadata.get("project_remote_updated"),
+            project_issue_number=metadata.get("project_issue_number"),
         )
-        task._source_path = filepath
+        source_path = filepath.resolve()
+        task._source_path = source_path
+        try:
+            task._source_mtime = source_path.stat().st_mtime
+        except OSError:
+            task._source_mtime = time.time()
 
         section = None
         buffer: List[str] = []
@@ -542,6 +595,11 @@ class TaskManager:
         self.tasks_dir = tasks_dir
         self.tasks_dir.mkdir(exist_ok=True)
         self.config = self.load_config()
+        self.auto_sync_message = ""
+        self.last_sync_error = ""
+        synced = self._auto_sync_all()
+        if synced:
+            self.auto_sync_message = f"Auto-sync: {synced} задач"
 
     @staticmethod
     def sanitize_domain(domain: Optional[str]) -> str:
@@ -599,6 +657,9 @@ class TaskManager:
         sync = get_projects_sync()
         if sync.enabled:
             sync.sync_task(task)
+            if getattr(task, "_sync_error", None):
+                self._report_sync_error(task._sync_error)
+                task._sync_error = None
 
     def _find_file_by_id(self, task_id: str, domain: str = "") -> Optional[Path]:
         if domain:
@@ -625,10 +686,14 @@ class TaskManager:
                 if prog == 100 and not task.blocked and task.status != "OK":
                     task.status = "OK"
                     self.save_task(task)
-            sync = get_projects_sync()
-            if sync.enabled and task.project_item_id:
-                sync.pull_task_fields(task)
+        sync = get_projects_sync()
+        if sync.enabled and task.project_item_id:
+            sync.pull_task_fields(task)
         return task
+
+    def _report_sync_error(self, message: str) -> None:
+        logging.getLogger("apply_task.sync").warning(message)
+        self.last_sync_error = f"SYNC ERROR: {message[:60]}"
 
     def list_tasks(self, domain: str = "") -> List[TaskDetail]:
         tasks: List[TaskDetail] = []
@@ -649,6 +714,35 @@ class TaskManager:
                     sync.pull_task_fields(parsed)
                 tasks.append(parsed)
         return tasks
+
+    def _auto_sync_all(self) -> int:
+        if not self.config.get("auto_sync", True):
+            return 0
+        sync = get_projects_sync()
+        if not sync.enabled or getattr(sync, "_full_sync_done", False):
+            return 0
+        setattr(sync, "_full_sync_done", True)
+        repo_requires_issue = bool(sync.config and sync.config.project_type == "repository" and sync.config.repo)
+        count = 0
+        for file in self._all_task_files():
+            task = TaskFileParser.parse(file)
+            if not task:
+                continue
+            needs_item = not getattr(task, "project_item_id", None)
+            needs_issue = repo_requires_issue and not getattr(task, "project_issue_number", None)
+            if not needs_item and not needs_issue:
+                continue
+            if not task.domain:
+                rel = file.parent.relative_to(self.tasks_dir)
+                task.domain = "" if str(rel) == "." else rel.as_posix()
+            changed = sync.sync_task(task)
+            if getattr(task, "_sync_error", None):
+                self._report_sync_error(task._sync_error)
+                task._sync_error = None
+            if changed:
+                file.write_text(task.to_file_content(), encoding="utf-8")
+                count += 1
+        return count
 
     def update_task_status(self, task_id: str, status: str, domain: str = "") -> Tuple[bool, Optional[Dict[str, str]]]:
         task = self.load_task(task_id, domain)
@@ -1326,6 +1420,13 @@ class TaskTrackerTUI:
         Status.FAIL: "selected.fail",
         Status.UNKNOWN: "selected.unknown",
     }
+    PROJECT_TYPE_LABELS: Dict[str, str] = {
+        "repository": "Репозиторий",
+        "organization": "Организация",
+        "user": "Пользователь",
+    }
+    PROJECT_TYPES: List[str] = ["repository", "organization", "user"]
+    SPINNER_FRAMES: List[str] = ["⣿", "⡇", "⡏", "⡗", "⡟", "⡧", "⡯", "⡷", "⡿", "⢇", "⢏", "⢗", "⢟", "⢧", "⢯", "⢷", "⢿"]
 
     @staticmethod
     def get_theme_palette(theme: str) -> Dict[str, str]:
@@ -1364,16 +1465,33 @@ class TaskTrackerTUI:
         self.list_view_offset: int = 0
         self.footer_height: int = 9
         self.mono_select = mono_select
+        self.settings_mode = False
+        self.settings_selected_index = 0
         self.task_row_map: List[Tuple[int, int]] = []
         self.subtask_row_map: List[Tuple[int, int]] = []
         self._last_click_index: Optional[int] = None
         self._last_click_time: float = 0.0
         self._last_subtask_click_index: Optional[int] = None
         self._last_subtask_click_time: float = 0.0
+        self.clipboard = self._build_clipboard()
+        self.spinner_active = False
+        self.spinner_message = ""
+        self.spinner_start = 0.0
+        self.pat_validation_result = ""
+        self._last_sync_enabled: Optional[bool] = None
+        self._sync_flash_until: float = 0.0
+        self._last_filter_value: Optional[str] = None
+        self._filter_flash_until: float = 0.0
+        if getattr(self.manager, "auto_sync_message", ""):
+            self.set_status_message(self.manager.auto_sync_message, ttl=4)
+        if getattr(self.manager, "last_sync_error", ""):
+            self.set_status_message(self.manager.last_sync_error, ttl=6)
 
         # Editing mode
         self.editing_mode = False
-        self.edit_buffer = Buffer(multiline=False)
+        self.edit_field = TextArea(multiline=False, scrollbar=False, focusable=True, wrap_lines=False)
+        self.edit_field.buffer.on_text_changed += lambda _: self.force_render()
+        self.edit_buffer = self.edit_field.buffer
         self.edit_context = None  # 'task_title', 'subtask_title', 'criterion', 'test', 'blocker'
         self.edit_index = None
 
@@ -1398,6 +1516,9 @@ class TaskTrackerTUI:
         @kb.add("j")
         @kb.add("о")
         def _(event):
+            if self.settings_mode and not self.editing_mode:
+                self.move_settings_selection(1)
+                return
             self.move_vertical_selection(1)
 
         @kb.add(Keys.ScrollDown)
@@ -1408,6 +1529,9 @@ class TaskTrackerTUI:
         @kb.add("k")
         @kb.add("л")
         def _(event):
+            if self.settings_mode and not self.editing_mode:
+                self.move_settings_selection(-1)
+                return
             self.move_vertical_selection(-1)
 
         @kb.add(Keys.ScrollUp)
@@ -1440,6 +1564,9 @@ class TaskTrackerTUI:
 
         @kb.add("enter")
         def _(event):
+            if self.settings_mode and not self.editing_mode:
+                self.activate_settings_option()
+                return
             if self.editing_mode:
                 # В режиме редактирования - сохранить
                 self.save_edit()
@@ -1457,6 +1584,8 @@ class TaskTrackerTUI:
             if self.editing_mode:
                 # В режиме редактирования - отменить
                 self.cancel_edit()
+            elif self.settings_mode:
+                self.close_settings_dialog()
             elif self.detail_mode:
                 self.exit_detail_view()
 
@@ -1480,20 +1609,20 @@ class TaskTrackerTUI:
             if not self.editing_mode:
                 self.edit_current_item()
 
-        @kb.add("backspace")
+        @kb.add("c-v")
         def _(event):
-            """Backspace - удалить символ при редактировании"""
-            if self.editing_mode and len(self.edit_buffer.text) > 0:
-                self.edit_buffer.text = self.edit_buffer.text[:-1]
+            if self.editing_mode:
+                self._paste_from_clipboard()
 
-        # Обработчик для печатных символов в editing mode
-        @kb.add("<any>")
+        @kb.add("s-insert")
         def _(event):
-            """Ввод текста в editing mode"""
-            if self.editing_mode and event.data and len(event.data) == 1:
-                # Только печатные ASCII и основные символы
-                if 32 <= ord(event.data) <= 126 or ord(event.data) >= 128:
-                    self.edit_buffer.text += event.data
+            if self.editing_mode:
+                self._paste_from_clipboard()
+
+        @kb.add("f5")
+        def _(event):
+            if self.editing_mode and self.edit_context == 'token':
+                self._validate_edit_buffer_pat()
 
         # Alternative keyboard controls for testing horizontal scroll
         @kb.add("c-left")
@@ -1525,7 +1654,8 @@ class TaskTrackerTUI:
         self.task_list = Window(content=FormattedTextControl(self.get_task_list_text), always_hide_cursor=True, wrap_lines=False)
         self.side_preview = Window(content=FormattedTextControl(self.get_side_preview_text), always_hide_cursor=True, wrap_lines=True, width=Dimension(weight=2))
         self.detail_view = Window(content=FormattedTextControl(self.get_detail_text), always_hide_cursor=True, wrap_lines=True)
-        self.footer = Window(content=FormattedTextControl(self.get_footer_text), height=Dimension(min=self.footer_height, max=self.footer_height), always_hide_cursor=True)
+        footer_control = FormattedTextControl(self.get_footer_text)
+        self.footer = Window(content=footer_control, height=Dimension(min=self.footer_height, max=self.footer_height), always_hide_cursor=False)
 
         self.normal_body = VSplit(
             [
@@ -1536,7 +1666,6 @@ class TaskTrackerTUI:
             padding=0,
         )
 
-        # Main content window
         self.body_control = InteractiveFormattedTextControl(self.get_body_content, show_cursor=False, focusable=False, mouse_handler=self._handle_body_mouse)
         self.main_window = Window(
             content=self.body_control,
@@ -1544,9 +1673,19 @@ class TaskTrackerTUI:
             wrap_lines=True,
         )
 
-        root = HSplit([self.status_bar, self.main_window, self.footer])
+        self.body_container = DynamicContainer(self._resolve_body_container)
 
-        self.app = Application(layout=Layout(root), key_bindings=kb, style=self.style, full_screen=True, mouse_support=True, refresh_interval=1.0)
+        root = HSplit([self.status_bar, self.body_container, self.footer])
+
+        self.app = Application(
+            layout=Layout(root),
+            key_bindings=kb,
+            style=self.style,
+            full_screen=True,
+            mouse_support=True,
+            refresh_interval=1.0,
+            clipboard=self.clipboard,
+        )
 
     @staticmethod
     def get_terminal_width() -> int:
@@ -1562,6 +1701,34 @@ class TaskTrackerTUI:
             return os.get_terminal_size().lines
         except (AttributeError, ValueError, OSError):
             return 40
+
+    def force_render(self) -> None:
+        app = getattr(self, "app", None)
+        if app:
+            app.invalidate()
+
+    def _start_spinner(self, message: str):
+        self.spinner_message = message
+        self.spinner_active = True
+        self.spinner_start = time.time()
+        self.force_render()
+
+    def _stop_spinner(self):
+        self.spinner_active = False
+        self.spinner_message = ""
+        self.force_render()
+
+    @contextmanager
+    def _spinner(self, message: str):
+        self._start_spinner(message)
+        try:
+            yield
+        finally:
+            self._stop_spinner()
+
+    def _run_with_spinner(self, message: str, func, *args, **kwargs):
+        with self._spinner(message):
+            return func(*args, **kwargs)
 
     def _visible_row_limit(self) -> int:
         total = self.get_terminal_height()
@@ -1640,6 +1807,13 @@ class TaskTrackerTUI:
             return '[X]'
         return '?'
 
+    def _spinner_frame(self) -> str:
+        if not self.spinner_active:
+            return ''
+        elapsed = time.time() - self.spinner_start
+        idx = int(elapsed * 8) % len(self.SPINNER_FRAMES)
+        return self.SPINNER_FRAMES[idx]
+
     def _selection_style_for_status(self, status: Union[Status, str, None]) -> str:
         if self.mono_select:
             return 'selected'
@@ -1699,8 +1873,27 @@ class TaskTrackerTUI:
             self._last_subtask_click_time = now
 
     def _handle_body_mouse(self, mouse_event: MouseEvent):
+        if (
+            mouse_event.event_type == MouseEventType.MOUSE_UP
+            and mouse_event.button == MouseButton.MIDDLE
+            and self.editing_mode
+            and self.edit_context == 'token'
+        ):
+            self._paste_from_clipboard()
+            return None
         if self.editing_mode:
             return NotImplemented
+        if self.settings_mode and not self.editing_mode:
+            if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+                self.move_settings_selection(1)
+                return None
+            if mouse_event.event_type == MouseEventType.SCROLL_UP:
+                self.move_settings_selection(-1)
+                return None
+            if mouse_event.event_type == MouseEventType.MOUSE_UP and mouse_event.button == MouseButton.LEFT:
+                self.activate_settings_option()
+                return None
+            return None
         shift = MouseModifier.SHIFT in mouse_event.modifiers
         vertical_step = 2
         horizontal_step = 5
@@ -1859,8 +2052,9 @@ class TaskTrackerTUI:
             self._last_signature = sig
 
     def load_tasks(self, preserve_selection: bool = False, selected_task_file: Optional[str] = None):
-        domain_path = derive_domain_explicit(self.domain_filter, self.phase_filter, self.component_filter)
-        details = self.manager.list_tasks(domain_path)
+        with self._spinner("Обновление задач"):
+            domain_path = derive_domain_explicit(self.domain_filter, self.phase_filter, self.component_filter)
+            details = self.manager.list_tasks(domain_path)
         if self.phase_filter:
             details = [d for d in details if d.phase == self.phase_filter]
         if self.component_filter:
@@ -1924,15 +2118,33 @@ class TaskTrackerTUI:
         }
         flt = self.current_filter.value[0] if self.current_filter else "ALL"
         flt_display = filter_labels.get(flt, "ALL")
+        now = time.time()
+        if self._last_filter_value != flt_display:
+            self._filter_flash_until = now + 1.0
+            self._last_filter_value = flt_display
+        filter_flash_active = now < self._filter_flash_until
 
         parts = [
-            ("class:text.dim", f" {total} задач | Фильтр: "),
-            ("class:header", f"{flt_display}"),
-            ("class:text.dim", f" | Контекст: {ctx} | "),
-            ("class:icon.check", f"DONE={ok} "),
-            ("class:icon.warn", f"IN PROGRESS={warn} "),
-            ("class:icon.fail", f"BACKLOG={fail}"),
+            ("class:text.dim", f" {total} задач | "),
+            ("class:icon.check", str(ok)),
+            ("class:text.dim", "/"),
+            ("class:icon.warn", str(warn)),
+            ("class:text.dim", "/"),
+            ("class:icon.fail", str(fail)),
         ]
+        filter_style = 'class:icon.warn' if filter_flash_active else 'class:header'
+        parts.extend([
+            ("class:text.dim", " | "),
+            (filter_style, f"{flt_display}"),
+            ("class:text.dim", " | "),
+        ])
+        parts.extend(self._sync_indicator_fragments(filter_flash_active))
+        spinner_frame = self._spinner_frame()
+        if spinner_frame:
+            parts.extend([
+                ("class:text.dim", " | "),
+                ("class:header", f"{spinner_frame} {self.spinner_message or 'Загрузка'}"),
+            ])
         if self.status_message and time.time() < self.status_message_expires:
             parts.extend([
                 ("class:text.dim", " | "),
@@ -1977,6 +2189,54 @@ class TaskTrackerTUI:
             task = self.filtered_tasks[self.selected_index]
             return self._get_task_detail(task)
         return None
+
+    def _sync_status_summary(self) -> str:
+        sync = get_projects_sync()
+        cfg = getattr(sync, "config", None)
+        if not cfg:
+            return "OFF"
+        if cfg.project_type == "repository":
+            target = f"{cfg.owner}/{cfg.repo or '-'}#{cfg.number}"
+        else:
+            target = f"{cfg.project_type}:{cfg.owner}#{cfg.number}"
+        prefix = "ON" if sync.enabled else "OFF"
+        return f"{prefix} {target}"
+
+    def _sync_indicator_fragments(self, filter_flash: bool = False) -> List[Tuple[str, str]]:
+        sync = get_projects_sync()
+        cfg = getattr(sync, "config", None)
+        enabled = bool(sync and sync.enabled and cfg)
+        now = time.time()
+        if self._last_sync_enabled is None:
+            self._last_sync_enabled = enabled
+        elif self._last_sync_enabled and not enabled:
+            self._sync_flash_until = now + 1.0
+            self._last_sync_enabled = enabled
+        else:
+            self._last_sync_enabled = enabled
+
+        flash = (not enabled) and now < self._sync_flash_until
+        square = "■" if enabled or flash else "□"
+        if filter_flash:
+            style = "class:icon.warn"
+        else:
+            style = "class:icon.check" if enabled or flash else "class:text.dim"
+
+        def handler(mouse_event):
+            if mouse_event.event_type == MouseEventType.MOUSE_UP and mouse_event.button == MouseButton.LEFT:
+                self.open_settings_dialog()
+                return None
+            return NotImplemented
+
+        return [(style, f"Git Projects {square}", handler)]
+
+    @staticmethod
+    def _sync_target_label(cfg) -> str:
+        if not cfg:
+            return "-"
+        if cfg.project_type == "repository":
+            return f"{cfg.owner}/{cfg.repo or '-'}#{cfg.number}"
+        return f"{cfg.project_type}:{cfg.owner}#{cfg.number}"
 
     def _task_created_value(self, task: Task) -> str:
         detail = self._get_task_detail(task)
@@ -2760,6 +3020,8 @@ class TaskTrackerTUI:
         self.edit_index = index
         self.edit_buffer.text = current_value
         self.edit_buffer.cursor_position = len(current_value)
+        if hasattr(self, "app") and self.app:
+            self.app.layout.focus(self.edit_field)
 
     def save_edit(self):
         """Сохранить результат редактирования"""
@@ -2778,6 +3040,80 @@ class TaskTrackerTUI:
             else:
                 self.set_status_message("PAT очищен")
             self.cancel_edit()
+            if self.settings_mode:
+                self.force_render()
+            return
+
+        if context == 'project_owner':
+            if not new_value:
+                self.set_status_message("Владелец обязателен")
+            else:
+                self._apply_project_target_change(owner=new_value)
+                self.set_status_message("Владелец обновлён")
+            self.cancel_edit()
+            if self.settings_mode:
+                self.force_render()
+            return
+
+        if context == 'project_repo':
+            self._apply_project_target_change(repo=new_value)
+            message = "Репозиторий обновлён" if new_value else "Репозиторий очищен"
+            self.set_status_message(message)
+            self.cancel_edit()
+            if self.settings_mode:
+                self.force_render()
+            return
+
+        if context == 'project_number':
+            try:
+                number_value = int(new_value)
+                if number_value <= 0:
+                    raise ValueError
+            except ValueError:
+                self.set_status_message("Номер проекта должен быть положительным целым")
+            else:
+                self._apply_project_target_change(number=number_value)
+                self.set_status_message("Номер проекта обновлён")
+            self.cancel_edit()
+            if self.settings_mode:
+                self.force_render()
+            return
+
+        if context == 'project_target':
+            if not new_value:
+                self.set_status_message("Формат: тип:владелец/репозиторий#номер")
+                self.cancel_edit()
+                if self.settings_mode:
+                    self.force_render()
+                return
+            try:
+                spec = new_value
+                if ':' in spec:
+                    ptype, rest = spec.split(':', 1)
+                else:
+                    ptype, rest = 'repository', spec
+                if '#' not in rest:
+                    raise ValueError
+                path_part, number_part = rest.split('#', 1)
+                number = int(number_part.strip())
+                path_part = path_part.strip()
+                if '/' in path_part:
+                    owner, repo = path_part.split('/', 1)
+                else:
+                    owner, repo = path_part, None
+                ptype = ptype.strip().lower()
+                owner = owner.strip()
+                if ptype not in ('repository', 'organization', 'user'):
+                    raise ValueError
+                if ptype == 'repository' and (not repo):
+                    raise ValueError
+                update_project_target(ptype, owner, repo.strip() if repo else None, number)
+                self.set_status_message("Project target обновлён")
+            except ValueError:
+                self.set_status_message("Неверный формат: тип:владелец/репозиторий#номер")
+            self.cancel_edit()
+            if self.settings_mode:
+                self.force_render()
             return
 
         if not new_value:
@@ -2826,6 +3162,63 @@ class TaskTrackerTUI:
         self.edit_context = None
         self.edit_index = None
         self.edit_buffer.text = ''
+        if hasattr(self, "app") and self.app:
+            self.app.layout.focus(self.main_window)
+
+    def _clipboard_text(self) -> str:
+        clipboard = getattr(self, "clipboard", None)
+        if not clipboard:
+            return ""
+        try:
+            data = clipboard.get_data()
+        except Exception:
+            return ""
+        if not data:
+            return self._system_clipboard_fallback()
+        text = data.text or ""
+        if text:
+            return text
+        return self._system_clipboard_fallback()
+
+    def _system_clipboard_fallback(self) -> str:
+        # Try pyperclip via prompt_toolkit wrapper
+        if PyperclipClipboard:
+            try:
+                clip = PyperclipClipboard()
+                data = clip.get_data()
+                if data and data.text:
+                    return data.text
+            except Exception:
+                pass
+        # Try native commands (pbpaste/wl-paste/xclip)
+        commands = [
+            ["pbpaste"],
+            ["wl-paste", "-n"],
+            ["wl-copy", "-o"],
+            ["xclip", "-selection", "clipboard", "-out"],
+            ["clip.exe"],
+        ]
+        for cmd in commands:
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=1)
+            except Exception:
+                continue
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout
+        return ""
+
+    def _paste_from_clipboard(self) -> None:
+        if not self.editing_mode:
+            return
+        text = self._clipboard_text()
+        if not text:
+            self.set_status_message("Клипборд пуст или недоступен", ttl=3)
+            return
+        buf = self.edit_buffer
+        cursor = buf.cursor_position
+        buf.text = buf.text[:cursor] + text + buf.text[cursor:]
+        buf.cursor_position = cursor + len(text)
+        self.force_render()
 
     def exit_detail_view(self):
         if hasattr(self, "single_subtask_view") and self.single_subtask_view:
@@ -2845,6 +3238,7 @@ class TaskTrackerTUI:
             self.current_task_detail = None
             self.detail_selected_index = 0
         self.horizontal_offset = 0
+        self.settings_mode = False
 
     def edit_current_item(self):
         """Редактировать текущий элемент"""
@@ -2951,37 +3345,10 @@ class TaskTrackerTUI:
         parts.append(("class:border", border))
         return FormattedText(parts)
 
-    def get_edit_dialog(self) -> FormattedText:
-        """Показать диалог редактирования"""
-        context_labels = {
-            'task_title': 'Редактирование названия задачи',
-            'task_description': 'Редактирование описания задачи',
-            'subtask_title': 'Редактирование подзадачи',
-            'criterion': 'Редактирование критерия',
-            'test': 'Редактирование теста',
-            'blocker': 'Редактирование блокера',
-            'token': 'GitHub PAT',
-        }
-        label = context_labels.get(self.edit_context, 'Редактирование')
-
-        lines = []
-        lines.append(('class:border', '+' + '='*60 + '+\n'))
-        lines.append(('class:border', '| '))
-        lines.append(('class:header', label.ljust(58)))
-        lines.append(('class:border', ' |\n'))
-        lines.append(('class:border', '+' + '-'*60 + '+\n'))
-        lines.append(('class:border', '| '))
-        lines.append(('class:text', self.edit_buffer.text[:58].ljust(58)))
-        lines.append(('class:border', ' |\n'))
-        lines.append(('class:border', '+' + '='*60 + '+'))
-
-        return FormattedText(lines)
-
     def get_body_content(self) -> FormattedText:
         """Returns content for main body - either task list or detail view."""
-        if self.editing_mode:
-            # Показываем диалог редактирования
-            return self.get_edit_dialog()
+        if self.settings_mode:
+            return self.get_settings_panel()
         if self.detail_mode and self.current_task_detail:
             # Если открыт просмотр конкретной подзадачи — показываем его
             if hasattr(self, "single_subtask_view") and self.single_subtask_view:
@@ -2998,17 +3365,322 @@ class TaskTrackerTUI:
         """Deprecated - use get_body_content instead."""
         return self.get_body_content()
 
-    def open_settings_dialog(self):
-        token = get_user_token()
-        if token:
-            self.set_status_message("PAT сохранён. Введи новый для обновления или оставь пустым")
+    def close_settings_dialog(self):
+        self.settings_mode = False
+        self.editing_mode = False
+        self.force_render()
+
+    def _resolve_body_container(self):
+        if self.editing_mode:
+            return self._build_edit_container()
+        return self.main_window
+
+    def _build_edit_container(self):
+        labels = {
+            'task_title': 'Редактирование названия задачи',
+            'task_description': 'Редактирование описания задачи',
+            'subtask_title': 'Редактирование подзадачи',
+            'criterion': 'Редактирование критерия',
+            'test': 'Редактирование теста',
+            'blocker': 'Редактирование блокера',
+            'token': 'GitHub PAT',
+            'project_target': 'Цель Projects',
+            'project_owner': 'Владелец проекта',
+            'project_repo': 'Репозиторий',
+            'project_number': 'Номер проекта',
+        }
+        label = labels.get(self.edit_context, 'Редактирование')
+        width = max(40, self.get_terminal_width() - 4)
+        header = Window(
+            content=FormattedTextControl([('class:header', f" {label} ".ljust(width))]),
+            height=1,
+            always_hide_cursor=True,
+        )
+        self.edit_field.buffer.cursor_position = len(self.edit_field.text)
+        children = [header, Window(height=1, char='─'), self.edit_field]
+
+        if self.edit_context == 'token':
+            button_text = '[ Проверить PAT (F5) ]'
+
+            def fragments():
+                return [('class:header', button_text, lambda mouse_event: self._validate_edit_buffer_pat() if (
+                    mouse_event.event_type == MouseEventType.MOUSE_UP and mouse_event.button == MouseButton.LEFT
+                ) else None)]
+
+            button_control = FormattedTextControl(fragments)
+            children.append(Window(height=1, char=' '))
+            children.append(Window(content=button_control, height=1, always_hide_cursor=True))
+
+        return HSplit(children, padding=0)
+
+    def get_settings_panel(self) -> FormattedText:
+        options = self._settings_options()
+        if not options:
+            return FormattedText([("class:text.dim", "Настройки недоступны")])
+        width = max(70, min(110, self.get_terminal_width() - 4))
+        inner_width = max(30, width - 2)
+        max_label = max(len(opt["label"]) for opt in options)
+        label_width = max(14, min(inner_width - 12, max_label + 2))
+        value_width = max(10, inner_width - label_width - 2)
+        self.settings_selected_index = min(self.settings_selected_index, len(options) - 1)
+
+        lines: List[Tuple[str, str]] = []
+        lines.append(('class:border', '+' + '='*width + '+\n'))
+        lines.append(('class:border', '| '))
+        title = 'НАСТРОЙКИ GITHUB PROJECTS'
+        lines.append(('class:header', title.center(width - 2)))
+        lines.append(('class:border', ' |\n'))
+        lines.append(('class:border', '+' + '-'*width + '+\n'))
+
+        for idx, option in enumerate(options):
+            prefix = '▸' if idx == self.settings_selected_index else ' '
+            label_text = option['label'][:label_width].ljust(label_width)
+            value_text = option['value']
+            if len(value_text) > value_width:
+                value_text = value_text[:max(1, value_width - 1)] + '…'
+            row_text = f"{prefix} {label_text}{value_text.ljust(value_width)}"
+            style = 'class:selected' if idx == self.settings_selected_index else ('class:text.dim' if option.get('disabled') else 'class:text')
+            lines.append(('class:border', '| '))
+            lines.append((style, row_text.ljust(inner_width)))
+            lines.append(('class:border', ' |\n'))
+            if idx == self.settings_selected_index and option.get('hint'):
+                hint_lines = textwrap.wrap(option['hint'], width - 6) or ['']
+                for hint_line in hint_lines:
+                    lines.append(('class:border', '| '))
+                    lines.append(('class:text.dim', f"  {hint_line}".ljust(inner_width)))
+                    lines.append(('class:border', ' |\n'))
+
+        lines.append(('class:border', '+' + '-'*width + '+\n'))
+        hint = "Вверх/вниз — выбор, Enter — действие, Esc — закрыть"
+        lines.append(('class:border', '| '))
+        lines.append(('class:text.dim', hint[:width - 2].ljust(width - 2)))
+        lines.append(('class:border', ' |\n'))
+        lines.append(('class:border', '+' + '='*width + '+'))
+        return FormattedText(lines)
+
+    def _settings_options(self) -> List[Dict[str, Any]]:
+        snapshot = self._project_config_snapshot()
+        options: List[Dict[str, Any]] = []
+        if snapshot['token_saved']:
+            pat_value = f"Сохранён (…{snapshot['token_preview']})"
+        elif snapshot['token_env']:
+            pat_value = f"ENV {snapshot['token_env']}"
         else:
-            self.set_status_message("Вставь PAT со scope project")
-        self.start_editing('token', '', None)
-        self.edit_buffer.cursor_position = 0
+            pat_value = "Не задан"
+        options.append({
+            "label": "GitHub PAT",
+            "value": pat_value,
+            "hint": "Enter — вставь новый PAT или оставь пустым, чтобы очистить",
+            "action": "edit_pat",
+        })
+
+        if not snapshot['config_exists']:
+            sync_value = "Недоступна (нет проекта)"
+        elif not snapshot['config_enabled']:
+            sync_value = "Выключена"
+        elif not snapshot['token_active']:
+            sync_value = "Недоступна (нет PAT)"
+        else:
+            sync_value = "Включена"
+        options.append({
+            "label": "Синхронизация",
+            "value": sync_value,
+            "hint": "Enter — включить или выключить автоматическую синхронизацию",
+            "action": "toggle_sync",
+            "disabled": not snapshot['config_exists'],
+            "disabled_msg": "Сначала выбери проект",
+        })
+
+        type_label = self.PROJECT_TYPE_LABELS.get(snapshot['type'], snapshot['type'])
+        options.append({
+            "label": "Тип проекта",
+            "value": type_label,
+            "hint": "Enter — переключить между репозиторием, организацией и пользователем",
+            "action": "cycle_type",
+        })
+
+        options.append({
+            "label": "Владелец",
+            "value": snapshot['owner'] or '—',
+            "hint": "Enter — указать организацию или пользователя, к которому привязан проект",
+            "action": "edit_owner",
+        })
+
+        options.append({
+            "label": "Репозиторий",
+            "value": snapshot['repo'] or '—',
+            "hint": "Доступно только если выбран тип 'Репозиторий'",
+            "action": "edit_repo",
+            "disabled": snapshot['type'] != 'repository',
+            "disabled_msg": "Репозиторий нужен только для типа 'репозиторий'",
+        })
+
+        options.append({
+            "label": "Номер проекта",
+            "value": str(snapshot['number']) if snapshot['number'] else '—',
+            "hint": "Enter — обновить номер Project v2",
+            "action": "edit_number",
+        })
+
+        options.append({
+            "label": "Перечитать поля",
+            "value": "Обновить кеш GraphQL",
+            "hint": "Enter — сбросить кеш полей Projects перед синхронизацией",
+            "action": "refresh_metadata",
+            "disabled": not (snapshot['config_exists'] and snapshot['token_active']),
+            "disabled_msg": "Нужен выбранный проект и PAT",
+        })
+        options.append({
+            "label": "Проверить PAT",
+            "value": self.pat_validation_result or "GitHub viewer",
+            "hint": "Enter — проверить токен через GitHub GraphQL",
+            "action": "validate_pat",
+            "disabled": not (snapshot['token_saved'] or snapshot['token_env']),
+            "disabled_msg": "Сначала сохрани PAT",
+        })
+        return options
+
+    def _project_config_snapshot(self) -> Dict[str, Any]:
+        sync = get_projects_sync()
+        cfg = sync.config
+        user_token = get_user_token()
+        env_primary = os.getenv("APPLY_TASK_GITHUB_TOKEN")
+        env_secondary = os.getenv("GITHUB_TOKEN") if not env_primary else None
+        env_source = ""
+        if env_primary:
+            env_source = "APPLY_TASK_GITHUB_TOKEN"
+        elif env_secondary:
+            env_source = "GITHUB_TOKEN"
+        return {
+            "type": cfg.project_type if cfg else "repository",
+            "owner": (cfg.owner if cfg and cfg.owner else ""),
+            "repo": (cfg.repo if cfg and cfg.repo else ""),
+            "number": cfg.number if cfg else 1,
+            "config_exists": bool(cfg),
+            "config_enabled": bool(cfg and cfg.enabled),
+            "token_saved": bool(user_token),
+            "token_preview": user_token[-4:] if user_token else "",
+            "token_env": env_source,
+            "token_active": bool(sync.token),
+        }
+
+    def _apply_project_target_change(self, **updates) -> None:
+        snapshot = self._project_config_snapshot()
+        project_type = updates.get("project_type", snapshot["type"])
+        owner = updates.get("owner", snapshot["owner"]).strip()
+        repo = updates.get("repo", snapshot["repo"]).strip()
+        number = updates.get("number", snapshot["number"]) or 1
+        update_project_target(project_type, owner, repo if repo else None, int(number))
+
+    def _next_project_type(self, current_type: str) -> str:
+        order = self.PROJECT_TYPES
+        if current_type not in order:
+            return order[0]
+        idx = order.index(current_type)
+        return order[(idx + 1) % len(order)]
+
+    def move_settings_selection(self, delta: int) -> None:
+        options = self._settings_options()
+        if not options:
+            return
+        self.settings_selected_index = (self.settings_selected_index + delta) % len(options)
+        self.force_render()
+
+    def activate_settings_option(self):
+        options = self._settings_options()
+        if not options:
+            return
+        idx = self.settings_selected_index
+        option = options[idx]
+        if option.get("disabled"):
+            self.set_status_message(option.get("disabled_msg") or "Опция недоступна")
+            return
+        action = option.get("action")
+        if action == "edit_pat":
+            self.set_status_message("Вставь PAT (оставь пустым чтобы очистить)")
+            self.start_editing('token', '', None)
+            self.edit_buffer.cursor_position = 0
+        elif action == "toggle_sync":
+            snapshot = self._project_config_snapshot()
+            desired = not snapshot['config_enabled']
+            update_projects_enabled(desired)
+            state = "включена" if desired else "выключена"
+            self.set_status_message(f"Синхронизация {state}")
+            self.force_render()
+        elif action == "cycle_type":
+            snapshot = self._project_config_snapshot()
+            new_type = self._next_project_type(snapshot['type'])
+            self._apply_project_target_change(project_type=new_type)
+            label = self.PROJECT_TYPE_LABELS.get(new_type, new_type)
+            self.set_status_message(f"Тип проекта: {label}")
+            self.force_render()
+        elif action == "edit_owner":
+            snapshot = self._project_config_snapshot()
+            self.start_editing('project_owner', snapshot['owner'], None)
+            self.edit_buffer.cursor_position = len(self.edit_buffer.text)
+        elif action == "edit_repo":
+            snapshot = self._project_config_snapshot()
+            self.start_editing('project_repo', snapshot['repo'], None)
+            self.edit_buffer.cursor_position = len(self.edit_buffer.text)
+        elif action == "edit_number":
+            snapshot = self._project_config_snapshot()
+            self.start_editing('project_number', str(snapshot['number']), None)
+            self.edit_buffer.cursor_position = len(self.edit_buffer.text)
+        elif action == "refresh_metadata":
+            reload_projects_sync()
+            self.set_status_message("Кеш Projects обновлён")
+            self.force_render()
+        elif action == "validate_pat":
+            self._start_pat_validation()
+        else:
+            self.set_status_message("Опция недоступна")
+
+    def open_settings_dialog(self):
+        self.settings_mode = True
+        self.settings_selected_index = 0
+        self.editing_mode = False
+        self.force_render()
+
+    def _start_pat_validation(self, token: Optional[str] = None, label: str = "PAT", cache_result: bool = True):
+        source_token = token or get_user_token() or os.getenv("APPLY_TASK_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN")
+        if not source_token:
+            self.set_status_message("PAT отсутствует")
+            return
+
+        if cache_result:
+            self.pat_validation_result = "Проверка..."
+        spinner_label = f"Проверка {label}"
+        self._start_spinner(spinner_label)
+
+        def worker():
+            try:
+                ok, msg = validate_pat_token_http(source_token)
+                self.set_status_message(msg, ttl=6)
+                if cache_result:
+                    self.pat_validation_result = msg
+            finally:
+                self._stop_spinner()
+                self.force_render()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _validate_edit_buffer_pat(self):
+        value = self.edit_buffer.text.strip()
+        if not value:
+            self.set_status_message("Введи PAT для проверки", ttl=4)
+            return
+        self._start_pat_validation(token=value, label="PAT (ввод)", cache_result=False)
 
     def run(self):
         self.app.run()
+
+    def _build_clipboard(self):
+        if PyperclipClipboard:
+            try:
+                return PyperclipClipboard()
+            except Exception:
+                pass
+        return InMemoryClipboard()
 
 
 # ============================================================================
@@ -4055,15 +4727,23 @@ def cmd_projects_webhook(args) -> int:
         return structured_error("projects-webhook", "Projects sync disabled (missing token or config)")
     body = _load_input_source(args.payload, "--payload")
     try:
-        updated = sync.handle_webhook(body, args.signature, args.secret)
+        result = sync.handle_webhook(body, args.signature, args.secret)
     except ValueError as exc:
         return structured_error("projects-webhook", str(exc))
+    if result and result.get("conflict"):
+        return structured_response(
+            "projects-webhook",
+            status="CONFLICT",
+            message="Конфликт: локальные правки новее удалённых",
+            payload=result,
+        )
+    updated = bool(result and result.get("updated"))
     message = "Task updated" if updated else "No matching task"
     return structured_response(
         "projects-webhook",
         status="OK",
         message=message,
-        payload={"updated": updated},
+        payload=result or {"updated": False},
     )
 
 
@@ -4080,9 +4760,13 @@ def cmd_projects_webhook_serve(args) -> int:
             raw = self_inner.rfile.read(length)
             signature = self_inner.headers.get("X-Hub-Signature-256")
             try:
-                updated = sync.handle_webhook(raw.decode(), signature, secret)
-                status = 200
-                payload = {"updated": updated}
+                result = sync.handle_webhook(raw.decode(), signature, secret)
+                if result and result.get("conflict"):
+                    status = 409
+                    payload = {"status": "conflict", **result}
+                else:
+                    status = 200
+                    payload = result or {"updated": False}
             except ValueError as exc:
                 status = 400
                 payload = {"error": str(exc)}
@@ -4103,6 +4787,39 @@ def cmd_projects_webhook_serve(args) -> int:
     except KeyboardInterrupt:
         server.server_close()
     return 0
+
+
+def cmd_projects_sync_cli(args) -> int:
+    if not args.all:
+        return structured_error("projects sync", "Укажи --all для явного подтверждения")
+    sync = get_projects_sync()
+    if not sync.enabled:
+        return structured_error("projects sync", "Projects sync отключён или не настроен")
+    sync.consume_conflicts()
+    manager = TaskManager()
+    domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
+    tasks = manager.list_tasks(domain)
+    pulled = pushed = 0
+    for task in tasks:
+        if sync.pull_task_fields(task):
+            pulled += 1
+        if sync.sync_task(task):
+            pushed += 1
+    conflicts = sync.consume_conflicts()
+    payload = {
+        "tasks": len(tasks),
+        "pull_updates": pulled,
+        "push_updates": pushed,
+        "conflicts": conflicts,
+    }
+    conflict_suffix = f", конфликты={len(conflicts)}" if conflicts else ""
+    return structured_response(
+        "projects sync",
+        status="OK",
+        message=f"Синхронизация завершена ({pulled} pull / {pushed} push{conflict_suffix})",
+        payload=payload,
+        summary=f"{pulled} pull / {pushed} push{conflict_suffix}",
+    )
 
 
 def cmd_edit(args) -> int:
@@ -4521,6 +5238,14 @@ def build_parser() -> argparse.ArgumentParser:
     auth.add_argument("--token", help="PAT со scope project")
     auth.add_argument("--unset", action="store_true", help="Удалить сохранённый PAT")
     auth.set_defaults(func=cmd_projects_auth)
+
+    projects = sub.add_parser("projects", help="Операции с GitHub Projects v2")
+    proj_sub = projects.add_subparsers(dest="projects_command")
+    proj_sub.required = True
+    sync_cmd = proj_sub.add_parser("sync", help="Синхронизировать backlog с Projects v2")
+    sync_cmd.add_argument("--all", action="store_true", help="Подтвердить синхронизацию всех задач")
+    add_context_args(sync_cmd)
+    sync_cmd.set_defaults(func=cmd_projects_sync_cli)
 
     # checkpoint wizard
     ckp = sub.add_parser(
