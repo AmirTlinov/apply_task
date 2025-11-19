@@ -1715,9 +1715,12 @@ class TaskTrackerTUI:
 
     def _format_cell(self, content: str, width: int, align: str = 'left') -> str:
         """Форматирует содержимое ячейки с заданной шириной"""
+        text = content[:width] if len(content) > width else content
         if align == 'right':
-            return content[:width].rjust(width) if len(content) > width else content.rjust(width)
-        return content[:width].ljust(width) if len(content) > width else content.ljust(width)
+            return text.rjust(width)
+        if align == 'center':
+            return text.center(width)
+        return text.ljust(width)
 
     def _get_status_info(self, task: Task) -> Tuple[str, str, str]:
         """Возвращает символ статуса, CSS класс и короткое название"""
@@ -1753,6 +1756,18 @@ class TaskTrackerTUI:
         layout = ResponsiveLayoutManager.select_layout(term_width)
         widths = layout.calculate_widths(term_width)
 
+        if layout.has_column('progress'):
+            max_prog = max((len(f"{t.progress}%") for t in self.filtered_tasks), default=4)
+            widths['progress'] = max(max_prog, 2)
+        if layout.has_column('subtasks'):
+            max_sub = 0
+            for t in self.filtered_tasks:
+                if t.subtasks_count:
+                    max_sub = max(max_sub, len(f"{t.subtasks_completed}/{t.subtasks_count}"))
+                else:
+                    max_sub = max(max_sub, 1)
+            widths['subtasks'] = max(max_sub, 3)
+
         # Построение header line
         header_parts = []
         for col in layout.columns:
@@ -1767,8 +1782,8 @@ class TaskTrackerTUI:
         column_labels = {
             'stat': ('Ст', widths.get('stat', 3)),
             'title': ('Задача', widths.get('title', 20)),
-            'progress': ('Прогр', widths.get('progress', 6)),
-            'subtasks': ('Подзадач', widths.get('subtasks', 9)),
+            'progress': ('%', widths.get('progress', 4)),
+            'subtasks': ('Подз', widths.get('subtasks', 3)),
             'path': ('Путь', widths.get('path', 12)),
         }
 
@@ -1797,23 +1812,23 @@ class TaskTrackerTUI:
                     marker_text = marker.center(stat_width) if stat_width > 1 else marker
                     cell_data['stat'] = (marker_text, status_class)
                 else:
-                    cell_data['stat'] = (self._format_cell(status_text, widths['stat']), status_class)
+                    cell_data['stat'] = (self._format_cell(status_text, widths['stat'], align='center'), status_class)
 
             if 'title' in layout.columns:
                 title_scrolled = self._apply_scroll(task.name)
                 cell_data['title'] = (self._format_cell(title_scrolled, widths['title']), 'class:text')
 
             if 'progress' in layout.columns:
-                prog_text = f"{task.progress:3d}%"
+                prog_text = f"{task.progress}%"
                 prog_style = 'class:icon.check' if task.progress >= 100 else 'class:text.dim'
-                cell_data['progress'] = (self._format_cell(prog_text, widths['progress']), prog_style)
+                cell_data['progress'] = (self._format_cell(prog_text, widths['progress'], align='center'), prog_style)
 
             if 'subtasks' in layout.columns:
                 if task.subtasks_count:
                     subt_text = f"{task.subtasks_completed}/{task.subtasks_count}"
                 else:
                     subt_text = "—"
-                cell_data['subtasks'] = (self._format_cell(subt_text, widths['subtasks']), 'class:text.dim')
+                cell_data['subtasks'] = (self._format_cell(subt_text, widths['subtasks'], align='center'), 'class:text.dim')
 
             if 'path' in layout.columns:
                 components = [comp for comp in (task.domain, task.phase, task.component) if comp]
