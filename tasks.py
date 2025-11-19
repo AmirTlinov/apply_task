@@ -1160,7 +1160,6 @@ class ColumnLayout:
     stat_w: int = 3
     prog_w: int = 7
     subt_w: int = 9
-    ctx_w: int = 18
 
     def has_column(self, name: str) -> bool:
         return name in self.columns
@@ -1171,7 +1170,6 @@ class ColumnLayout:
             'stat': self.stat_w,
             'progress': self.prog_w,
             'subtasks': self.subt_w,
-            'path': self.ctx_w,
         }
 
         # Подсчёт фиксированных колонок
@@ -1192,9 +1190,9 @@ class ResponsiveLayoutManager:
     """Управляет адаптивными layout в зависимости от ширины терминала"""
 
     LAYOUTS = [
-        ColumnLayout(min_width=200, columns=['stat', 'title', 'progress', 'subtasks', 'path']),
-        ColumnLayout(min_width=150, columns=['stat', 'title', 'progress', 'subtasks', 'path']),
-        ColumnLayout(min_width=120, columns=['stat', 'title', 'progress', 'subtasks', 'path']),
+        ColumnLayout(min_width=200, columns=['stat', 'title', 'progress', 'subtasks']),
+        ColumnLayout(min_width=150, columns=['stat', 'title', 'progress', 'subtasks']),
+        ColumnLayout(min_width=120, columns=['stat', 'title', 'progress', 'subtasks']),
         ColumnLayout(min_width=95, columns=['stat', 'title', 'progress', 'subtasks']),
         ColumnLayout(min_width=75, columns=['stat', 'title', 'progress', 'subtasks']),
         ColumnLayout(min_width=55, columns=['stat', 'title', 'progress', 'subtasks']),
@@ -1699,12 +1697,7 @@ class TaskTrackerTUI:
         return FormattedText(parts)
 
     def _current_description_snippet(self) -> str:
-        detail: Optional[TaskDetail] = None
-        if self.detail_mode and self.current_task_detail:
-            detail = self.current_task_detail
-        elif self.filtered_tasks:
-            task = self.filtered_tasks[self.selected_index]
-            detail = task.detail
+        detail = self._current_task_detail_obj()
         if not detail:
             return ""
         text = detail.description or detail.context or ""
@@ -1721,6 +1714,20 @@ class TaskTrackerTUI:
         if align == 'center':
             return text.center(width)
         return text.ljust(width)
+
+    def _current_task_detail_obj(self) -> Optional[TaskDetail]:
+        if self.detail_mode and self.current_task_detail:
+            return self.current_task_detail
+        if self.filtered_tasks:
+            task = self.filtered_tasks[self.selected_index]
+            detail = task.detail
+            if (not detail) and task.task_file:
+                try:
+                    detail = TaskFileParser.parse(Path(task.task_file))
+                except Exception:
+                    detail = None
+            return detail
+        return None
 
     def _get_status_info(self, task: Task) -> Tuple[str, str, str]:
         """Возвращает символ статуса, CSS класс и короткое название"""
@@ -1784,14 +1791,12 @@ class TaskTrackerTUI:
             'title': ('Задача', widths.get('title', 20)),
             'progress': ('%', widths.get('progress', 4)),
             'subtasks': ('Σ', widths.get('subtasks', 3)),
-            'path': ('⇢', widths.get('path', 12)),
         }
 
         header_align = {
             'stat': 'center',
             'progress': 'center',
             'subtasks': 'center',
-            'path': 'center',
         }
         for col in layout.columns:
             if col in column_labels:
@@ -1836,11 +1841,6 @@ class TaskTrackerTUI:
                 else:
                     subt_text = "—"
                 cell_data['subtasks'] = (self._format_cell(subt_text, widths['subtasks'], align='center'), 'class:text.dim')
-
-            if 'path' in layout.columns:
-                components = [comp for comp in (task.domain, task.phase, task.component) if comp]
-                path_text = '/'.join(components) if components else "-"
-                cell_data['path'] = (self._format_cell(path_text, widths['path']), 'class:text.dim')
 
             # Рендер строки
             if idx == self.selected_index:
@@ -2446,6 +2446,11 @@ class TaskTrackerTUI:
                 ("class:text.dimmer", " Enter: сохранить | Esc: отменить"),
             ])
         desc = self._current_description_snippet() or "Описание отсутствует"
+        detail = self._current_task_detail_obj()
+        path_parts = []
+        if detail:
+            path_parts = [comp for comp in (detail.domain, detail.phase, detail.component) if comp]
+        path_text = '/'.join(path_parts) if path_parts else "-"
         width = max(20, self.get_terminal_width() - 4)
         lines = []
         current = desc
@@ -2454,9 +2459,11 @@ class TaskTrackerTUI:
             current = current[width:]
             if len(lines) == 2:
                 break
-        parts = [("class:text.dim", f" {lines[0]}")]
-        if len(lines) > 1:
-            parts.extend([("", "\n"), ("class:text.dim", f" {lines[1]}")])
+        parts = [("class:text.dim", f" Путь: {path_text}")]
+        if lines:
+            parts.extend([("", "\n"), ("class:text.dim", f" {lines[0]}")])
+            if len(lines) > 1:
+                parts.extend([("", "\n"), ("class:text.dim", f" {lines[1]}")])
         parts.extend([("", "\n"), ("class:text.dimmer", f"  Чекпоинты: [✓ ✓ ·] = критерии/тесты/блокеры | ? — подсказки{scroll_info}")])
         return FormattedText(parts)
 
