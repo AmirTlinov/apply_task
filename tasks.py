@@ -1230,8 +1230,8 @@ THEMES: Dict[str, Dict[str, str]] = {
         "header": "#ffb347 bold",
         "border": "#4b525a",
         "icon.check": "#9ad974 bold",
-        "icon.warn": "#ff8c38 bold",
-        "icon.fail": "#e06c75 bold",
+        "icon.warn": "#f9ac60 bold",
+        "icon.fail": "#ff2f34 bold",
     },
     "dark-contrast": {
         "": "#e8eaec",  # без черной подложки
@@ -1246,8 +1246,8 @@ THEMES: Dict[str, Dict[str, str]] = {
         "header": "#ffb347 bold",
         "border": "#5a6169",
         "icon.check": "#b8f171 bold",
-        "icon.warn": "#ff8c38 bold",
-        "icon.fail": "#ff6b6b bold",
+        "icon.warn": "#f9ac60 bold",
+        "icon.fail": "#ff2f34 bold",
     },
 }
 
