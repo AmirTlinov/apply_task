@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
+import textwrap
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition
@@ -1160,6 +1161,8 @@ class ColumnLayout:
     stat_w: int = 3
     prog_w: int = 7
     subt_w: int = 9
+    created_w: int = 10
+    done_w: int = 10
 
     def has_column(self, name: str) -> bool:
         return name in self.columns
@@ -1170,6 +1173,8 @@ class ColumnLayout:
             'stat': self.stat_w,
             'progress': self.prog_w,
             'subtasks': self.subt_w,
+            'created': self.created_w,
+            'done': self.done_w,
         }
 
         # Подсчёт фиксированных колонок
@@ -1190,13 +1195,13 @@ class ResponsiveLayoutManager:
     """Управляет адаптивными layout в зависимости от ширины терминала"""
 
     LAYOUTS = [
-        ColumnLayout(min_width=200, columns=['stat', 'title', 'progress', 'subtasks']),
-        ColumnLayout(min_width=150, columns=['stat', 'title', 'progress', 'subtasks']),
-        ColumnLayout(min_width=120, columns=['stat', 'title', 'progress', 'subtasks']),
-        ColumnLayout(min_width=95, columns=['stat', 'title', 'progress', 'subtasks']),
-        ColumnLayout(min_width=75, columns=['stat', 'title', 'progress', 'subtasks']),
-        ColumnLayout(min_width=55, columns=['stat', 'title', 'progress', 'subtasks']),
-        ColumnLayout(min_width=0, columns=['stat', 'progress', 'title', 'subtasks'], stat_w=3, prog_w=6),
+        ColumnLayout(min_width=200, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
+        ColumnLayout(min_width=150, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
+        ColumnLayout(min_width=120, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
+        ColumnLayout(min_width=95, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
+        ColumnLayout(min_width=75, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
+        ColumnLayout(min_width=55, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
+        ColumnLayout(min_width=0, columns=['stat', 'progress', 'title', 'subtasks', 'created', 'done'], stat_w=3, prog_w=6),
     ]
 
     @classmethod
@@ -1715,19 +1720,34 @@ class TaskTrackerTUI:
             return text.center(width)
         return text.ljust(width)
 
+    def _get_task_detail(self, task: Task) -> Optional[TaskDetail]:
+        detail = task.detail
+        if not detail and task.task_file:
+            try:
+                detail = TaskFileParser.parse(Path(task.task_file))
+            except Exception:
+                detail = None
+        return detail
+
     def _current_task_detail_obj(self) -> Optional[TaskDetail]:
         if self.detail_mode and self.current_task_detail:
             return self.current_task_detail
         if self.filtered_tasks:
             task = self.filtered_tasks[self.selected_index]
-            detail = task.detail
-            if (not detail) and task.task_file:
-                try:
-                    detail = TaskFileParser.parse(Path(task.task_file))
-                except Exception:
-                    detail = None
-            return detail
+            return self._get_task_detail(task)
         return None
+
+    def _task_created_value(self, task: Task) -> str:
+        detail = self._get_task_detail(task)
+        if detail and detail.created:
+            return detail.created
+        return "—"
+
+    def _task_done_value(self, task: Task) -> str:
+        detail = self._get_task_detail(task)
+        if detail and detail.updated and detail.status == "OK":
+            return detail.updated
+        return "—"
 
     def _get_status_info(self, task: Task) -> Tuple[str, str, str]:
         """Возвращает символ статуса, CSS класс и короткое название"""
@@ -1774,6 +1794,12 @@ class TaskTrackerTUI:
                 else:
                     max_sub = max(max_sub, 1)
             widths['subtasks'] = max(max_sub, 3)
+        if layout.has_column('created'):
+            max_created = max((len(self._task_created_value(t)) for t in self.filtered_tasks), default=10)
+            widths['created'] = max(max_created, 10)
+        if layout.has_column('done'):
+            max_done = max((len(self._task_done_value(t)) for t in self.filtered_tasks), default=3)
+            widths['done'] = max(max_done, 3)
 
         # Построение header line
         header_parts = []
@@ -1791,12 +1817,16 @@ class TaskTrackerTUI:
             'title': ('Задача', widths.get('title', 20)),
             'progress': ('%', widths.get('progress', 4)),
             'subtasks': ('Σ', widths.get('subtasks', 3)),
+            'created': ('C', widths.get('created', 10)),
+            'done': ('✓', widths.get('done', 10)),
         }
 
         header_align = {
             'stat': 'center',
             'progress': 'center',
             'subtasks': 'center',
+            'created': 'center',
+            'done': 'center',
         }
         for col in layout.columns:
             if col in column_labels:
@@ -1841,6 +1871,15 @@ class TaskTrackerTUI:
                 else:
                     subt_text = "—"
                 cell_data['subtasks'] = (self._format_cell(subt_text, widths['subtasks'], align='center'), 'class:text.dim')
+
+            if 'created' in layout.columns:
+                created_value = self._task_created_value(task)
+                cell_data['created'] = (self._format_cell(created_value, widths['created'], align='center'), 'class:text.dim')
+
+            if 'done' in layout.columns:
+                done_value = self._task_done_value(task)
+                style = 'class:icon.check' if done_value != "—" else 'class:text.dim'
+                cell_data['done'] = (self._format_cell(done_value, widths['done'], align='center'), style)
 
             # Рендер строки
             if idx == self.selected_index:
@@ -2482,15 +2521,26 @@ class TaskTrackerTUI:
             if len(lines) == 2:
                 break
         parts: List[Tuple[str, str]] = []
-        parts.append(("class:text.dim", " Домен: "))
-        parts.extend(path_display)
+        label = " Домен: "
+        parts.append(("class:text.dim", label))
+        current_len = len(label)
+        for style, text in path_display:
+            seg = text
+            if current_len + len(seg) > width:
+                parts.append(("", "\n"))
+                parts.append(("class:text.dim", " " * len(label)))
+                current_len = len(label)
+            parts.append((style, seg))
+            current_len += len(seg)
         desc_header = " Описание: "
-        if lines:
-            parts.extend([("", "\n"), ("class:text.dim", desc_header), ("class:text", lines[0])])
-            if len(lines) > 1:
-                parts.extend([("", "\n"), ("class:text", " " * len(desc_header) + lines[1])])
-        else:
-            parts.extend([("", "\n"), ("class:text.dim", desc_header), ("class:text", "—")])
+        available = max(10, width - len(desc_header))
+        wrapped = textwrap.wrap(desc, available) if desc else []
+        if not wrapped:
+            wrapped = ["—"]
+        parts.extend([("", "\n"), ("class:text.dim", desc_header), ("class:text", wrapped[0])])
+        indent = " " * len(desc_header)
+        for extra in wrapped[1:]:
+            parts.extend([("", "\n"), ("class:text", indent + extra)])
         legend = " ◉=OK/В работе | ◎=Блокер | %=прогресс | Σ=подзадачи | ?=подсказки"
         parts.extend([("", "\n"), ("class:text.dimmer", legend + scroll_info)])
         return FormattedText(parts)
