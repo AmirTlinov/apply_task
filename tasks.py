@@ -2447,10 +2447,32 @@ class TaskTrackerTUI:
             ])
         desc = self._current_description_snippet() or "Описание отсутствует"
         detail = self._current_task_detail_obj()
-        path_parts = []
+        segments: List[str] = []
+        seen: set[str] = set()
         if detail:
-            path_parts = [comp for comp in (detail.domain, detail.phase, detail.component) if comp]
-        path_text = '/'.join(path_parts) if path_parts else "-"
+            domain = detail.domain or ""
+            if domain:
+                for part in domain.split('/'):
+                    if part:
+                        formatted = f"[{part}]"
+                        if formatted not in seen:
+                            segments.append(formatted)
+                            seen.add(formatted)
+            for comp in (detail.phase, detail.component):
+                if comp:
+                    formatted = f"[{comp}]"
+                    if formatted not in seen:
+                        segments.append(formatted)
+                        seen.add(formatted)
+        path_display: List[Tuple[str, str]] = []
+        if segments:
+            for idx, seg in enumerate(segments):
+                style = 'class:header' if idx == len(segments) - 1 else 'class:text.dim'
+                path_display.append((style, seg))
+                if idx < len(segments) - 1:
+                    path_display.append(('class:text.dim', '->'))
+        else:
+            path_display = [('class:text.dim', '-')]
         width = max(20, self.get_terminal_width() - 4)
         lines = []
         current = desc
@@ -2460,7 +2482,8 @@ class TaskTrackerTUI:
             if len(lines) == 2:
                 break
         parts: List[Tuple[str, str]] = []
-        parts.append(("class:text.dim", f" Путь: {path_text}"))
+        parts.append(("class:text.dim", " Путь: "))
+        parts.extend(path_display)
         desc_header = " Описание: "
         if lines:
             parts.extend([("", "\n"), ("class:text.dim", desc_header + lines[0])])
