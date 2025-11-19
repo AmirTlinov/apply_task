@@ -105,6 +105,15 @@ apply_task history [N]    # last N commands (default 5)
 apply_task replay N       # re-run command #N (1 = latest)
 ```
 
+### GitHub Projects helpers
+
+```bash
+apply_task projects-webhook --payload payload.json --signature "$X_HUB_SIG" --secret "$WEBHOOK_SECRET"
+apply_task projects-webhook-serve --host 0.0.0.0 --port 8787 --secret "$WEBHOOK_SECRET"
+```
+
+The first form applies a single webhook payload (useful for testing or piping from another server). The `projects-webhook-serve` command runs a minimal HTTP server that accepts GitHub `projects_v2_item` events and keeps `.task` metadata in sync when board fields change.
+
 ## Direct tasks.py commands (for scripts)
 
 ```bash

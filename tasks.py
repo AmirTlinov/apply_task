@@ -42,6 +42,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl, BufferControl
 from prompt_toolkit.mouse_events import MouseEventType, MouseEvent, MouseButton, MouseModifier
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import TextArea
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 # ============================================================================
@@ -3971,6 +3972,62 @@ def cmd_clean(args) -> int:
     )
 
 
+def cmd_projects_webhook(args) -> int:
+    sync = get_projects_sync()
+    if not sync.enabled:
+        return structured_error("projects-webhook", "Projects sync disabled (missing token or config)")
+    body = _load_input_source(args.payload, "--payload")
+    try:
+        updated = sync.handle_webhook(body, args.signature, args.secret)
+    except ValueError as exc:
+        return structured_error("projects-webhook", str(exc))
+    message = "Task updated" if updated else "No matching task"
+    return structured_response(
+        "projects-webhook",
+        status="OK",
+        message=message,
+        payload={"updated": updated},
+    )
+
+
+def cmd_projects_webhook_serve(args) -> int:
+    sync = get_projects_sync()
+    if not sync.enabled:
+        return structured_error("projects-webhook-serve", "Projects sync disabled (missing token or config)")
+
+    secret = args.secret
+
+    class Handler(BaseHTTPRequestHandler):  # pragma: no cover - network entrypoint
+        def do_POST(self_inner):
+            length = int(self_inner.headers.get("Content-Length", "0"))
+            raw = self_inner.rfile.read(length)
+            signature = self_inner.headers.get("X-Hub-Signature-256")
+            try:
+                updated = sync.handle_webhook(raw.decode(), signature, secret)
+                status = 200
+                payload = {"updated": updated}
+            except ValueError as exc:
+                status = 400
+                payload = {"error": str(exc)}
+            except Exception as exc:  # pragma: no cover
+                status = 500
+                payload = {"error": str(exc)}
+            self_inner.send_response(status)
+            self_inner.send_header("Content-Type", "application/json")
+            self_inner.end_headers()
+            self_inner.wfile.write(json.dumps(payload).encode())
+
+        def log_message(self_inner, format, *args):
+            return
+
+    server = HTTPServer((args.host, args.port), Handler)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.server_close()
+    return 0
+
+
 def cmd_edit(args) -> int:
     manager = TaskManager()
     domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
@@ -4370,6 +4427,18 @@ def build_parser() -> argparse.ArgumentParser:
     blp.add_argument("--task", help="task_id по умолчанию для операций без поля task (используй '.'/last для .last)")
     add_context_args(blp)
     blp.set_defaults(func=cmd_bulk)
+
+    webhook = sub.add_parser("projects-webhook", help="Обработать payload GitHub Projects")
+    webhook.add_argument("--payload", default="-", help="JSON payload ('-' для STDIN)")
+    webhook.add_argument("--signature", help="Значение заголовка X-Hub-Signature-256")
+    webhook.add_argument("--secret", help="Shared secret для проверки подписи")
+    webhook.set_defaults(func=cmd_projects_webhook)
+
+    webhook_srv = sub.add_parser("projects-webhook-serve", help="HTTP-сервер для GitHub Projects webhook")
+    webhook_srv.add_argument("--host", default="0.0.0.0")
+    webhook_srv.add_argument("--port", type=int, default=8787)
+    webhook_srv.add_argument("--secret", help="Shared secret для проверки подписи")
+    webhook_srv.set_defaults(func=cmd_projects_webhook_serve)
 
     # checkpoint wizard
     ckp = sub.add_parser(

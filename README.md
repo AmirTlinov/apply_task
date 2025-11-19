@@ -172,9 +172,24 @@ apply_task tui
    ```
 2. Provide a token via `APPLY_TASK_GITHUB_TOKEN` (or `GITHUB_TOKEN`) with `project` scope.
 3. Any `apply_task` save automatically creates/updates the corresponding Project draft item, including status, percentage, domain text, and a Markdown checklist of subtasks.
+4. Optional reverse sync: expose the webhook endpoint and every board edit updates the `.task` metadata.
 
 If the config or token is missing, the sync layer silently disables itself. Existing tasks will update as soon as they are touched; for older ones just run `apply_task show TASK-ID` → edit/save to trigger a sync.
 
 Sample config lives in `apply_task_projects.example.yaml`.
+
+### Webhooks (remote → local)
+
+GitHub Projects v2 emits `projects_v2_item` webhooks whenever a field changes. Two helper commands let you apply those changes locally:
+
+```bash
+# One-shot handler (reads payload from file or STDIN)
+apply_task projects-webhook --payload payload.json --signature "$X_HUB_SIG" --secret "$HOOK_SECRET"
+
+# Long-running HTTP server (default 0.0.0.0:8787)
+apply_task projects-webhook-serve --secret "$HOOK_SECRET"
+```
+
+Point your GitHub webhook to the server URL, set the same secret, and only `projects_v2_item` events are required. When a single-select column such as “Status” is edited on the board, the corresponding `.task` front matter (`status`, `progress`, `domain`) is updated automatically. Signature validation follows `X-Hub-Signature-256` semantics; omit `--secret` to accept unsigned traffic in trusted networks.
 
 Stay in sync with `apply_task` for every change and let GitHub Projects v2 mirror the exact state of your backlog.

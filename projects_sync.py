@@ -1,7 +1,10 @@
+import hashlib
+import hmac
 import json
 import logging
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -167,11 +170,24 @@ class ProjectsSync:
                 "id": match.get("id"),
                 "typename": match.get("__typename"),
                 "options": {},
+                "reverse": {},
             }
             if match.get("__typename") == "ProjectV2SingleSelectField":
                 entry["options" ] = {opt.get("name"): opt.get("id") for opt in (match.get("options") or [])}
+                reverse = {}
+                for status, option_name in field_cfg.options.items():
+                    opt_id = entry["options"].get(option_name)
+                    if opt_id:
+                        reverse[opt_id] = status
+                entry["reverse"] = reverse
             result[alias] = entry
         return result
+
+    def _alias_by_field_id(self, field_id: str) -> Optional[str]:
+        for alias, info in self.project_fields.items():
+            if info.get("id") == field_id:
+                return alias
+        return None
 
     def _create_draft_issue(self, task, body: str) -> (Optional[str], Optional[str]):
         mutation = (
@@ -294,6 +310,100 @@ class ProjectsSync:
         if getattr(task, "risks", None):
             lines += ["", "## Risks", *[f"- {r}" for r in task.risks]]
         return "\n".join(lines).strip()
+
+    # ------------------------------------------------------------------
+    # Webhook handling
+    # ------------------------------------------------------------------
+
+    def handle_webhook(self, body: str, signature: Optional[str], secret: Optional[str]) -> Optional[str]:
+        if not self.enabled:
+            return None
+        payload_bytes = body.encode()
+        if secret:
+            if not signature or not signature.startswith("sha256="):
+                raise ValueError("signature missing for webhook")
+            expected = "sha256=" + hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(expected, signature):
+                raise ValueError("invalid signature")
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid payload: {exc}")
+
+        item = payload.get("projects_v2_item") or {}
+        item_id = item.get("node_id") or item.get("id")
+        if not item_id:
+            return None
+
+        try:
+            self._ensure_project_metadata()
+        except Exception as exc:  # pragma: no cover
+            logger.warning("projects metadata unavailable: %s", exc)
+            return None
+
+        if self.project_id and item.get("project_node_id") and item["project_node_id"] != self.project_id:
+            return None
+
+        change = (payload.get("changes") or {}).get("field_value")
+        if not change:
+            return None
+        field_id = change.get("field_node_id")
+        alias = self._alias_by_field_id(field_id) if field_id else None
+        if not alias:
+            return None
+
+        updates: Dict[str, Any] = {}
+        if alias == "status":
+            option_id = change.get("single_select_option_id") or (change.get("value") or {}).get("singleSelectOptionId")
+            status = None
+            if option_id:
+                status = (self.project_fields.get(alias) or {}).get("reverse", {}).get(option_id)
+            if status:
+                updates["status"] = status
+        elif alias == "progress":
+            number = change.get("number")
+            if number is None:
+                number = (change.get("value") or {}).get("number")
+            if number is not None:
+                updates["progress"] = int(number)
+        elif alias == "domain":
+            text = change.get("text") or (change.get("value") or {}).get("text")
+            if text:
+                updates["domain"] = text.strip()
+        if not updates:
+            return None
+        return self._update_local_metadata(item_id, updates)
+
+    def _update_local_metadata(self, item_id: str, updates: Dict[str, Any]) -> Optional[str]:
+        tasks_dir = Path(".tasks")
+        if not tasks_dir.exists():
+            return None
+        for file in tasks_dir.rglob("TASK-*.task"):
+            content = file.read_text(encoding="utf-8")
+            parts = content.split("---", 2)
+            if len(parts) < 3:
+                continue
+            metadata = yaml.safe_load(parts[1]) or {}
+            if metadata.get("project_item_id") != item_id:
+                continue
+            changed = False
+            if "status" in updates and metadata.get("status") != updates["status"]:
+                metadata["status"] = updates["status"]
+                changed = True
+            if "progress" in updates and metadata.get("progress") != updates["progress"]:
+                metadata["progress"] = updates["progress"]
+                changed = True
+            if "domain" in updates and updates["domain"]:
+                metadata["domain"] = updates["domain"]
+                changed = True
+            if changed:
+                metadata["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                header = yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip()
+                body = parts[2].lstrip("\n")
+                file.write_text(f"---\n{header}\n---\n{body}", encoding="utf-8")
+                return str(file)
+            return None
+        return None
 
 
 def get_projects_sync() -> ProjectsSync:
