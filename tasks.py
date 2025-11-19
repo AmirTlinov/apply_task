@@ -1745,6 +1745,41 @@ class TaskTrackerTUI:
             return str(detail.updated)
         return "—"
 
+    def _parse_task_datetime(self, value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z"):
+            try:
+                return datetime.strptime(value[:len(fmt)], fmt)
+            except ValueError:
+                continue
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    def _task_duration_value(self, detail: Optional[TaskDetail]) -> str:
+        if not detail:
+            return "-"
+        start = self._parse_task_datetime(detail.created)
+        end = self._parse_task_datetime(detail.updated) if detail.status == "OK" else None
+        if not start or not end:
+            return "-"
+        delta = end - start
+        total_minutes = int(delta.total_seconds() // 60)
+        days, rem_minutes = divmod(total_minutes, 60 * 24)
+        hours, minutes = divmod(rem_minutes, 60)
+        parts: List[str] = []
+        if days:
+            parts.append(f"{days}д")
+        if hours:
+            parts.append(f"{hours}ч")
+        if minutes:
+            parts.append(f"{minutes}м")
+        if not parts:
+            parts.append("<1ч")
+        return " ".join(parts)
+
     def _get_status_info(self, task: Task) -> Tuple[str, str, str]:
         """Возвращает символ статуса, CSS класс и короткое название"""
         status_char = task.status.value[0].lower()
@@ -2518,6 +2553,8 @@ class TaskTrackerTUI:
             if detail.status == "OK" and getattr(detail, "updated", None):
                 finish_time = str(detail.updated)
         parts.extend([("", "\n"), ("class:text.dim", " Время: "), ("class:text", f"{start_time} → {finish_time}")])
+        duration_value = self._task_duration_value(detail)
+        parts.extend([("", "\n"), ("class:text.dim", " Длительность: "), ("class:text", duration_value)])
         desc_header = " Описание: "
         available = max(10, width - len(desc_header))
         wrapped = textwrap.wrap(desc, available) if desc else []
