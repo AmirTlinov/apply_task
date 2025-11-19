@@ -1157,7 +1157,7 @@ class ColumnLayout:
     """Определяет, какие колонки отображать и их ширину"""
     min_width: int
     columns: List[str]
-    stat_w: int = 10
+    stat_w: int = 3
     prog_w: int = 7
     subt_w: int = 9
     ctx_w: int = 18
@@ -1200,7 +1200,7 @@ class ResponsiveLayoutManager:
         ColumnLayout(min_width=95, columns=['stat', 'title', 'progress', 'path']),
         ColumnLayout(min_width=75, columns=['stat', 'title', 'progress']),
         ColumnLayout(min_width=55, columns=['stat', 'title', 'progress']),
-        ColumnLayout(min_width=0, columns=['stat', 'progress', 'title'], stat_w=8, prog_w=6),
+        ColumnLayout(min_width=0, columns=['stat', 'progress', 'title'], stat_w=3, prog_w=6),
     ]
 
     @classmethod
@@ -1722,17 +1722,16 @@ class TaskTrackerTUI:
         return content[:width].ljust(width) if len(content) > width else content.ljust(width)
 
     def _get_status_info(self, task: Task) -> Tuple[str, str, str]:
-        """Возвращает текст статуса, CSS класс и короткое название"""
+        """Возвращает символ статуса, CSS класс и короткое название"""
         status_char = task.status.value[0].lower()
-        circle = '● '
         if status_char == 'ok':
-            return f'{circle}ГОТОВО', 'class:icon.check', '[OK]'
+            return '✓', 'class:icon.check', '[OK]'
         elif status_char == 'warn':
-            return f'{circle}В РАБОТЕ', 'class:icon.warn', '[~]'
+            return '●', 'class:icon.warn', '[~]'
         elif status_char == 'fail':
-            return f'{circle}БЛОКЕР', 'class:icon.fail', '[X]'
+            return '●', 'class:icon.fail', '[X]'
         else:
-            return '○ НЕИЗВ', 'class:status.unknown', '?'
+            return '○', 'class:status.unknown', '?'
 
     def _apply_scroll(self, text: str) -> str:
         """Применяет горизонтальную прокрутку к тексту"""
@@ -1768,7 +1767,7 @@ class TaskTrackerTUI:
         result.append(('class:border', '|'))
 
         column_labels = {
-            'stat': ('Статус', widths.get('stat', 8)),
+            'stat': ('Ст', widths.get('stat', 3)),
             'title': ('Задача', widths.get('title', 20)),
             'progress': ('Прогр', widths.get('progress', 6)),
             'subtasks': ('Подзадач', widths.get('subtasks', 9)),
@@ -1796,7 +1795,7 @@ class TaskTrackerTUI:
 
             if 'stat' in layout.columns:
                 if compact_status_mode:
-                    marker = '●'
+                    marker = status_text if status_class != 'class:icon.check' else '⚑'
                     if status_class == 'class:status.unknown':
                         marker = '○'
                     stat_width = widths['stat']
