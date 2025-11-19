@@ -1161,8 +1161,6 @@ class ColumnLayout:
     stat_w: int = 3
     prog_w: int = 7
     subt_w: int = 9
-    created_w: int = 10
-    done_w: int = 10
 
     def has_column(self, name: str) -> bool:
         return name in self.columns
@@ -1173,8 +1171,6 @@ class ColumnLayout:
             'stat': self.stat_w,
             'progress': self.prog_w,
             'subtasks': self.subt_w,
-            'created': self.created_w,
-            'done': self.done_w,
         }
 
         # Подсчёт фиксированных колонок
@@ -1195,13 +1191,13 @@ class ResponsiveLayoutManager:
     """Управляет адаптивными layout в зависимости от ширины терминала"""
 
     LAYOUTS = [
-        ColumnLayout(min_width=200, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
-        ColumnLayout(min_width=150, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
-        ColumnLayout(min_width=120, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
-        ColumnLayout(min_width=95, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
-        ColumnLayout(min_width=75, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
-        ColumnLayout(min_width=55, columns=['stat', 'title', 'progress', 'subtasks', 'created', 'done']),
-        ColumnLayout(min_width=0, columns=['stat', 'progress', 'title', 'subtasks', 'created', 'done'], stat_w=3, prog_w=6),
+        ColumnLayout(min_width=200, columns=['stat', 'title', 'progress', 'subtasks']),
+        ColumnLayout(min_width=150, columns=['stat', 'title', 'progress', 'subtasks']),
+        ColumnLayout(min_width=120, columns=['stat', 'title', 'progress', 'subtasks']),
+        ColumnLayout(min_width=95, columns=['stat', 'title', 'progress', 'subtasks']),
+        ColumnLayout(min_width=75, columns=['stat', 'title', 'progress', 'subtasks']),
+        ColumnLayout(min_width=55, columns=['stat', 'title', 'progress', 'subtasks']),
+        ColumnLayout(min_width=0, columns=['stat', 'progress', 'title', 'subtasks'], stat_w=3, prog_w=6),
     ]
 
     @classmethod
@@ -1794,12 +1790,6 @@ class TaskTrackerTUI:
                 else:
                     max_sub = max(max_sub, 1)
             widths['subtasks'] = max(max_sub, 3)
-        if layout.has_column('created'):
-            max_created = max((len(self._task_created_value(t)) for t in self.filtered_tasks), default=10)
-            widths['created'] = max(max_created, 10)
-        if layout.has_column('done'):
-            max_done = max((len(self._task_done_value(t)) for t in self.filtered_tasks), default=3)
-            widths['done'] = max(max_done, 3)
 
         # Построение header line
         header_parts = []
@@ -1817,16 +1807,12 @@ class TaskTrackerTUI:
             'title': ('Задача', widths.get('title', 20)),
             'progress': ('%', widths.get('progress', 4)),
             'subtasks': ('Σ', widths.get('subtasks', 3)),
-            'created': ('C', widths.get('created', 10)),
-            'done': ('✓', widths.get('done', 10)),
         }
 
         header_align = {
             'stat': 'center',
             'progress': 'center',
             'subtasks': 'center',
-            'created': 'center',
-            'done': 'center',
         }
         for col in layout.columns:
             if col in column_labels:
@@ -1872,14 +1858,6 @@ class TaskTrackerTUI:
                     subt_text = "—"
                 cell_data['subtasks'] = (self._format_cell(subt_text, widths['subtasks'], align='center'), 'class:text.dim')
 
-            if 'created' in layout.columns:
-                created_value = self._task_created_value(task)
-                cell_data['created'] = (self._format_cell(created_value, widths['created'], align='center'), 'class:text.dim')
-
-            if 'done' in layout.columns:
-                done_value = self._task_done_value(task)
-                style = 'class:icon.check' if done_value != "—" else 'class:text.dim'
-                cell_data['done'] = (self._format_cell(done_value, widths['done'], align='center'), style)
 
             # Рендер строки
             if idx == self.selected_index:
@@ -2532,6 +2510,14 @@ class TaskTrackerTUI:
                 current_len = len(label)
             parts.append((style, seg))
             current_len += len(seg)
+        start_time = "-"
+        finish_time = "-"
+        if detail:
+            if getattr(detail, "created", None):
+                start_time = str(detail.created)
+            if detail.status == "OK" and getattr(detail, "updated", None):
+                finish_time = str(detail.updated)
+        parts.extend([("", "\n"), ("class:text.dim", " Время: "), ("class:text", f"{start_time} → {finish_time}")])
         desc_header = " Описание: "
         available = max(10, width - len(desc_header))
         wrapped = textwrap.wrap(desc, available) if desc else []
