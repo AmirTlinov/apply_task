@@ -1161,7 +1161,7 @@ class ColumnLayout:
     prog_w: int = 7
     subt_w: int = 9
     ctx_w: int = 18
-    check_w: int = 8
+    check_w: int = 12
 
     def has_column(self, name: str) -> bool:
         return name in self.columns
@@ -1832,14 +1832,23 @@ class TaskTrackerTUI:
                     c_ready = target.criteria_confirmed
                     t_ready = target.tests_confirmed
                     b_ready = target.blockers_resolved
+                    if not target.criteria_confirmed:
+                        pending_text = " Крит"
+                    elif not target.tests_confirmed:
+                        pending_text = " Тест"
+                    elif not target.blockers_resolved:
+                        pending_text = " Блок"
+                    else:
+                        pending_text = " OK"
                 else:
                     c_ready = t_ready = b_ready = False
+                    pending_text = " —"
                 glyphs = [
                     '✓' if c_ready else '·',
                     '✓' if t_ready else '·',
                     '✓' if b_ready else '·',
                 ]
-                checks_text = '[' + ' '.join(glyphs) + ']'
+                checks_text = '[' + ' '.join(glyphs) + ']' + pending_text
                 style = 'class:icon.check' if (c_ready and t_ready and b_ready) else 'class:text.dim'
                 cell_data['checks'] = (self._format_cell(checks_text, widths['checks']), style)
 
