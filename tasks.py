@@ -1787,10 +1787,17 @@ class TaskTrackerTUI:
             'path': ('⇢', widths.get('path', 12)),
         }
 
+        header_align = {
+            'stat': 'center',
+            'progress': 'center',
+            'subtasks': 'center',
+            'path': 'center',
+        }
         for col in layout.columns:
             if col in column_labels:
                 label, width = column_labels[col]
-                result.append(('class:header', self._format_cell(label, width)))
+                align = header_align.get(col, 'left')
+                result.append(('class:header', self._format_cell(label, width, align=align)))
                 result.append(('class:border', '|'))
 
         result.append(('', '\n'))
