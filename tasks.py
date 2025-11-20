@@ -2351,6 +2351,10 @@ class TaskTrackerTUI:
                 label = f"{label}@{rate_reset}"
             if rate_wait:
                 label = f"{label} wait={int(rate_wait)}s"
+        if snapshot.get("project_id"):
+            label = f"{label} id={snapshot['project_id']}"
+        if snapshot.get("project_url"):
+            label = f"{label} ↗"
         if not enabled and reason:
             label = f"{label} ({reason})"
         return [(style, label, handler)]
