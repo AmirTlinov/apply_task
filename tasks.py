@@ -2336,6 +2336,7 @@ class TaskTrackerTUI:
     @staticmethod
     def _focusable_line_indices(lines: List[List[Tuple[str, str]]]) -> List[int]:
         focusable: List[int] = []
+        seen_groups: set[int] = set()
         for idx, line in enumerate(lines):
             texts = "".join(text for _, text in line).strip()
             if not texts:
@@ -2344,6 +2345,11 @@ class TaskTrackerTUI:
             border_chars = set("+-=─═│|")
             if texts and all(ch in border_chars for ch in texts):
                 continue
+            group = TaskTrackerTUI._extract_group(line)
+            if group is not None:
+                if group in seen_groups:
+                    continue
+                seen_groups.add(group)
             if any(
                 ('header' in (style or '')) or ('label' in (style or '')) or ('status.' in (style or ''))
                 for style, _ in line

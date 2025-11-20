@@ -191,6 +191,31 @@ def test_wrapped_bullet_entire_group_highlighted(tmp_path):
     assert selected_lines >= 2
 
 
+def test_wrapped_bullet_moves_in_single_step(tmp_path):
+    tui = build_tui(tmp_path)
+    tui.get_terminal_height = lambda: 14
+    tui.get_terminal_width = lambda: 46  # узко, будет перенос
+    st = SubTask(
+        False,
+        "Subtask",
+        success_criteria=[
+            "Очень длинная строка номер один без переноса в исходнике чтобы занять две строки",
+            "Вторая строка короче",
+        ],
+    )
+    tui.show_subtask_details(st, 0)
+    # курсор на первом элементе
+    start_cursor = tui.subtask_detail_cursor
+    lines = tui._formatted_lines(tui._subtask_detail_buffer)
+    start_group = TaskTrackerTUI._extract_group(lines[start_cursor])
+    tui.move_vertical_selection(1)  # один шаг вниз
+    lines_after = tui._formatted_lines(tui._subtask_detail_buffer)
+    cursor_after = tui.subtask_detail_cursor
+    group_after = TaskTrackerTUI._extract_group(lines_after[cursor_after])
+    # Должен перейти на следующий пункт, а не на вторую визуальную строку того же
+    assert start_group != group_after
+
+
 def test_single_subtask_view_highlight(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 12
