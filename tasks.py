@@ -2195,24 +2195,20 @@ class TaskTrackerTUI:
 
     @staticmethod
     def _formatted_lines(items: List[Tuple[str, str]]) -> List[List[Tuple[str, str]]]:
-        lines: List[List[Tuple[str, str]]] = []
-        current: List[Tuple[str, str]] = []
-
-        def push_line():
-            nonlocal current
-            lines.append(current or [('', '')])
-            current = []
-
+        """
+        Разворачивает FormattedText в массив строк без лишних пустых вставок.
+        Каждая строка — список (style, text) без символов перевода строки.
+        """
+        lines: List[List[Tuple[str, str]]] = [[]]
         for style, text in items:
             parts = text.split('\n')
             for idx, part in enumerate(parts):
                 if idx > 0:
-                    push_line()
-                current.append((style, part))
-            if text.endswith('\n'):
-                push_line()
-        if current:
-            push_line()
+                    lines.append([])
+                lines[-1].append((style, part))
+        # убираем возможную пустую финальную строку
+        if lines and all(not frag[1] for frag in lines[-1]):
+            lines.pop()
         return lines
 
     @staticmethod
