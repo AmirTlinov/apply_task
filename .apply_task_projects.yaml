@@ -15,5 +15,6 @@ project:
   enabled: true
   number: 4
   owner: AmirTlinov
+  runtime_disabled_reason: Could not resolve to a Repository with the name 'octo/demo'.
   type: user
   workers: 0
