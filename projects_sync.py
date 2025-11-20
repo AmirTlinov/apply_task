@@ -356,7 +356,13 @@ class ProjectsSync:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.config and self.config.enabled and self.token and not self._runtime_disabled_reason)
+        return bool(
+            self.config
+            and self.config.enabled
+            and self.token
+            and not self._runtime_disabled_reason
+            and not self.detect_error  # если git remote не определён — не дергаем сеть
+        )
 
     @property
     def runtime_disabled_reason(self) -> Optional[str]:
