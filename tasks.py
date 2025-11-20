@@ -2090,10 +2090,23 @@ class TaskTrackerTUI:
             if total <= 0:
                 return
             avail = max(5, self.get_terminal_height() - self.footer_height - 1)
-            # Двигаем курсор
             focusables = self._focusable_line_indices(self._formatted_lines(self._subtask_detail_buffer))
-            desired = self.subtask_detail_cursor + delta
-            self.subtask_detail_cursor = self._snap_cursor(desired, focusables)
+            if focusables:
+                current = self._snap_cursor(self.subtask_detail_cursor, focusables)
+                steps = abs(delta)
+                direction = 1 if delta > 0 else -1
+                for _ in range(steps):
+                    if direction > 0:
+                        next_candidates = [i for i in focusables if i > current]
+                        if not next_candidates:
+                            break
+                        current = next_candidates[0]
+                    else:
+                        prev_candidates = [i for i in reversed(focusables) if i < current]
+                        if not prev_candidates:
+                            break
+                        current = prev_candidates[0]
+                self.subtask_detail_cursor = current
             # Обеспечиваем видимость курсора
             indicator_top = 1 if self.subtask_detail_scroll > 0 else 0
             visible_content = max(1, avail - indicator_top)
@@ -2103,7 +2116,6 @@ class TaskTrackerTUI:
             elif self.subtask_detail_cursor >= self.subtask_detail_scroll + visible_content:
                 self.subtask_detail_scroll = self.subtask_detail_cursor - visible_content + 1
             self.subtask_detail_scroll = max(0, min(self.subtask_detail_scroll, max_offset))
-            # content_width равен ширине при последнем рендере; если нет — берем терминал
             term_width = self.get_terminal_width()
             content_width = max(40, term_width - 2)
             self._render_single_subtask_view(content_width)
@@ -2230,10 +2242,17 @@ class TaskTrackerTUI:
             texts = "".join(text for _, text in line).strip()
             if not texts:
                 continue
-            # пропускаем чистые бордеры/хедеры
-            if texts.startswith('+') or texts.startswith('|') and all(texts.startswith(tok) for tok in ['|', '-', '+']):
+            border_chars = set("+-─═│|")
+            if texts and all(ch in border_chars for ch in texts):
                 continue
-            if any('header' in (style or '') or 'label' in (style or '') for style, _ in line):
+            if any(
+                ('header' in (style or '')) or ('label' in (style or '')) or ('status.' in (style or ''))
+                for style, _ in line
+            ):
+                continue
+            if texts.startswith('↑') or texts.startswith('↓'):
+                continue
+            if texts.startswith('○'):
                 continue
             focusable.append(idx)
         return focusable

@@ -149,3 +149,20 @@ def test_single_subtask_view_highlight(tmp_path):
     tui.move_vertical_selection(1)
     styles_after = [style for style, _ in tui.single_subtask_view]
     assert any("selected" in (style or "") for style in styles_after)
+
+
+def test_single_subtask_view_skips_headers(tmp_path):
+    tui = build_tui(tmp_path)
+    tui.get_terminal_height = lambda: 20
+    st = SubTask(
+        False,
+        "Subtask",
+        success_criteria=["line a", "line b"],
+        tests=["line c"],
+        blockers=["line d"],
+    )
+    tui.show_subtask_details(st, 0)
+    focusables = tui._focusable_line_indices(tui._formatted_lines(tui._subtask_detail_buffer))
+    # Заголовки (например, строка со словом 'Критерии выполнения') не должны быть в фокусируемых
+    header_lines = [i for i, line in enumerate(tui._formatted_lines(tui._subtask_detail_buffer)) if any('status.' in (s or '') or 'header' in (s or '') for s, _ in line)]
+    assert all(h not in focusables for h in header_lines)
