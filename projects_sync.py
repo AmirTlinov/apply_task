@@ -514,8 +514,11 @@ class ProjectsSync:
                         retry = True
                         continue
                     if not_found:
+                        with _SCHEMA_CACHE_LOCK:
+                            _SCHEMA_CACHE.pop(cache_key, None)
+                        _persist_project_schema_cache()
                         self._disable_runtime("project not found and auto-create failed")
-                        cfg = self.config
+                        raise ProjectsSyncPermissionError("project not found")
                     raise
             repo_node = (data.get("repository") or {})
             node = repo_node.get("projectV2")
