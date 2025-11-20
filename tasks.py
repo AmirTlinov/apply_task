@@ -2330,7 +2330,7 @@ class TaskTrackerTUI:
 
         for idx, line in enumerate(visible_lines):
             global_idx = offset + idx
-            highlight = global_idx == self.subtask_detail_cursor
+            highlight = global_idx == self.subtask_detail_cursor and global_idx in focusables
             style_prefix = 'class:selected' if highlight else None
             for frag_style, frag_text in line:
                 style = self._merge_styles(style_prefix, frag_style) if highlight else frag_style
