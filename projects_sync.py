@@ -31,6 +31,7 @@ _SCHEMA_CACHE: Dict[Tuple[str, str, str, int], Dict[str, Any]] = {}
 _SCHEMA_CACHE_LOCK = Lock()
 SCHEMA_CACHE_PATH = PROJECT_ROOT / ".tasks" / ".projects_schema_cache.yaml"
 SCHEMA_CACHE_TTL = int(os.getenv("APPLY_TASK_SCHEMA_TTL_SECONDS", "86400"))
+DEFAULT_RESET_BEHAVIOR = os.getenv("APPLY_TASK_RATE_RESET", "auto")  # auto|hard
 
 
 def _token_digest(token: str) -> str:
@@ -52,6 +53,7 @@ def _load_project_schema_cache() -> Dict[Tuple[str, str, str, int], Dict[str, An
             if stored_digest and current_digest and stored_digest != current_digest:
                 SCHEMA_CACHE_PATH.unlink(missing_ok=True)
                 return {}
+            ttl_override = meta.get("ttl_seconds")
             for key_str, value in raw.items():
                 if key_str == "__meta__":
                     continue
@@ -64,7 +66,8 @@ def _load_project_schema_cache() -> Dict[Tuple[str, str, str, int], Dict[str, An
                     ts_val = float(ts) if ts is not None else None
                 except Exception:
                     ts_val = None
-                if ts_val and time.time() - ts_val > SCHEMA_CACHE_TTL:
+                ttl_limit = ttl_override if isinstance(ttl_override, (int, float)) else SCHEMA_CACHE_TTL
+                if ts_val and time.time() - ts_val > ttl_limit:
                     continue
                 with _SCHEMA_CACHE_LOCK:
                     _SCHEMA_CACHE[(type_, owner, repo, int(number))] = value
@@ -79,7 +82,11 @@ def _persist_project_schema_cache() -> None:
         if not _SCHEMA_CACHE:
             return
         data = {f"{k[0]}|{k[1]}|{k[2]}|{k[3]}": v for k, v in _SCHEMA_CACHE.items()}
-        data["__meta__"] = {"token": _token_digest(get_user_token() or ""), "ts": time.time()}
+        data["__meta__"] = {
+            "token": _token_digest(get_user_token() or ""),
+            "ts": time.time(),
+            "ttl_seconds": SCHEMA_CACHE_TTL,
+        }
     try:
         SCHEMA_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         SCHEMA_CACHE_PATH.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
@@ -211,6 +218,8 @@ class ProjectConfig:
     number: int
     repo: Optional[str] = None
     workers: Optional[int] = None
+    schema_ttl_seconds: Optional[int] = None
+    rate_reset_behavior: Optional[str] = None
     fields: Dict[str, FieldConfig] = field(default_factory=dict)
     enabled: bool = True
 
@@ -220,6 +229,10 @@ class ProjectsSync:
         self.config_path = config_path or CONFIG_PATH
         self.detect_error: Optional[str] = None
         self.config: Optional[ProjectConfig] = self._load_config()
+        if self.config and self.config.schema_ttl_seconds:
+            # применяем кастомный TTL из конфигурации
+            global SCHEMA_CACHE_TTL
+            SCHEMA_CACHE_TTL = int(self.config.schema_ttl_seconds)
         if self.config and (not self.config.number or self.config.number <= 0):
             if self._auto_set_project_number():
                 self.config = self._load_config()
@@ -397,6 +410,10 @@ class ProjectsSync:
         workers = project.get("workers")
         if isinstance(workers, str) and workers.isdigit():
             workers = int(workers)
+        ttl_override = project.get("schema_ttl_seconds")
+        if isinstance(ttl_override, str) and ttl_override.isdigit():
+            ttl_override = int(ttl_override)
+        reset_behavior = (project.get("rate_reset_behavior") or "").lower() or DEFAULT_RESET_BEHAVIOR
         try:
             owner, repo = detect_repo_slug()
             self.detect_error = None
@@ -411,7 +428,17 @@ class ProjectsSync:
             project["workers"] = 0
             _write_project_file({"project": project, "fields": data.get("fields") or {}}, self.config_path)
             workers = 0
-        return ProjectConfig(project_type=stored_type, owner=owner, number=number or 0, repo=repo, workers=workers if workers else None, fields=fields_cfg, enabled=bool(enabled))
+        return ProjectConfig(
+            project_type=stored_type,
+            owner=owner,
+            number=number or 0,
+            repo=repo,
+            workers=workers if workers else None,
+            schema_ttl_seconds=ttl_override if ttl_override else None,
+            rate_reset_behavior=reset_behavior,
+            fields=fields_cfg,
+            enabled=bool(enabled),
+        )
 
     def _graphql(self, query: str, variables: Dict[str, Any]) -> Dict[str, Any]:
         headers = {"Authorization": f"bearer {self.token}", "Accept": "application/vnd.github+json"}

@@ -2303,10 +2303,13 @@ class TaskTrackerTUI:
             label = f"{label} pull={lp} push={lpsh}"
         rate_rem = snapshot.get("rate_remaining")
         rate_reset = snapshot.get("rate_reset_human")
+        rate_wait = snapshot.get("rate_wait")
         if rate_rem is not None:
             label = f"{label} rlim={rate_rem}"
             if rate_reset:
                 label = f"{label}@{rate_reset}"
+            if rate_wait:
+                label = f"{label} wait={int(rate_wait)}s"
         if not enabled and reason:
             label = f"{label} ({reason})"
         return [(style, label, handler)]
@@ -3579,6 +3582,8 @@ class TaskTrackerTUI:
         rate_value = "н/д"
         if snapshot.get("rate_remaining") is not None:
             rate_value = f"{snapshot['rate_remaining']} @ {snapshot.get('rate_reset_human') or '—'}"
+            if snapshot.get("rate_wait"):
+                rate_value = f"{rate_value} wait={int(snapshot['rate_wait'])}s"
         options.append({
             "label": "Rate limit",
             "value": rate_value,
@@ -4925,6 +4930,7 @@ def _projects_status_payload() -> Dict[str, Any]:
         "rate_remaining": getattr(sync._rate_limiter, "last_remaining", None) if getattr(sync, "_rate_limiter", None) else None,
         "rate_reset": getattr(sync._rate_limiter, "last_reset_epoch", None) if getattr(sync, "_rate_limiter", None) else None,
         "rate_reset_human": datetime.fromtimestamp(getattr(sync._rate_limiter, "last_reset_epoch", 0), tz=timezone.utc).strftime("%H:%M:%S") if getattr(sync, "_rate_limiter", None) and getattr(sync._rate_limiter, "last_reset_epoch", None) else None,
+        "rate_wait": getattr(sync._rate_limiter, "last_wait", None) if getattr(sync, "_rate_limiter", None) else None,
         "target_label": target_label,
         "target_hint": "Определяется автоматически из git remote origin",
         "auto_sync": auto_sync,
