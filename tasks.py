@@ -2285,7 +2285,7 @@ class TaskTrackerTUI:
             w = wcwidth(ch) or 0
             if w < 0:
                 w = 0
-            if used + w > width:
+            if used + w > width and current:
                 lines.append(self._pad_display(current, width))
                 current = ch
                 used = w
@@ -2293,6 +2293,25 @@ class TaskTrackerTUI:
                 current += ch
                 used += w
         lines.append(self._pad_display(current, width))
+        return lines
+
+    def _wrap_with_prefix(self, text: str, width: int, prefix: str) -> List[str]:
+        """
+        Разбивает текст на строки, добавляя префикс только к первой строке,
+        последующие строки сдвигаются пробелами на ту же видимую ширину.
+        """
+        prefix_width = self._display_width(prefix)
+        inner_width = max(1, width - prefix_width)
+        segments = self._wrap_display(text, inner_width)
+        lines: List[str] = []
+        for idx, seg in enumerate(segments):
+            if idx == 0:
+                composed = prefix + seg
+            else:
+                composed = " " * prefix_width + seg
+            # защита от возможного выхода за ширину
+            composed = self._pad_display(composed, width)
+            lines.append(composed)
         return lines
 
     @staticmethod
@@ -3376,8 +3395,8 @@ class TaskTrackerTUI:
         if subtask.success_criteria:
             add_section_header("Критерии выполнения", subtask.criteria_confirmed)
             for i, criterion in enumerate(subtask.success_criteria, 1):
-                text = f"  {i}. {criterion}"
-                for ch in self._wrap_display(text, content_width - 2):
+                prefix = f"  {i}. "
+                for ch in self._wrap_with_prefix(criterion, content_width - 2, prefix):
                     lines.append(('class:border', '| '))
                     lines.append(('class:text', ch))
                     lines.append(('class:border', ' |\n'))
@@ -3386,8 +3405,8 @@ class TaskTrackerTUI:
         if subtask.tests:
             add_section_header("Тесты", subtask.tests_confirmed)
             for i, test in enumerate(subtask.tests, 1):
-                text = f"  {i}. {test}"
-                for ch in self._wrap_display(text, content_width - 2):
+                prefix = f"  {i}. "
+                for ch in self._wrap_with_prefix(test, content_width - 2, prefix):
                     lines.append(('class:border', '| '))
                     lines.append(('class:text', ch))
                     lines.append(('class:border', ' |\n'))
@@ -3396,8 +3415,8 @@ class TaskTrackerTUI:
         if subtask.blockers:
             add_section_header("Блокеры", subtask.blockers_resolved)
             for i, blocker in enumerate(subtask.blockers, 1):
-                text = f"  {i}. {blocker}"
-                for ch in self._wrap_display(text, content_width - 2):
+                prefix = f"  {i}. "
+                for ch in self._wrap_with_prefix(blocker, content_width - 2, prefix):
                     lines.append(('class:border', '| '))
                     lines.append(('class:text', ch))
                     lines.append(('class:border', ' |\n'))
@@ -3411,9 +3430,9 @@ class TaskTrackerTUI:
             lines.append(('class:label', self._pad_display(f"{label} — отметки:", content_width - 2)))
             lines.append(('class:border', ' |\n'))
             for entry in entries:
-                for ch in self._wrap_display(entry, content_width - 2):
+                for ch in self._wrap_with_prefix(entry, content_width - 2, "  - "):
                     lines.append(('class:border', '| '))
-                    lines.append(('class:text', self._pad_display(f"  - {ch.strip()}", content_width - 2)))
+                    lines.append(('class:text', ch))
                     lines.append(('class:border', ' |\n'))
 
         append_logs("Критерии", subtask.criteria_notes)
