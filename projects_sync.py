@@ -765,6 +765,10 @@ class ProjectsSync:
                     update_project_target(int(number))
                     self.config = self._load_config()
                     return True
+            # если проектов нет — попробуем создать
+            if self._auto_create_repo_project():
+                self.config = self._load_config()
+                return True
         # 2) fallback: user projects от имени viewer
         login = cfg.owner or self._fetch_viewer_login()
         if login:
@@ -857,8 +861,9 @@ class ProjectsSync:
                 except Exception:
                     pass
             if number:
-                update_project_target(int(number))
+                _update_project_entry(type="repository", owner=cfg.owner, repo=cfg.repo, number=int(number))
                 self.config = self._load_config()
+                self._clear_runtime_disable()
                 self._log_event("project_created", f"Created project {project_id or '?'} number={number} for repo {cfg.owner}/{cfg.repo}")
                 return True
         except Exception:
