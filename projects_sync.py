@@ -25,6 +25,7 @@ GRAPHQL_URL = "https://api.github.com/graphql"
 CONFIG_PATH = PROJECT_ROOT / ".apply_task_projects.yaml"
 logger = logging.getLogger("apply_task.projects")
 _PROJECTS_SYNC: Optional["ProjectsSync"] = None
+_PROJECTS_DISABLED_REASON: Optional[str] = None
 _REPO_SLUG_CACHE: Optional[Tuple[str, str]] = None
 _REPO_ROOT_CACHE: Optional[Path] = None
 _SCHEMA_CACHE: Dict[Tuple[str, str, str, int], Dict[str, Any]] = {}
@@ -267,6 +268,8 @@ class ProjectsSync:
         self.last_push: Optional[str] = None
         if self._runtime_disabled_reason:
             self._project_lookup_failed = True
+            global _PROJECTS_DISABLED_REASON
+            _PROJECTS_DISABLED_REASON = self._runtime_disabled_reason
         self._rate_limiter = _RATE_LIMITER
         self._project_lookup_failed: bool = False
         self._metadata_attempted: bool = False
@@ -363,6 +366,8 @@ class ProjectsSync:
             self._runtime_disabled_reason = reason
             logger.warning("Projects sync disabled: %s", reason)
         self._project_lookup_failed = True
+        global _PROJECTS_DISABLED_REASON
+        _PROJECTS_DISABLED_REASON = self._runtime_disabled_reason
         if persist and self.config_path.exists():
             data = _read_project_file(self.config_path)
             project = data.get("project") or {}
@@ -625,7 +630,6 @@ class ProjectsSync:
                             except Exception:
                                 pass
                             self._disable_runtime(f"Project {cfg.owner}/{cfg.repo}#{variables.get('number')} not found")
-                            self._project_lookup_failed = True
                         raise ProjectsSyncPermissionError("project not found")
                 raise
             repo_node = (data.get("repository") or {})
@@ -1274,6 +1278,9 @@ def get_projects_sync() -> ProjectsSync:
     global _PROJECTS_SYNC
     if _PROJECTS_SYNC is None:
         _PROJECTS_SYNC = ProjectsSync()
+    elif _PROJECTS_DISABLED_REASON:
+        _PROJECTS_SYNC._runtime_disabled_reason = _PROJECTS_DISABLED_REASON
+        _PROJECTS_SYNC._project_lookup_failed = True
     return _PROJECTS_SYNC
 
 

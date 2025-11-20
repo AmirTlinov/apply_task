@@ -35,6 +35,7 @@ from projects_sync import (
     update_projects_enabled,
     update_project_target,
     update_project_workers,
+    detect_repo_slug,
 )
 from config import get_user_token, set_user_token
 
@@ -1768,6 +1769,37 @@ class TaskTrackerTUI:
         except (AttributeError, ValueError, OSError):
             return 40
 
+    def _bootstrap_git(self, remote_url: str) -> None:
+        """Инициализация git + origin + первый push (best effort)."""
+        remote_url = remote_url.strip()
+        repo_root = Path(".").resolve()
+        try:
+            if not (repo_root / ".git").exists():
+                subprocess.run(["git", "init"], cwd=repo_root, check=True, capture_output=True)
+            # set default branch main
+            subprocess.run(["git", "checkout", "-B", "main"], cwd=repo_root, check=True, capture_output=True)
+            # add remote origin (replace if exists)
+            existing = subprocess.run(["git", "remote", "get-url", "origin"], cwd=repo_root, capture_output=True, text=True)
+            if existing.returncode == 0:
+                subprocess.run(["git", "remote", "remove", "origin"], cwd=repo_root, check=True, capture_output=True)
+            subprocess.run(["git", "remote", "add", "origin", remote_url], cwd=repo_root, check=True, capture_output=True)
+            # add all files
+            subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True, capture_output=True)
+            # create commit if none
+            has_commits = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_root, capture_output=True)
+            if has_commits.returncode != 0:
+                subprocess.run(["git", "commit", "-m", "chore: bootstrap repo"], cwd=repo_root, check=True, capture_output=True)
+            # push
+            push = subprocess.run(["git", "push", "-u", "origin", "main"], cwd=repo_root, capture_output=True, text=True)
+            if push.returncode == 0:
+                self.set_status_message("Git пуш завершён", ttl=4)
+            else:
+                self.set_status_message(f"Push не удался: {push.stderr[:80]}", ttl=6)
+        except subprocess.CalledProcessError as exc:
+            self.set_status_message(f"Git bootstrap ошибка: {exc.stderr.decode()[:80] if exc.stderr else exc}", ttl=6)
+        except Exception as exc:  # pragma: no cover - best effort
+            self.set_status_message(f"Git bootstrap не удался: {exc}", ttl=6)
+
     def force_render(self) -> None:
         app = getattr(self, "app", None)
         if app:
@@ -3166,6 +3198,10 @@ class TaskTrackerTUI:
             if self.settings_mode:
                 self.force_render()
             return
+        if context == 'bootstrap_remote':
+            self._bootstrap_git(new_value)
+            self.cancel_edit()
+            return
 
         if not new_value:
             self.cancel_edit()
@@ -3561,6 +3597,14 @@ class TaskTrackerTUI:
             "action": None,
         })
 
+        if not snapshot['config_exists'] or snapshot['status_reason'].lower().startswith("нет конфигурации") or "remote origin" in snapshot['status_reason']:
+            options.append({
+                "label": "Инициализировать git + origin",
+                "value": "Создать репо и push",
+                "hint": "Enter — ввести URL (https://github.com/owner/repo.git), будет git init/add/push",
+                "action": "bootstrap_git",
+            })
+
         options.append({
             "label": "Project URL",
             "value": snapshot.get("project_url") or "недоступно",
@@ -3695,6 +3739,9 @@ class TaskTrackerTUI:
             current = snapshot.get("workers")
             self.start_editing('project_workers', str(current) if current else "0", None)
             self.edit_buffer.cursor_position = len(self.edit_buffer.text)
+        elif action == "bootstrap_git":
+            self.start_editing('bootstrap_remote', "https://github.com/owner/repo.git", None)
+            self.edit_buffer.cursor_position = 0
         elif action == "refresh_metadata":
             reload_projects_sync()
             self.set_status_message("Кеш Projects обновлён")
