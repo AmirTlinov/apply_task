@@ -3650,6 +3650,12 @@ class TaskTrackerTUI:
             "hint": "GitHub remaining/reset (обновляется после запросов)",
             "action": None,
         })
+        options.append({
+            "label": "Git remote",
+            "value": snapshot.get("origin_url") or "не задан",
+            "hint": "Используется для автоопределения Projects; меняется через git remote set-url origin",
+            "action": None,
+        })
 
         options.append({
             "label": "Перечитать поля",
@@ -3680,6 +3686,7 @@ class TaskTrackerTUI:
             "project_id": status.get("project_id"),
             "config_exists": cfg_exists,
             "config_enabled": status["auto_sync"],
+            "runtime_enabled": status.get("runtime_enabled"),
             "token_saved": status["token_saved"],
             "token_preview": status["token_preview"],
             "token_env": status["token_env"],
@@ -3690,6 +3697,10 @@ class TaskTrackerTUI:
             "last_pull": status.get("last_pull"),
             "last_push": status.get("last_push"),
             "workers": status.get("workers"),
+            "rate_remaining": status.get("rate_remaining"),
+            "rate_reset_human": status.get("rate_reset_human"),
+            "rate_wait": status.get("rate_wait"),
+            "origin_url": self._origin_url(),
         }
 
     def _open_project_url(self) -> None:
@@ -3703,6 +3714,19 @@ class TaskTrackerTUI:
                 self.set_status_message(f"Не удалось открыть ссылку: {exc}", ttl=4)
         else:
             self.set_status_message("Project URL недоступен")
+
+    @staticmethod
+    def _origin_url() -> str:
+        try:
+            result = subprocess.run(
+                ["git", "config", "--get", "remote.origin.url"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except Exception:
+            return ""
+        return result.stdout.strip()
 
     def _set_project_number(self, number_value: int) -> None:
         update_project_target(int(number_value))
