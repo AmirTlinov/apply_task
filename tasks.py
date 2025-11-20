@@ -3352,6 +3352,11 @@ class TaskTrackerTUI:
 
         lines: List[Tuple[str, str]] = []
         group_id = 0  # логический идентификатор для многострочных элементов
+
+        def next_group() -> int:
+            nonlocal group_id
+            group_id += 1
+            return group_id
         lines.append(('class:border', '+' + '='*content_width + '+\n'))
 
         # Header с кнопкой назад
@@ -3428,10 +3433,10 @@ class TaskTrackerTUI:
             add_section_header("Критерии выполнения", subtask.criteria_confirmed)
             for i, criterion in enumerate(subtask.success_criteria, 1):
                 prefix = f"  {i}. "
-                group_id += 1
+                gid = next_group()
                 for ch in self._wrap_with_prefix(criterion, content_width - 2, prefix):
                     lines.append(('class:border', '| '))
-                    lines.append((self._item_style(group_id), ch))
+                    lines.append((self._item_style(gid), ch))
                     lines.append(('class:border', ' |\n'))
 
         # Тесты
@@ -3439,10 +3444,10 @@ class TaskTrackerTUI:
             add_section_header("Тесты", subtask.tests_confirmed)
             for i, test in enumerate(subtask.tests, 1):
                 prefix = f"  {i}. "
-                group_id += 1
+                gid = next_group()
                 for ch in self._wrap_with_prefix(test, content_width - 2, prefix):
                     lines.append(('class:border', '| '))
-                    lines.append((self._item_style(group_id), ch))
+                    lines.append((self._item_style(gid), ch))
                     lines.append(('class:border', ' |\n'))
 
         # Блокеры
@@ -3450,10 +3455,10 @@ class TaskTrackerTUI:
             add_section_header("Блокеры", subtask.blockers_resolved)
             for i, blocker in enumerate(subtask.blockers, 1):
                 prefix = f"  {i}. "
-                group_id += 1
+                gid = next_group()
                 for ch in self._wrap_with_prefix(blocker, content_width - 2, prefix):
                     lines.append(('class:border', '| '))
-                    lines.append((self._item_style(group_id), ch))
+                    lines.append((self._item_style(gid), ch))
                     lines.append(('class:border', ' |\n'))
 
         # Evidence logs
@@ -3465,13 +3470,11 @@ class TaskTrackerTUI:
             lines.append(('class:label', self._pad_display(f"{label} — отметки:", content_width - 2)))
             lines.append(('class:border', ' |\n'))
             for entry in entries:
-                group_id_nonlocal = len(append_logs._groups) + 1
-                append_logs._groups.append(group_id_nonlocal)
+                gid = next_group()
                 for ch in self._wrap_with_prefix(entry, content_width - 2, "  - "):
                     lines.append(('class:border', '| '))
-                    lines.append((self._item_style(group_id_nonlocal), ch))
+                    lines.append((self._item_style(gid), ch))
                     lines.append(('class:border', ' |\n'))
-        append_logs._groups = []  # type: ignore
         append_logs("Критерии", subtask.criteria_notes)
         append_logs("Тесты", subtask.tests_notes)
         append_logs("Блокеры", subtask.blockers_notes)
