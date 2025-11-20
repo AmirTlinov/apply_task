@@ -2089,8 +2089,11 @@ class TaskTrackerTUI:
             total = self._subtask_detail_total_lines or 0
             if total <= 0:
                 return
+            lines = self._formatted_lines(self._subtask_detail_buffer)
+            pinned = min(len(lines), getattr(self, "_subtask_header_lines_count", 0))
             avail = max(5, self.get_terminal_height() - self.footer_height - 1)
-            focusables = self._focusable_line_indices(self._formatted_lines(self._subtask_detail_buffer))
+            scroll_area = max(1, avail - pinned)
+            focusables = self._focusable_line_indices(lines)
             if focusables:
                 current = self._snap_cursor(self.subtask_detail_cursor, focusables)
                 steps = abs(delta)
@@ -2107,14 +2110,16 @@ class TaskTrackerTUI:
                             break
                         current = prev_candidates[0]
                 self.subtask_detail_cursor = current
-            # Обеспечиваем видимость курсора
+            # Обеспечиваем видимость курсора в зоне скролла, не скрывая шапку
             indicator_top = 1 if self.subtask_detail_scroll > 0 else 0
-            visible_content = max(1, avail - indicator_top)
-            max_offset = max(0, total - visible_content)
-            if self.subtask_detail_cursor < self.subtask_detail_scroll:
-                self.subtask_detail_scroll = self.subtask_detail_cursor
-            elif self.subtask_detail_cursor >= self.subtask_detail_scroll + visible_content:
-                self.subtask_detail_scroll = self.subtask_detail_cursor - visible_content + 1
+            visible_content = max(1, scroll_area - indicator_top)
+            scrollable_total = max(0, total - pinned)
+            max_offset = max(0, scrollable_total - visible_content)
+            cursor_rel = max(0, self.subtask_detail_cursor - pinned)
+            if cursor_rel < self.subtask_detail_scroll:
+                self.subtask_detail_scroll = cursor_rel
+            elif cursor_rel >= self.subtask_detail_scroll + visible_content:
+                self.subtask_detail_scroll = cursor_rel - visible_content + 1
             self.subtask_detail_scroll = max(0, min(self.subtask_detail_scroll, max_offset))
             term_width = self.get_terminal_width()
             content_width = max(40, term_width - 2)
@@ -2302,26 +2307,44 @@ class TaskTrackerTUI:
             return
         lines = self._formatted_lines(self._subtask_detail_buffer)
         total = len(lines)
+        pinned = min(total, getattr(self, "_subtask_header_lines_count", 0))
+        scrollable = lines[pinned:]
         focusables = self._focusable_line_indices(lines)
         if total:
             self.subtask_detail_cursor = self._snap_cursor(self.subtask_detail_cursor, focusables)
         avail = max(5, self.get_terminal_height() - self.footer_height - 1)
-        offset = max(0, min(self.subtask_detail_scroll, max(0, total - 1)))
+        scroll_area = max(1, avail - pinned)
+        max_raw_offset = max(0, len(scrollable) - 1)
+        offset = max(0, min(self.subtask_detail_scroll, max_raw_offset))
 
         indicator_top = 1 if offset > 0 else 0
-        visible_content = max(1, avail - indicator_top)
-        max_offset = max(0, total - visible_content)
+        visible_content = max(1, scroll_area - indicator_top)
+        max_offset = max(0, len(scrollable) - visible_content)
         offset = max(0, min(offset, max_offset))
         indicator_top = 1 if offset > 0 else 0
-        indicator_bottom = 1 if offset + visible_content < total else 0
-        visible_content = max(1, avail - indicator_top - indicator_bottom)
-        max_offset = max(0, total - visible_content)
+        indicator_bottom = 1 if offset + visible_content < len(scrollable) else 0
+        visible_content = max(1, scroll_area - indicator_top - indicator_bottom)
+        max_offset = max(0, len(scrollable) - visible_content)
         offset = max(0, min(offset, max_offset))
-        remaining_below = max(0, total - (offset + visible_content))
+        remaining_below = max(0, len(scrollable) - (offset + visible_content))
 
-        visible_lines = lines[offset : offset + visible_content]
+        visible_lines = scrollable[offset : offset + visible_content]
 
         rendered: List[Tuple[str, str]] = []
+        # закреплённая шапка всегда сверху
+        for idx, line in enumerate(lines[:pinned]):
+            global_idx = idx
+            highlight = global_idx == self.subtask_detail_cursor and global_idx in focusables
+            style_prefix = 'class:selected' if highlight else None
+            for frag_style, frag_text in line:
+                style = self._merge_styles(style_prefix, frag_style) if highlight else frag_style
+                rendered.append((style, frag_text))
+            if pinned and idx < pinned - 1:
+                rendered.append(('', '\n'))
+
+        if pinned and (indicator_top or visible_lines):
+            rendered.append(('', '\n'))
+
         if indicator_top:
             rendered.extend([
                 ('class:border', '| '),
@@ -2330,7 +2353,7 @@ class TaskTrackerTUI:
             ])
 
         for idx, line in enumerate(visible_lines):
-            global_idx = offset + idx
+            global_idx = pinned + offset + idx
             highlight = global_idx == self.subtask_detail_cursor and global_idx in focusables
             style_prefix = 'class:selected' if highlight else None
             for frag_style, frag_text in line:
@@ -3226,6 +3249,9 @@ class TaskTrackerTUI:
         lines.append(('class:header', header_label[:remaining].ljust(remaining)))
         lines.append(('class:border', ' |\n'))
         lines.append(('class:border', '+' + '-'*content_width + '+\n'))
+        # фиксируем количество строк шапки для закрепления при скролле (оставляем заголовок и нижнюю границу)
+        header_lines = self._formatted_lines(lines)
+        self._subtask_header_lines_count = max(1, len(header_lines) - 1)
 
         # Title
         text = subtask.title

@@ -182,3 +182,21 @@ def test_border_lines_not_focusable(tmp_path):
     assert 0 not in focusables
     assert 2 not in focusables
     assert 1 in focusables  # строка с текстом остаётся кликабельной
+
+
+def test_single_subtask_header_sticks_on_scroll(tmp_path):
+    tui = build_tui(tmp_path)
+    tui.get_terminal_height = lambda: 8  # маленькое окно, чтобы принудить скролл
+    st = SubTask(
+        False,
+        "Subtask title fits here",
+        success_criteria=[f"Criterion {i}" for i in range(12)],
+    )
+    tui.show_subtask_details(st, 0)
+    tui.subtask_detail_scroll = 5
+    tui._render_single_subtask_view(max(40, tui.get_terminal_width() - 2))
+    rendered_lines = "".join(text for _, text in tui.single_subtask_view).split("\n")
+
+    visible_nonempty = [ln for ln in rendered_lines if ln.strip()]
+    # Первые строки вида должны содержать шапку SUBTASK 1, даже после скролла
+    assert any("SUBTASK 1" in ln for ln in visible_nonempty[:3])
