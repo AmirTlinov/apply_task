@@ -376,6 +376,18 @@ class ProjectsSync:
             data["project"] = project
             _write_project_file(data, self.config_path)
 
+    def _clear_runtime_disable(self) -> None:
+        self._runtime_disabled_reason = None
+        self._project_lookup_failed = False
+        global _PROJECTS_DISABLED_REASON
+        _PROJECTS_DISABLED_REASON = None
+        data = _read_project_file(self.config_path)
+        if data:
+            project = data.get("project") or {}
+            if project.pop("runtime_disabled_reason", None) is not None:
+                data["project"] = project
+                _write_project_file(data, self.config_path)
+
     def sync_task(self, task) -> bool:
         if not self.enabled:
             return False
@@ -604,7 +616,8 @@ class ProjectsSync:
             self.project_id = cached.get("id")
             self.project_fields = self._map_fields(cached.get("fields") or [])
             if self.project_id:
-                self._clear_runtime_disable()
+                self._runtime_disabled_reason = None
+                self._project_lookup_failed = False
                 return
         retry = False
         if cfg.project_type == "repository":
