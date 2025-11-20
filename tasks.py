@@ -2325,7 +2325,7 @@ class TaskTrackerTUI:
         for style, _ in line:
             if not style:
                 continue
-            m = re.search(r"item-(\\d+)", style)
+            m = re.search(r"item-(\d+)", style)
             if m:
                 try:
                     return int(m.group(1))

@@ -173,6 +173,24 @@ def test_single_subtask_long_lines_do_not_wrap(tmp_path):
     assert any("selected" in (s or "") for s, _ in tui.single_subtask_view)
 
 
+def test_wrapped_bullet_entire_group_highlighted(tmp_path):
+    tui = build_tui(tmp_path)
+    tui.get_terminal_height = lambda: 12
+    tui.get_terminal_width = lambda: 50  # заставим перенос
+    st = SubTask(
+        False,
+        "Subtask",
+        success_criteria=["Очень длинная строка без переноса чтобы занять две строки подряд и проверить выделение"],
+    )
+    tui.show_subtask_details(st, 0)
+    # перейти к следующей фокусируемой строке (вероятно вторая часть переноса)
+    tui.move_vertical_selection(1)
+    styles = [style for style, _ in tui.single_subtask_view]
+    selected_lines = sum(1 for style in styles if style and "selected" in style)
+    # обе части пункта должны подсвечиваться
+    assert selected_lines >= 2
+
+
 def test_single_subtask_view_highlight(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 12
