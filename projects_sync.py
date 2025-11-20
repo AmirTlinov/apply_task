@@ -266,6 +266,7 @@ class ProjectsSync:
         self._runtime_disabled_reason: Optional[str] = None
         self._rate_limiter = _RATE_LIMITER
         self._project_lookup_failed: bool = False
+        self._metadata_attempted: bool = False
 
     # ------------------------------------------------------------------
     # Helpers for conflict detection / reporting
@@ -534,6 +535,8 @@ class ProjectsSync:
     def _ensure_project_metadata(self) -> None:
         if self._runtime_disabled_reason:
             raise ProjectsSyncPermissionError(self._runtime_disabled_reason)
+        if self._project_lookup_failed:
+            raise ProjectsSyncPermissionError(self._runtime_disabled_reason or "project lookup failed")
         if self.project_id:
             return
         cfg = self.config
@@ -543,10 +546,12 @@ class ProjectsSync:
             # попробуем определить/создать, иначе отключаем синхронизацию без спама
             if not self._auto_set_project_number() and not self._auto_create_repo_project():
                 self._disable_runtime("Project number not set and auto-detect failed")
+                self._project_lookup_failed = True
                 raise ProjectsSyncPermissionError("project number missing")
             cfg = self.config
             if not cfg or cfg.number <= 0:
                 self._disable_runtime("Project number still missing after auto-detect")
+                self._project_lookup_failed = True
                 raise ProjectsSyncPermissionError("project number missing")
         cache_key = (cfg.project_type, cfg.owner, cfg.repo or "", int(cfg.number or 0))
         cached_cache = _load_project_schema_cache()
@@ -596,7 +601,7 @@ class ProjectsSync:
                             self._disable_runtime(f"Project {cfg.owner}/{cfg.repo}#{variables.get('number')} not found")
                             self._project_lookup_failed = True
                         raise ProjectsSyncPermissionError("project not found")
-                    raise
+                raise
             repo_node = (data.get("repository") or {})
             node = repo_node.get("projectV2")
         elif cfg.project_type == "organization":
