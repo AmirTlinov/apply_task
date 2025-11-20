@@ -1999,19 +1999,15 @@ class TaskTrackerTUI:
             if shift:
                 self.horizontal_offset = min(200, self.horizontal_offset + horizontal_step)
             else:
-                if self.detail_mode:
-                    self.move_vertical_selection(vertical_step)
-                else:
-                    self._scroll_task_view(vertical_step)
+                # Скролл колёсиком двигает выделение по одной строке
+                self.move_vertical_selection(vertical_step)
             return None
         if mouse_event.event_type == MouseEventType.SCROLL_UP:
             if shift:
                 self.horizontal_offset = max(0, self.horizontal_offset - horizontal_step)
             else:
-                if self.detail_mode:
-                    self.move_vertical_selection(-vertical_step)
-                else:
-                    self._scroll_task_view(-vertical_step)
+                # Скролл колёсиком двигает выделение по одной строке
+                self.move_vertical_selection(-vertical_step)
             return None
         if mouse_event.event_type == MouseEventType.MOUSE_UP and mouse_event.button == MouseButton.LEFT:
             if self.detail_mode and self.current_task_detail and not getattr(self, "single_subtask_view", None):
