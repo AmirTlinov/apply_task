@@ -1532,6 +1532,7 @@ class TaskTrackerTUI:
         self._last_click_time: float = 0.0
         self._last_subtask_click_index: Optional[int] = None
         self._last_subtask_click_time: float = 0.0
+        self._last_rate_wait: float = 0.0
         self.clipboard = self._build_clipboard()
         self.spinner_active = False
         self.spinner_message = ""
@@ -2120,6 +2121,14 @@ class TaskTrackerTUI:
         with self._spinner("Обновление задач"):
             domain_path = derive_domain_explicit(self.domain_filter, self.phase_filter, self.component_filter)
             details = self.manager.list_tasks(domain_path, skip_sync=skip_sync)
+        # показываем плашку при достижении rate-limit
+        snapshot = _projects_status_payload()
+        wait = snapshot.get("rate_wait") or 0
+        remaining = snapshot.get("rate_remaining")
+        if wait > 0 and wait != self._last_rate_wait:
+            message = f"Rate limit: осталось {remaining if remaining is not None else '?'}; ждать {int(wait)}с"
+            self.set_status_message(message, ttl=5)
+            self._last_rate_wait = wait
         if self.phase_filter:
             details = [d for d in details if d.phase == self.phase_filter]
         if self.component_filter:

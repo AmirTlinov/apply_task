@@ -32,6 +32,7 @@ _SCHEMA_CACHE_LOCK = Lock()
 SCHEMA_CACHE_PATH = PROJECT_ROOT / ".tasks" / ".projects_schema_cache.yaml"
 SCHEMA_CACHE_TTL = int(os.getenv("APPLY_TASK_SCHEMA_TTL_SECONDS", "86400"))
 DEFAULT_RESET_BEHAVIOR = os.getenv("APPLY_TASK_RATE_RESET", "auto")  # auto|hard
+_RATE_RESET_MODE = DEFAULT_RESET_BEHAVIOR
 
 
 def _token_digest(token: str) -> str:
@@ -136,10 +137,15 @@ class RateLimiter:
                                 if reset_ts > now:
                                     self._next_ts = max(self._next_ts, reset_ts)
                                     self.last_reset_epoch = reset_ts
+                                    if _RATE_RESET_MODE == "hard":
+                                        self._next_ts = max(self._next_ts, reset_ts + 5)
                             except Exception:
                                 self._next_ts = max(self._next_ts, now + 60)
                         else:
-                            self._next_ts = max(self._next_ts, now + 60)
+                            if _RATE_RESET_MODE == "hard":
+                                self._next_ts = max(self._next_ts, now + 300)
+                            else:
+                                self._next_ts = max(self._next_ts, now + 60)
                 except Exception:
                     pass
             if reset and self.last_reset_epoch is None:
@@ -148,7 +154,8 @@ class RateLimiter:
                 except Exception:
                     pass
             if errors and ProjectsSync._looks_like_rate_limit(errors):
-                self._next_ts = max(self._next_ts, now + 60)
+                hard_extra = 120 if _RATE_RESET_MODE == "hard" else 60
+                self._next_ts = max(self._next_ts, now + hard_extra)
             self.last_wait = max(0.0, self._next_ts - now)
 
 
@@ -233,6 +240,9 @@ class ProjectsSync:
             # применяем кастомный TTL из конфигурации
             global SCHEMA_CACHE_TTL
             SCHEMA_CACHE_TTL = int(self.config.schema_ttl_seconds)
+        if self.config and self.config.rate_reset_behavior:
+            global _RATE_RESET_MODE
+            _RATE_RESET_MODE = self.config.rate_reset_behavior.lower()
         if self.config and (not self.config.number or self.config.number <= 0):
             if self._auto_set_project_number():
                 self.config = self._load_config()
