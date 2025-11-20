@@ -284,7 +284,25 @@ class ProjectsSync:
 
     def _graphql(self, query: str, variables: Dict[str, Any]) -> Dict[str, Any]:
         headers = {"Authorization": f"bearer {self.token}", "Accept": "application/vnd.github+json"}
-        response = self.session.post(GRAPHQL_URL, json={"query": query, "variables": variables}, headers=headers, timeout=30)
+        attempt = 0
+        delay = 1.0
+        while True:
+            attempt += 1
+            try:
+                response = self.session.post(GRAPHQL_URL, json={"query": query, "variables": variables}, headers=headers, timeout=30)
+            except requests.RequestException as exc:
+                if attempt >= 3:
+                    raise RuntimeError(f"GitHub API network error: {exc}") from exc
+                jitter = random.uniform(0, delay)
+                time.sleep(delay + jitter)
+                delay *= 2
+                continue
+            if response.status_code >= 500 and attempt < 3:
+                jitter = random.uniform(0, delay)
+                time.sleep(delay + jitter)
+                delay *= 2
+                continue
+            break
         if response.status_code in (401, 403):
             self._disable_runtime(f"GitHub token lacks Projects access (HTTP {response.status_code})")
             raise ProjectsSyncPermissionError("projects sync disabled due to insufficient permissions")
