@@ -250,7 +250,7 @@ def test_maybe_reload_works_in_detail_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(tui, "load_tasks", fake_load)
     tui.maybe_reload()
     assert called.get("load")
-    assert "Автообновление" in tui.status_message
+    assert "↻ CLI" in tui.status_message
 
 def test_single_subtask_view_highlight(tmp_path):
     tui = build_tui(tmp_path)

@@ -210,6 +210,7 @@ def main():
         'create',
         'guided',
         'subtask',
+        'sub',
         'clean',
         'template',
         'ok',
@@ -253,6 +254,8 @@ def main():
 
     elif cmd == 'subtask':
         return run_tasks_py(['subtask'] + args, verbose=verbose)
+    elif cmd == 'sub':
+        return run_tasks_py(['sub'] + args, verbose=verbose)
 
     elif cmd == 'clean':
         return run_tasks_py(['clean'] + args, verbose=verbose)

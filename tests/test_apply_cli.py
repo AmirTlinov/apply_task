@@ -4,6 +4,7 @@ import importlib.util
 import shutil
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 import unittest
 
@@ -602,6 +603,59 @@ class ApplyTaskResolveTests(unittest.TestCase):
         self.assertGreaterEqual(len(body["payload"]["operations"]), 3)
         meta, _ = self._read_task_metadata(task_id)
         self.assertGreaterEqual(meta["progress"], 16)
+
+
+@pytest.mark.usefixtures("isolated_tasks")
+def test_sub_ok_alias():
+    task_id = "TASK-ALIAS"
+    now = datetime.now(timezone.utc).isoformat()
+    task_file = _task_file(task_id)
+    task_file.parent.mkdir(parents=True, exist_ok=True)
+    task_file.write_text(
+        "\n".join(
+            [
+                "---",
+                f"id: {task_id}",
+                "title: Alias test",
+                "status: FAIL",
+                "priority: MEDIUM",
+                f"created: {now}",
+                f"updated: {now}",
+                "assignee: ai",
+                "---",
+                "## Подзадачи",
+                "- [ ] Demo subtask",
+                "  - Критерии: crit1",
+                "  - Тесты: test1",
+                "  - Блокеры: block1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    res = _run_apply_cmd(
+        [
+            "sub",
+            "ok",
+            task_id,
+            "0",
+            "--criteria-note",
+            "cli criteria",
+            "--tests-note",
+            "cli tests",
+            "--blockers-note",
+            "cli blockers",
+        ]
+    )
+    assert res.returncode == 0, res.stderr
+    body = _json_body(res)
+    assert body["command"] == "ok"
+    assert body["status"] == "OK"
+    st = body["payload"]["subtask"]
+    assert st["criteria_confirmed"]
+    assert st["tests_confirmed"]
+    assert st["blockers_resolved"]
+    assert st["completed"]
 
 
 @pytest.mark.usefixtures("isolated_tasks")

@@ -2529,7 +2529,7 @@ class TaskTrackerTUI:
 
             self.load_tasks(preserve_selection=True, selected_task_file=selected_task_file, skip_sync=True)
             self._last_signature = sig
-            self.set_status_message("Автообновление: задачи обновлены (CLI/внешний)", ttl=3)
+            self.set_status_message("↻ CLI: задачи обновлены (внешнее изменение)", ttl=3)
 
             if prev_detail:
                 for t in self.tasks:
