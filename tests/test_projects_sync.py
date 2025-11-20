@@ -170,3 +170,32 @@ def test_auto_switches_to_user_projects(monkeypatch, tmp_path):
     sync = projects_sync.ProjectsSync(config_path=cfg_path)
     assert sync.config.project_type == "user"
     assert sync.config.number == 14
+
+
+def test_permission_signatures_detected():
+    errors = [{"message": "Could not resolve to a ProjectV2 with the number 1."}]
+    assert projects_sync.ProjectsSync._looks_like_permission_error(errors)
+    errors = [{"message": "Apps are not permitted to access this resource"}]
+    assert projects_sync.ProjectsSync._looks_like_permission_error(errors)
+
+
+def test_graphql_schema_cache(monkeypatch, tmp_path):
+    cfg_path = tmp_path / ".apply_task_projects.yaml"
+    _write_project_cfg(cfg_path, project_type="repository")
+    monkeypatch.setattr(projects_sync, "CONFIG_PATH", cfg_path)
+    projects_sync._PROJECTS_SYNC = None
+    projects_sync._SCHEMA_CACHE.clear()
+    monkeypatch.setattr(projects_sync, "detect_repo_slug", lambda: ("octo", "demo"))
+
+    calls = {"count": 0}
+
+    def fake_graphql(self, query, variables):
+        calls["count"] += 1
+        return {"repository": {"projectV2": {"id": "PID", "fields": {"nodes": []}}}}
+
+    monkeypatch.setattr(projects_sync.ProjectsSync, "_graphql", fake_graphql, raising=False)
+    sync1 = projects_sync.ProjectsSync(config_path=cfg_path)
+    sync1._ensure_project_metadata()
+    sync2 = projects_sync.ProjectsSync(config_path=cfg_path)
+    sync2._ensure_project_metadata()
+    assert calls["count"] == 1

@@ -14,8 +14,10 @@ import sys
 import time
 import subprocess
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import requests
+import webbrowser
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -26,6 +28,7 @@ from contextlib import contextmanager
 import yaml
 import textwrap
 
+import projects_sync
 from projects_sync import (
     get_projects_sync,
     reload_projects_sync,
@@ -722,12 +725,12 @@ class TaskManager:
     def _auto_sync_all(self) -> int:
         if not self.config.get("auto_sync", True):
             return 0
-        sync = get_projects_sync()
-        if not sync.enabled or getattr(sync, "_full_sync_done", False):
+        base_sync = get_projects_sync()
+        if not base_sync.enabled or getattr(base_sync, "_full_sync_done", False):
             return 0
-        setattr(sync, "_full_sync_done", True)
-        repo_requires_issue = bool(sync.config and sync.config.project_type == "repository" and sync.config.repo)
-        count = 0
+        setattr(base_sync, "_full_sync_done", True)
+        repo_requires_issue = bool(base_sync.config and base_sync.config.project_type == "repository" and base_sync.config.repo)
+        tasks_to_sync: List[Tuple[TaskDetail, Path]] = []
         for file in self._all_task_files():
             task = TaskFileParser.parse(file)
             if not task:
@@ -739,14 +742,42 @@ class TaskManager:
             if not task.domain:
                 rel = file.parent.relative_to(self.tasks_dir)
                 task.domain = "" if str(rel) == "." else rel.as_posix()
-            changed = sync.sync_task(task)
+            tasks_to_sync.append((task, file))
+        if not tasks_to_sync:
+            return 0
+
+        def worker(entry: Tuple[TaskDetail, Path]) -> bool:
+            task, file_path = entry
+            sync = self._make_parallel_sync(base_sync)
+            changed = sync.sync_task(task) if sync.enabled else False
             if getattr(task, "_sync_error", None):
                 self._report_sync_error(task._sync_error)
                 task._sync_error = None
             if changed:
-                file.write_text(task.to_file_content(), encoding="utf-8")
-                count += 1
-        return count
+                file_path.write_text(task.to_file_content(), encoding="utf-8")
+            return changed
+
+        max_workers = min(max(2, (os.cpu_count() or 2)), 8, len(tasks_to_sync))
+        changed_count = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(worker, t) for t in tasks_to_sync]
+            for f in as_completed(futures):
+                try:
+                    if f.result():
+                        changed_count += 1
+                except Exception as exc:  # pragma: no cover - safety
+                    logging.getLogger("apply_task.sync").warning("Auto-sync worker failed: %s", exc)
+        if changed_count:
+            base_sync.last_push = datetime.now().strftime(TIMESTAMP_FORMAT)
+        return changed_count
+
+    def _make_parallel_sync(self, base_sync):
+        """Создает независимую копию ProjectsSync для безопасной работы в пуле."""
+        clone = projects_sync.ProjectsSync(config_path=projects_sync.CONFIG_PATH)
+        clone.token = base_sync.token
+        clone.config = base_sync.config
+        clone.project_fields = base_sync.project_fields
+        return clone
 
     def update_task_status(self, task_id: str, status: str, domain: str = "") -> Tuple[bool, Optional[Dict[str, str]]]:
         task = self.load_task(task_id, domain)
@@ -1607,6 +1638,12 @@ class TaskTrackerTUI:
             if not self.editing_mode:
                 self.edit_current_item()
 
+        @kb.add("g")
+        @kb.add("п")
+        def _(event):
+            """g - открыть GitHub Projects в браузере"""
+            self._open_project_url()
+
         @kb.add("c-v")
         def _(event):
             if self.editing_mode:
@@ -2230,6 +2267,10 @@ class TaskTrackerTUI:
             return NotImplemented
 
         label = f"Git Projects {square}"
+        if snapshot.get("last_pull") or snapshot.get("last_push"):
+            lp = snapshot.get("last_pull") or "—"
+            lpsh = snapshot.get("last_push") or "—"
+            label = f"{label} pull={lp} push={lpsh}"
         if not enabled and reason:
             label = f"{label} ({reason})"
         return [(style, label, handler)]
@@ -3213,7 +3254,7 @@ class TaskTrackerTUI:
         scroll_info = f" | Смещение: {self.horizontal_offset}" if self.horizontal_offset > 0 else ""
         if getattr(self, 'help_visible', False):
             return FormattedText([
-                ("class:text.dimmer", " q — выход | r — обновить | Enter — детали | d — завершить | e — редактировать"),
+                ("class:text.dimmer", " q — выход | r — обновить | Enter — детали | d — завершить | e — редактировать | g — Git Projects"),
                 ("", "\n"),
                 ("class:text.dim", "  Чекпоинты: [✓ ✓ ·] = критерии / тесты / блокеры | ? — скрыть подсказку"),
             ])
@@ -3481,6 +3522,8 @@ class TaskTrackerTUI:
             "owner": status["owner"],
             "repo": status["repo"],
             "number": status["project_number"] or 1,
+            "project_url": status.get("project_url"),
+            "project_id": status.get("project_id"),
             "config_exists": cfg_exists,
             "config_enabled": status["auto_sync"],
             "token_saved": status["token_saved"],
@@ -3490,7 +3533,21 @@ class TaskTrackerTUI:
             "target_label": status["target_label"],
             "target_hint": status["target_hint"],
             "status_reason": status["status_reason"],
+            "last_pull": status.get("last_pull"),
+            "last_push": status.get("last_push"),
         }
+
+    def _open_project_url(self) -> None:
+        snapshot = self._project_config_snapshot()
+        url = snapshot.get("project_url")
+        if url:
+            try:
+                webbrowser.open(url)
+                self.set_status_message(f"Открываю GitHub Project → {url}", ttl=3)
+            except Exception as exc:  # pragma: no cover - platform dependent
+                self.set_status_message(f"Не удалось открыть ссылку: {exc}", ttl=4)
+        else:
+            self.set_status_message("Project URL недоступен")
 
     def _set_project_number(self, number_value: int) -> None:
         update_project_target(int(number_value))

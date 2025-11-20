@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
+from threading import Lock
 
 import requests
 import yaml
@@ -25,6 +26,8 @@ logger = logging.getLogger("apply_task.projects")
 _PROJECTS_SYNC: Optional["ProjectsSync"] = None
 _REPO_SLUG_CACHE: Optional[Tuple[str, str]] = None
 _REPO_ROOT_CACHE: Optional[Path] = None
+_SCHEMA_CACHE: Dict[Tuple[str, str, str, int], Dict[str, Any]] = {}
+_SCHEMA_CACHE_LOCK = Lock()
 
 
 class ProjectsSyncPermissionError(RuntimeError):
@@ -322,7 +325,20 @@ class ProjectsSync:
     def _looks_like_permission_error(errors: Any) -> bool:
         if not errors:
             return False
-        keywords = ("resource not accessible", "must have push access", "forbidden", "access denied", "insufficient")
+        keywords = (
+            "resource not accessible",
+            "must have push access",
+            "forbidden",
+            "access denied",
+            "insufficient",
+            "could not resolve to a projectv2",
+            "could not resolve to a repository",
+            "not a member",
+            "does not have permission",
+            "must enable repository projects",
+            "must enable organization projects",
+            "apps are not permitted",
+        )
         for err in errors:
             message = str(err.get("message", "")).lower()
             if any(key in message for key in keywords):
@@ -335,6 +351,14 @@ class ProjectsSync:
         cfg = self.config
         if not cfg:
             raise RuntimeError("projects config missing")
+        cache_key = (cfg.project_type, cfg.owner, cfg.repo or "", int(cfg.number or 0))
+        with _SCHEMA_CACHE_LOCK:
+            cached = _SCHEMA_CACHE.get(cache_key)
+        if cached:
+            self.project_id = cached.get("id")
+            self.project_fields = self._map_fields(cached.get("fields") or [])
+            if self.project_id:
+                return
         retry = False
         if cfg.project_type == "repository":
             if not cfg.repo:
@@ -378,6 +402,9 @@ class ProjectsSync:
         self.project_id = node.get("id")
         field_nodes = ((node.get("fields") or {}).get("nodes") or [])
         self.project_fields = self._map_fields(field_nodes)
+        if self.project_id:
+            with _SCHEMA_CACHE_LOCK:
+                _SCHEMA_CACHE[cache_key] = {"id": self.project_id, "fields": field_nodes}
 
     def _repo_project_query(self) -> str:
         return (
