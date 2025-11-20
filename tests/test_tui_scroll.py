@@ -216,6 +216,15 @@ def test_wrapped_bullet_moves_in_single_step(tmp_path):
     assert start_group != group_after
 
 
+def test_selection_not_paint_border(tmp_path):
+    tui = build_tui(tmp_path)
+    tui.get_terminal_height = lambda: 12
+    st = SubTask(False, "Subtask", success_criteria=["a" * 10, "b" * 10])
+    tui.show_subtask_details(st, 0)
+    styles = [style or "" for style, _ in tui.single_subtask_view]
+    # выбрана первая линия; бордеры должны остаться без selected
+    assert all("selected" not in s for s in styles if "border" in s)
+
 def test_single_subtask_view_highlight(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 12

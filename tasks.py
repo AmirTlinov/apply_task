@@ -2455,7 +2455,8 @@ class TaskTrackerTUI:
             highlight = global_idx == self.subtask_detail_cursor and global_idx in focusables
             style_prefix = 'class:selected' if highlight else None
             for frag_style, frag_text in line:
-                style = self._merge_styles(style_prefix, frag_style) if highlight else frag_style
+                is_border = frag_style and 'border' in frag_style
+                style = self._merge_styles(style_prefix, frag_style) if (highlight and not is_border) else frag_style
                 rendered.append((style, frag_text))
             if pinned and idx < pinned - 1:
                 rendered.append(('', '\n'))
@@ -2487,7 +2488,8 @@ class TaskTrackerTUI:
             highlight = is_cursor or (selected_group is not None and group == selected_group and group is not None)
             style_prefix = 'class:selected' if highlight else None
             for frag_style, frag_text in line:
-                style = self._merge_styles(style_prefix, frag_style) if highlight else frag_style
+                is_border = frag_style and 'border' in frag_style
+                style = self._merge_styles(style_prefix, frag_style) if (highlight and not is_border) else frag_style
                 rendered.append((style, frag_text))
             if idx < len(visible_meta) - 1:
                 rendered.append(('', '\n'))
