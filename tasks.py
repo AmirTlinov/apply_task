@@ -4218,6 +4218,31 @@ def cmd_update(args) -> int:
     )
 
 
+def cmd_status_set(args) -> int:
+    """Единообразная установка статуса (OK/WARN/FAIL) — терминология TUI=CLI."""
+    manager = TaskManager()
+    status = args.status.upper()
+    ok, error = manager.update_task_status(normalize_task_id(args.task_id), status, args.domain or "")
+    if ok:
+        detail = manager.load_task(normalize_task_id(args.task_id), args.domain or "")
+        payload = {"task": task_to_dict(detail, include_subtasks=True) if detail else {"id": normalize_task_id(args.task_id)}}
+        return structured_response(
+            "status-set",
+            status="OK",
+            message=f"{normalize_task_id(args.task_id)} → {status}",
+            payload=payload,
+            summary=f"{normalize_task_id(args.task_id)} → {status}",
+        )
+    payload = {"task_id": args.task_id, "domain": args.domain or "", "status": status}
+    return structured_response(
+        "status-set",
+        status="ERROR",
+        message=(error or {}).get("message", "Статус не обновлён"),
+        payload=payload,
+        exit_code=1,
+    )
+
+
 def cmd_analyze(args) -> int:
     manager = TaskManager()
     domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
@@ -5511,6 +5536,11 @@ def build_parser() -> argparse.ArgumentParser:
     sync_cmd.set_defaults(func=cmd_projects_sync_cli)
     status_cmd = proj_sub.add_parser("status", help="Показать текущее состояние Projects sync")
     status_cmd.set_defaults(func=cmd_projects_status)
+    status_set_cmd = proj_sub.add_parser("status-set", help="Установить статус задачи (OK/WARN/FAIL) — единообразно с TUI")
+    status_set_cmd.add_argument("task_id", help="TASK-xxx")
+    status_set_cmd.add_argument("status", choices=["OK", "WARN", "FAIL"])
+    add_domain_arg(status_set_cmd)
+    status_set_cmd.set_defaults(func=cmd_status_set)
     autosync_cmd = proj_sub.add_parser("autosync", help="Включить или выключить auto_sync без редактирования конфигов")
     autosync_cmd.add_argument("state", choices=["on", "off"], help="on/off")
     autosync_cmd.set_defaults(func=cmd_projects_autosync)
