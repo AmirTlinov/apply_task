@@ -3222,12 +3222,6 @@ class TaskTrackerTUI:
                 return None
             return NotImplemented
 
-        lines.append(('class:border', '| '))
-        # no controls here; управляем через статус-бар
-        lines.append(('class:text', ' ' * (content_width - 2)))
-        lines.append(('class:border', ' |\n'))
-        lines.append(('class:border', '+' + '-'*content_width + '+\n'))
-
         sub_status = self._subtask_status(subtask)
         symbol, icon_style = self._status_indicator(sub_status)
         header_label = f"SUBTASK {index+1}"
