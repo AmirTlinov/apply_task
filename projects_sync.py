@@ -43,6 +43,13 @@ def _load_project_schema_cache() -> Dict[Tuple[str, str, str, int], Dict[str, An
                 if len(parts) != 4:
                     continue
                 type_, owner, repo, number = parts
+                ts = value.get("ts")
+                try:
+                    ts_val = float(ts) if ts is not None else None
+                except Exception:
+                    ts_val = None
+                if ts_val and time.time() - ts_val > 86400:  # TTL 1d
+                    continue
                 with _SCHEMA_CACHE_LOCK:
                     _SCHEMA_CACHE[(type_, owner, repo, int(number))] = value
         except Exception:
@@ -69,6 +76,8 @@ class RateLimiter:
     def __init__(self) -> None:
         self._lock = Lock()
         self._next_ts = 0.0
+        self.last_remaining: Optional[int] = None
+        self.last_reset_epoch: Optional[float] = None
 
     def acquire(self) -> None:
         while True:
@@ -94,16 +103,23 @@ class RateLimiter:
             if remaining is not None:
                 try:
                     rem = int(remaining)
+                    self.last_remaining = rem
                     if rem <= 1:
                         if reset:
                             try:
                                 reset_ts = float(reset)
                                 if reset_ts > now:
                                     self._next_ts = max(self._next_ts, reset_ts)
+                                    self.last_reset_epoch = reset_ts
                             except Exception:
                                 self._next_ts = max(self._next_ts, now + 60)
                         else:
                             self._next_ts = max(self._next_ts, now + 60)
+                except Exception:
+                    pass
+            if reset and self.last_reset_epoch is None:
+                try:
+                    self.last_reset_epoch = float(reset)
                 except Exception:
                     pass
             if errors and ProjectsSync._looks_like_rate_limit(errors):
@@ -371,6 +387,11 @@ class ProjectsSync:
             repo = ""
         if stored_type == "user":
             repo = ""
+        # migrate workers => default auto(0) записываем без участия пользователя
+        if workers is None and self.config_path.exists():
+            project["workers"] = 0
+            _write_project_file({"project": project, "fields": data.get("fields") or {}}, self.config_path)
+            workers = 0
         return ProjectConfig(project_type=stored_type, owner=owner, number=number or 0, repo=repo, workers=workers if workers else None, fields=fields_cfg, enabled=bool(enabled))
 
     def _graphql(self, query: str, variables: Dict[str, Any]) -> Dict[str, Any]:
