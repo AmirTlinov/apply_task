@@ -27,6 +27,7 @@ from contextlib import contextmanager
 
 import yaml
 import textwrap
+from wcwidth import wcwidth
 
 import projects_sync
 from projects_sync import (
@@ -2243,6 +2244,58 @@ class TaskTrackerTUI:
         return lines
 
     @staticmethod
+    def _display_width(text: str) -> int:
+        """Возвращает печатную ширину текста с учётом ширины символов."""
+        width = 0
+        for ch in text:
+            w = wcwidth(ch)
+            if w is None:
+                w = 0
+            width += max(0, w)
+        return width
+
+    def _trim_display(self, text: str, width: int) -> str:
+        """Обрезает текст так, чтобы видимая ширина не превышала width."""
+        acc = []
+        used = 0
+        for ch in text:
+            w = wcwidth(ch) or 0
+            if w < 0:
+                w = 0
+            if used + w > width:
+                break
+            acc.append(ch)
+            used += w
+        return "".join(acc)
+
+    def _pad_display(self, text: str, width: int) -> str:
+        """Обрезает и дополняет пробелами до exact width по видимой ширине."""
+        trimmed = self._trim_display(text, width)
+        trimmed_width = self._display_width(trimmed)
+        if trimmed_width < width:
+            trimmed += " " * (width - trimmed_width)
+        return trimmed
+
+    def _wrap_display(self, text: str, width: int) -> List[str]:
+        """Разбивает текст на строки фиксированной видимой ширины."""
+        lines: List[str] = []
+        current = ""
+        used = 0
+        for ch in text:
+            w = wcwidth(ch) or 0
+            if w < 0:
+                w = 0
+            if used + w > width:
+                lines.append(self._pad_display(current, width))
+                current = ch
+                used = w
+            else:
+                current += ch
+                used += w
+        lines.append(self._pad_display(current, width))
+        return lines
+
+    @staticmethod
     def _focusable_line_indices(lines: List[List[Tuple[str, str]]]) -> List[int]:
         focusable: List[int] = []
         for idx, line in enumerate(lines):
@@ -2366,7 +2419,7 @@ class TaskTrackerTUI:
         if indicator_top:
             rendered.extend([
                 ('class:border', '| '),
-                ('class:text.dim', f"↑ +{offset}".ljust(content_width - 2)),
+                ('class:text.dim', self._pad_display(f"↑ +{offset}", content_width - 2)),
                 ('class:border', ' |\n'),
             ])
 
@@ -2383,7 +2436,7 @@ class TaskTrackerTUI:
         if indicator_bottom:
             rendered.extend([
                 ('class:border', '| '),
-                ('class:text.dim', f"↓ +{remaining_below}".ljust(content_width - 2)),
+                ('class:text.dim', self._pad_display(f"↓ +{remaining_below}", content_width - 2)),
                 ('class:border', ' |\n'),
             ])
 
@@ -3264,7 +3317,7 @@ class TaskTrackerTUI:
         lines.append((icon_style, f"{symbol} "))
         inner_width = content_width - 2
         remaining = max(0, inner_width - 2)
-        lines.append(('class:header', header_label[:remaining].ljust(remaining)))
+        lines.append(('class:header', self._pad_display(header_label, remaining)))
         lines.append(('class:border', ' |\n'))
         lines.append(('class:border', '+' + '-'*content_width + '+\n'))
         # фиксируем количество строк шапки для закрепления при скролле (оставляем заголовок и нижнюю границу)
@@ -3273,10 +3326,9 @@ class TaskTrackerTUI:
 
         # Title
         text = subtask.title
-        chunks = [text[i:i+content_width-4] for i in range(0, len(text), content_width-4)] or ['']
-        for ch in chunks:
+        for ch in self._wrap_display(text, content_width - 2):
             lines.append(('class:border', '| '))
-            lines.append(('class:text', ch.ljust(content_width - 2)))
+            lines.append(('class:text', ch))
             lines.append(('class:border', ' |\n'))
 
         # Checkpoint summary
@@ -3286,23 +3338,24 @@ class TaskTrackerTUI:
             inner_width = content_width - 2
             consumed = 0
 
-            def append_fragment(style: str, text: str):
-                nonlocal consumed
-                if consumed >= inner_width or not text:
-                    return
-                available = inner_width - consumed
-                chunk = text[:available]
-                consumed += len(chunk)
-                lines.append((style, chunk))
-
             lines.append(('class:border', '| '))
             for idx, (label, flag) in enumerate(entries):
                 status = Status.OK if flag else Status.FAIL
                 symbol, icon_style = self._status_indicator(status)
-                append_fragment(icon_style, symbol)
-                append_fragment('class:text', f' {label}')
-                if idx < len(entries) - 1:
-                    append_fragment('class:text.dim', ' | ')
+                parts = [
+                    (icon_style, symbol),
+                    ('class:text', f' {label}'),
+                    ('class:text.dim', ' | ' if idx < len(entries) - 1 else ''),
+                ]
+                for style, text in parts:
+                    if not text:
+                        continue
+                    available = inner_width - consumed
+                    if available <= 0:
+                        break
+                    chunk = self._trim_display(text, available)
+                    consumed += self._display_width(chunk)
+                    lines.append((style, chunk))
             if consumed < inner_width:
                 lines.append(('class:text', ' ' * (inner_width - consumed)))
             lines.append(('class:border', ' |\n'))
@@ -3316,7 +3369,7 @@ class TaskTrackerTUI:
             inner_width = content_width - 2
             label_space = max(0, inner_width - 2)
             lines.append((icon_style, f"{symbol} "))
-            lines.append((style, label[:label_space].ljust(label_space)))
+            lines.append((style, self._pad_display(label, label_space)))
             lines.append(('class:border', ' |\n'))
 
         # Критерии выполнения
@@ -3324,10 +3377,9 @@ class TaskTrackerTUI:
             add_section_header("Критерии выполнения", subtask.criteria_confirmed)
             for i, criterion in enumerate(subtask.success_criteria, 1):
                 text = f"  {i}. {criterion}"
-                chunks = [text[i:i+content_width-4] for i in range(0, len(text), content_width-4)] or ['']
-                for ch in chunks:
+                for ch in self._wrap_display(text, content_width - 2):
                     lines.append(('class:border', '| '))
-                    lines.append(('class:text', ch.ljust(content_width - 2)))
+                    lines.append(('class:text', ch))
                     lines.append(('class:border', ' |\n'))
 
         # Тесты
@@ -3335,10 +3387,9 @@ class TaskTrackerTUI:
             add_section_header("Тесты", subtask.tests_confirmed)
             for i, test in enumerate(subtask.tests, 1):
                 text = f"  {i}. {test}"
-                chunks = [text[i:i+content_width-4] for i in range(0, len(text), content_width-4)] or ['']
-                for ch in chunks:
+                for ch in self._wrap_display(text, content_width - 2):
                     lines.append(('class:border', '| '))
-                    lines.append(('class:text', ch.ljust(content_width - 2)))
+                    lines.append(('class:text', ch))
                     lines.append(('class:border', ' |\n'))
 
         # Блокеры
@@ -3346,10 +3397,9 @@ class TaskTrackerTUI:
             add_section_header("Блокеры", subtask.blockers_resolved)
             for i, blocker in enumerate(subtask.blockers, 1):
                 text = f"  {i}. {blocker}"
-                chunks = [text[i:i+content_width-4] for i in range(0, len(text), content_width-4)] or ['']
-                for ch in chunks:
+                for ch in self._wrap_display(text, content_width - 2):
                     lines.append(('class:border', '| '))
-                    lines.append(('class:text', ch.ljust(content_width - 2)))
+                    lines.append(('class:text', ch))
                     lines.append(('class:border', ' |\n'))
 
         # Evidence logs
@@ -3358,13 +3408,12 @@ class TaskTrackerTUI:
                 return
             lines.append(('class:border', '+' + '-'*content_width + '+\n'))
             lines.append(('class:border', '| '))
-            lines.append(('class:label', f"{label} — отметки:".ljust(content_width - 2)))
+            lines.append(('class:label', self._pad_display(f"{label} — отметки:", content_width - 2)))
             lines.append(('class:border', ' |\n'))
             for entry in entries:
-                chunks = [entry[i:i+content_width-4] for i in range(0, len(entry), content_width-4)] or ['']
-                for ch in chunks:
+                for ch in self._wrap_display(entry, content_width - 2):
                     lines.append(('class:border', '| '))
-                    lines.append(('class:text', f"  - {ch}".ljust(content_width - 2)))
+                    lines.append(('class:text', self._pad_display(f"  - {ch.strip()}", content_width - 2)))
                     lines.append(('class:border', ' |\n'))
 
         append_logs("Критерии", subtask.criteria_notes)

@@ -152,6 +152,27 @@ def test_single_subtask_cursor_stays_visible_with_footer(tmp_path):
     assert any("selected" in (s or "") for s in styles)  # выделение осталось в видимой области
 
 
+def test_single_subtask_long_lines_do_not_wrap(tmp_path):
+    tui = build_tui(tmp_path)
+    tui.get_terminal_height = lambda: 14
+    tui.get_terminal_width = lambda: 60
+    st = SubTask(
+        False,
+        "Очень длинный заголовок ✅ с разноширинными символами чтобы проверить паддинг и обрезку",
+        success_criteria=[
+            "Проверить, что строки не вылезают за рамку даже при узком окне",
+            "Дважды проверить ✅ emoji и длинные слова_without_breaks_here_to_force_trim",
+        ],
+    )
+    tui.show_subtask_details(st, 0)
+    tui.move_vertical_selection(10)
+    lines = tui._formatted_lines(tui.single_subtask_view)
+    max_width = max(tui._display_width("".join(t for _, t in line)) for line in lines)
+    assert max_width <= tui.get_terminal_width()  # ни одна строка не уходит за ширину терминала
+    # курсор виден
+    assert any("selected" in (s or "") for s, _ in tui.single_subtask_view)
+
+
 def test_single_subtask_view_highlight(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 12
