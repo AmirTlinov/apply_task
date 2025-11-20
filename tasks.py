@@ -2091,8 +2091,6 @@ class TaskTrackerTUI:
                 return
             lines = self._formatted_lines(self._subtask_detail_buffer)
             pinned = min(len(lines), getattr(self, "_subtask_header_lines_count", 0))
-            avail = max(5, self.get_terminal_height() - self.footer_height - 1)
-            scroll_area = max(1, avail - pinned)
             focusables = self._focusable_line_indices(lines)
             if focusables:
                 current = self._snap_cursor(self.subtask_detail_cursor, focusables)
@@ -2110,17 +2108,21 @@ class TaskTrackerTUI:
                             break
                         current = prev_candidates[0]
                 self.subtask_detail_cursor = current
-            # Обеспечиваем видимость курсора в зоне скролла, не скрывая шапку
-            indicator_top = 1 if self.subtask_detail_scroll > 0 else 0
-            visible_content = max(1, scroll_area - indicator_top)
-            scrollable_total = max(0, total - pinned)
-            max_offset = max(0, scrollable_total - visible_content)
-            cursor_rel = max(0, self.subtask_detail_cursor - pinned)
-            if cursor_rel < self.subtask_detail_scroll:
-                self.subtask_detail_scroll = cursor_rel
-            elif cursor_rel >= self.subtask_detail_scroll + visible_content:
-                self.subtask_detail_scroll = cursor_rel - visible_content + 1
-            self.subtask_detail_scroll = max(0, min(self.subtask_detail_scroll, max_offset))
+            # Обеспечиваем видимость курсора в зоне скролла, не скрывая шапку и учитывая индикаторы
+            offset = self.subtask_detail_scroll
+            for _ in range(2):  # максимум два пересчёта, чтобы учесть изменение индикаторов
+                offset, visible_content, _, _, _ = self._calculate_subtask_viewport(
+                    total=len(lines), pinned=pinned, desired_offset=offset
+                )
+                cursor_rel = max(0, self.subtask_detail_cursor - pinned)
+                if cursor_rel < offset:
+                    offset = cursor_rel
+                    continue
+                if cursor_rel >= offset + visible_content:
+                    offset = cursor_rel - visible_content + 1
+                    continue
+                break
+            self.subtask_detail_scroll = offset
             term_width = self.get_terminal_width()
             content_width = max(40, term_width - 2)
             self._render_single_subtask_view(content_width)
@@ -2301,6 +2303,33 @@ class TaskTrackerTUI:
         focusables = self._focusable_line_indices(lines)
         return focusables[0] if focusables else 0
 
+    def _calculate_subtask_viewport(self, total: int, pinned: int, desired_offset: Optional[int] = None) -> Tuple[int, int, int, int, int]:
+        """
+        Рассчитывает параметры вьюпорта карточки подзадачи с учётом закреплённой шапки,
+        футера и индикаторов скролла.
+
+        Возвращает (offset, visible_content, indicator_top, indicator_bottom, remaining_below)
+        """
+        avail = max(5, self.get_terminal_height() - self.footer_height - 1)
+        scroll_area = max(1, avail - pinned)
+        scrollable_total = max(0, total - pinned)
+        offset = max(0, desired_offset if desired_offset is not None else self.subtask_detail_scroll)
+        max_raw_offset = max(0, scrollable_total - 1)
+        offset = min(offset, max_raw_offset)
+
+        indicator_top = 1 if offset > 0 else 0
+        visible_content = max(1, scroll_area - indicator_top)
+        max_offset = max(0, scrollable_total - visible_content)
+        offset = min(offset, max_offset)
+
+        indicator_bottom = 1 if offset + visible_content < scrollable_total else 0
+        visible_content = max(1, scroll_area - indicator_top - indicator_bottom)
+        max_offset = max(0, scrollable_total - visible_content)
+        offset = min(offset, max_offset)
+
+        remaining_below = max(0, scrollable_total - (offset + visible_content))
+        return offset, visible_content, indicator_top, indicator_bottom, remaining_below
+
     def _render_single_subtask_view(self, content_width: int) -> None:
         """Применяет вертикальный скролл к карточке подзадачи."""
         if not getattr(self, "_subtask_detail_buffer", None):
@@ -2312,21 +2341,10 @@ class TaskTrackerTUI:
         focusables = self._focusable_line_indices(lines)
         if total:
             self.subtask_detail_cursor = self._snap_cursor(self.subtask_detail_cursor, focusables)
-        avail = max(5, self.get_terminal_height() - self.footer_height - 1)
-        scroll_area = max(1, avail - pinned)
-        max_raw_offset = max(0, len(scrollable) - 1)
-        offset = max(0, min(self.subtask_detail_scroll, max_raw_offset))
-
-        indicator_top = 1 if offset > 0 else 0
-        visible_content = max(1, scroll_area - indicator_top)
-        max_offset = max(0, len(scrollable) - visible_content)
-        offset = max(0, min(offset, max_offset))
-        indicator_top = 1 if offset > 0 else 0
-        indicator_bottom = 1 if offset + visible_content < len(scrollable) else 0
-        visible_content = max(1, scroll_area - indicator_top - indicator_bottom)
-        max_offset = max(0, len(scrollable) - visible_content)
-        offset = max(0, min(offset, max_offset))
-        remaining_below = max(0, len(scrollable) - (offset + visible_content))
+        offset, visible_content, indicator_top, indicator_bottom, remaining_below = self._calculate_subtask_viewport(
+            total=len(lines),
+            pinned=pinned,
+        )
 
         visible_lines = scrollable[offset : offset + visible_content]
 

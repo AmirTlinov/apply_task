@@ -137,6 +137,21 @@ def test_single_subtask_view_scrolls_content(tmp_path):
     assert "Blocker 2" in rendered  # нижняя часть стала видимой после скролла
 
 
+def test_single_subtask_cursor_stays_visible_with_footer(tmp_path):
+    tui = build_tui(tmp_path)
+    tui.get_terminal_height = lambda: 12
+    st = SubTask(
+        False,
+        "Subtask",
+        success_criteria=[f"Criterion {i}" for i in range(15)],
+    )
+    tui.show_subtask_details(st, 0)
+    tui._set_footer_height(3)  # имитируем высокий футер
+    tui.move_vertical_selection(50)  # уйдём в конец
+    styles = [style for style, _ in tui.single_subtask_view]
+    assert any("selected" in (s or "") for s in styles)  # выделение осталось в видимой области
+
+
 def test_single_subtask_view_highlight(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 12
