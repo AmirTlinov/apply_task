@@ -3,6 +3,7 @@ import sys
 
 import pytest
 import yaml
+import os
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -17,6 +18,7 @@ class DummyResponse:
         self.status_code = status_code
         self._payload = payload or {}
         self.text = str(self._payload)
+        self.headers = {}
 
     def json(self):
         return self._payload
@@ -100,6 +102,7 @@ def test_permission_error_disables_sync(monkeypatch, tmp_path):
 
     class PermissionResponse:
         status_code = 200
+        headers = {}
 
         def json(self):
             return {"errors": [{"message": "Resource not accessible by integration"}]}
@@ -183,6 +186,11 @@ def test_graphql_schema_cache(monkeypatch, tmp_path):
     cfg_path = tmp_path / ".apply_task_projects.yaml"
     _write_project_cfg(cfg_path, project_type="repository")
     monkeypatch.setattr(projects_sync, "CONFIG_PATH", cfg_path)
+    cache_path = tmp_path / ".tasks" / ".projects_schema_cache.yaml"
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    if cache_path.exists():
+        cache_path.unlink()
+    monkeypatch.setattr(projects_sync, "SCHEMA_CACHE_PATH", cache_path)
     projects_sync._PROJECTS_SYNC = None
     projects_sync._SCHEMA_CACHE.clear()
     monkeypatch.setattr(projects_sync, "detect_repo_slug", lambda: ("octo", "demo"))
@@ -199,3 +207,32 @@ def test_graphql_schema_cache(monkeypatch, tmp_path):
     sync2 = projects_sync.ProjectsSync(config_path=cfg_path)
     sync2._ensure_project_metadata()
     assert calls["count"] == 1
+
+
+def test_schema_cache_persisted(monkeypatch, tmp_path):
+    cfg_path = tmp_path / ".apply_task_projects.yaml"
+    _write_project_cfg(cfg_path, project_type="repository")
+    tasks_dir = tmp_path / ".tasks"
+    tasks_dir.mkdir()
+    cache_path = tasks_dir / ".projects_schema_cache.yaml"
+    monkeypatch.setattr(projects_sync, "CONFIG_PATH", cfg_path)
+    monkeypatch.setattr(projects_sync, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(projects_sync, "SCHEMA_CACHE_PATH", cache_path)
+    projects_sync._SCHEMA_CACHE.clear()
+    monkeypatch.setattr(projects_sync, "detect_repo_slug", lambda: ("octo", "demo"))
+
+    calls = {"count": 0}
+
+    def fake_graphql(self, query, variables):
+        calls["count"] += 1
+        return {"repository": {"projectV2": {"id": "PID", "fields": {"nodes": []}}}}
+
+    monkeypatch.setattr(projects_sync.ProjectsSync, "_graphql", fake_graphql, raising=False)
+    sync1 = projects_sync.ProjectsSync(config_path=cfg_path)
+    sync1._ensure_project_metadata()
+    assert cache_path.exists()
+    projects_sync._SCHEMA_CACHE.clear()
+    sync2 = projects_sync.ProjectsSync(config_path=cfg_path)
+    sync2._ensure_project_metadata()
+    assert calls["count"] == 1
+    projects_sync._SCHEMA_CACHE.clear()

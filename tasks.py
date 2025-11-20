@@ -34,6 +34,7 @@ from projects_sync import (
     reload_projects_sync,
     update_projects_enabled,
     update_project_target,
+    update_project_workers,
 )
 from config import get_user_token, set_user_token
 
@@ -183,6 +184,14 @@ class TaskDetail:
     project_draft_id: Optional[str] = None
     project_remote_updated: Optional[str] = None
     project_issue_number: Optional[int] = None
+
+    @property
+    def folder(self) -> str:
+        return self.domain
+
+    @folder.setter
+    def folder(self, value: str) -> None:
+        self.domain = value
 
     @property
     def filepath(self) -> Path:
@@ -635,8 +644,8 @@ class TaskManager:
         ids = [int(f.stem.split("-")[1]) for f in self._all_task_files()]
         return f"TASK-{(max(ids) + 1 if ids else 1):03d}"
 
-    def create_task(self, title: str, status: str = "FAIL", priority: str = "MEDIUM", parent: Optional[str] = None, domain: str = "", phase: str = "", component: str = "") -> TaskDetail:
-        domain = self.sanitize_domain(domain)
+    def create_task(self, title: str, status: str = "FAIL", priority: str = "MEDIUM", parent: Optional[str] = None, domain: str = "", phase: str = "", component: str = "", folder: Optional[str] = None) -> TaskDetail:
+        domain = self.sanitize_domain(folder or domain or derive_domain_explicit("", phase, component))
         now_value = current_timestamp()
         task = TaskDetail(
             id=self._next_id(),
@@ -702,7 +711,7 @@ class TaskManager:
         logging.getLogger("apply_task.sync").warning(message)
         self.last_sync_error = f"SYNC ERROR: {message[:60]}"
 
-    def list_tasks(self, domain: str = "") -> List[TaskDetail]:
+    def list_tasks(self, domain: str = "", skip_sync: bool = False) -> List[TaskDetail]:
         tasks: List[TaskDetail] = []
         selected = self._all_task_files() if not domain else (self.tasks_dir / self.sanitize_domain(domain)).glob("TASK-*.task")
         for file in sorted(selected):
@@ -716,9 +725,10 @@ class TaskManager:
                     if prog == 100 and not parsed.blocked and parsed.status != "OK":
                         parsed.status = "OK"
                         self.save_task(parsed)
-                sync = get_projects_sync()
-                if sync.enabled and parsed.project_item_id:
-                    sync.pull_task_fields(parsed)
+                if not skip_sync:
+                    sync = get_projects_sync()
+                    if sync.enabled and parsed.project_item_id:
+                        sync.pull_task_fields(parsed)
                 tasks.append(parsed)
         return tasks
 
@@ -757,7 +767,7 @@ class TaskManager:
                 file_path.write_text(task.to_file_content(), encoding="utf-8")
             return changed
 
-        max_workers = min(max(2, (os.cpu_count() or 2)), 8, len(tasks_to_sync))
+        max_workers = self._compute_worker_count(len(tasks_to_sync))
         changed_count = 0
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(worker, t) for t in tasks_to_sync]
@@ -778,6 +788,21 @@ class TaskManager:
         clone.config = base_sync.config
         clone.project_fields = base_sync.project_fields
         return clone
+
+    def _compute_worker_count(self, queue_size: int) -> int:
+        env_override = os.getenv("APPLY_TASK_SYNC_WORKERS")
+        if env_override and env_override.isdigit():
+            value = int(env_override)
+            if value > 0:
+                return max(1, min(value, queue_size or value))
+        sync = get_projects_sync()
+        cfg_workers = getattr(sync.config, "workers", None) if sync and sync.config else None
+        if cfg_workers:
+            return max(1, min(int(cfg_workers), queue_size or int(cfg_workers)))
+        auto = min(max(2, (os.cpu_count() or 2)), 8)
+        if queue_size:
+            auto = min(auto, queue_size)
+        return max(1, auto)
 
     def update_task_status(self, task_id: str, status: str, domain: str = "") -> Tuple[bool, Optional[Dict[str, str]]]:
         task = self.load_task(task_id, domain)
@@ -1000,6 +1025,11 @@ def derive_domain_explicit(domain: Optional[str], phase: Optional[str], componen
     if not parts:
         return ""
     return TaskManager.sanitize_domain("/".join(parts))
+
+
+def derive_folder_explicit(domain: Optional[str], phase: Optional[str], component: Optional[str]) -> str:
+    """Совместимость: alias для derive_domain_explicit (используется в старых тестах)."""
+    return derive_domain_explicit(domain, phase, component)
 
 
 def parse_smart_title(title: str) -> Tuple[str, List[str], List[str]]:
@@ -3103,6 +3133,21 @@ class TaskTrackerTUI:
             if self.settings_mode:
                 self.force_render()
             return
+        if context == 'project_workers':
+            try:
+                workers_value = int(new_value)
+                if workers_value < 0:
+                    raise ValueError
+            except ValueError:
+                self.set_status_message("Пул должен быть целым (0=auto)")
+            else:
+                update_project_workers(None if workers_value == 0 else workers_value)
+                reload_projects_sync()
+                self.set_status_message("Размер пула обновлён")
+            self.cancel_edit()
+            if self.settings_mode:
+                self.force_render()
+            return
 
         if not new_value:
             self.cancel_edit()
@@ -3152,6 +3197,14 @@ class TaskTrackerTUI:
         self.edit_buffer.text = ''
         if hasattr(self, "app") and self.app:
             self.app.layout.focus(self.main_window)
+
+    def _build_clipboard(self):
+        if PyperclipClipboard:
+            try:
+                return PyperclipClipboard()
+            except Exception:
+                pass
+        return InMemoryClipboard()
 
     def _clipboard_text(self) -> str:
         clipboard = getattr(self, "clipboard", None)
@@ -3491,10 +3544,31 @@ class TaskTrackerTUI:
         })
 
         options.append({
+            "label": "Project URL",
+            "value": snapshot.get("project_url") or "недоступно",
+            "hint": "g — открыть в браузере",
+            "action": None,
+        })
+
+        options.append({
             "label": "Номер проекта",
             "value": str(snapshot['number']) if snapshot['number'] else '—',
             "hint": "Enter — обновить номер Project v2",
             "action": "edit_number",
+        })
+
+        options.append({
+            "label": "Пул потоков",
+            "value": str(snapshot.get("workers")) if snapshot.get("workers") else "auto",
+            "hint": "Enter — задать размер пула sync (0=auto). Ограничивает API бюджет.",
+            "action": "edit_workers",
+        })
+
+        options.append({
+            "label": "Последний pull/push",
+            "value": f"{snapshot.get('last_pull') or '—'} / {snapshot.get('last_push') or '—'}",
+            "hint": "Обновляется после успешной синхронизации",
+            "action": None,
         })
 
         options.append({
@@ -3517,7 +3591,7 @@ class TaskTrackerTUI:
 
     def _project_config_snapshot(self) -> Dict[str, Any]:
         status = _projects_status_payload()
-        cfg_exists = bool(status["owner"] and status["repo"])
+        cfg_exists = bool(status["owner"] and (status["project_number"] or status.get("project_id")))
         return {
             "owner": status["owner"],
             "repo": status["repo"],
@@ -3535,6 +3609,7 @@ class TaskTrackerTUI:
             "status_reason": status["status_reason"],
             "last_pull": status.get("last_pull"),
             "last_push": status.get("last_push"),
+            "workers": status.get("workers"),
         }
 
     def _open_project_url(self) -> None:
@@ -3585,6 +3660,11 @@ class TaskTrackerTUI:
         elif action == "edit_number":
             snapshot = self._project_config_snapshot()
             self.start_editing('project_number', str(snapshot['number']), None)
+            self.edit_buffer.cursor_position = len(self.edit_buffer.text)
+        elif action == "edit_workers":
+            snapshot = self._project_config_snapshot()
+            current = snapshot.get("workers")
+            self.start_editing('project_workers', str(current) if current else "0", None)
             self.edit_buffer.cursor_position = len(self.edit_buffer.text)
         elif action == "refresh_metadata":
             reload_projects_sync()
@@ -3660,7 +3740,7 @@ def cmd_tui(args) -> int:
 
 def cmd_list(args) -> int:
     manager = TaskManager()
-    domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
+    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
     tasks = manager.list_tasks(domain)
     if args.status:
         tasks = [t for t in tasks if t.status == args.status]
@@ -3697,7 +3777,7 @@ def cmd_show(args) -> int:
     if not task_id:
         return structured_error("show", "Нет задачи для показа")
     manager = TaskManager()
-    domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None)) or last_domain or ""
+    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None)) or last_domain or ""
     task = manager.load_task(task_id, domain)
     if not task:
         return structured_error("show", f"Задача {task_id} не найдена")
@@ -3717,7 +3797,7 @@ def cmd_show(args) -> int:
 def cmd_create(args) -> int:
     manager = TaskManager()
     args.parent = normalize_task_id(args.parent)
-    domain = derive_domain_explicit(args.domain, args.phase, args.component)
+    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
 
     def fail(message: str, payload: Optional[Dict[str, Any]] = None) -> int:
         if getattr(args, "validate_only", False):
@@ -3817,7 +3897,7 @@ def cmd_smart_create(args) -> int:
         payload = {"task": task_to_dict(task, include_subtasks=True)}
         return validation_response("task", True, message, payload)
 
-    domain = derive_domain_explicit(args.domain, args.phase, args.component)
+    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
     task = manager.create_task(
         title,
         status=args.status,
@@ -4005,7 +4085,7 @@ def cmd_update(args) -> int:
             return structured_error("update", "Не указан ID задачи и нет последней")
 
     manager = TaskManager()
-    domain = derive_domain_explicit(args.domain, args.phase, args.component) or last_domain or ""
+    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None)) or last_domain or ""
     ok, error = manager.update_task_status(task_id, status, domain)
     if ok:
         save_last_task(task_id, domain)
@@ -4033,7 +4113,7 @@ def cmd_update(args) -> int:
 
 def cmd_analyze(args) -> int:
     manager = TaskManager()
-    domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
+    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
     task = manager.load_task(normalize_task_id(args.task_id), domain)
     if not task:
         return structured_error("analyze", f"Задача {args.task_id} не найдена")
@@ -4055,8 +4135,8 @@ def cmd_analyze(args) -> int:
 
 def cmd_next(args) -> int:
     manager = TaskManager()
-    domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
-    tasks = manager.list_tasks(domain)
+    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
+    tasks = manager.list_tasks(domain, skip_sync=True)
     candidates = [t for t in tasks if t.status != "OK" and t.calculate_progress() < 100]
     filter_hint = f" (domain='{domain or '-'}', phase='{args.phase or '-'}', component='{args.component or '-'}')"
     if not candidates:
@@ -4102,7 +4182,7 @@ def _parse_semicolon_list(raw: Optional[str]) -> List[str]:
 
 def cmd_add_subtask(args) -> int:
     manager = TaskManager()
-    domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
+    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
     task_id = normalize_task_id(args.task_id)
     criteria = _parse_semicolon_list(args.criteria)
     tests = _parse_semicolon_list(args.tests)
@@ -4130,7 +4210,7 @@ def cmd_add_subtask(args) -> int:
 
 def cmd_add_dependency(args) -> int:
     manager = TaskManager()
-    domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
+    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
     task_id = normalize_task_id(args.task_id)
     if manager.add_dependency(task_id, args.dependency, domain):
         payload = {"task_id": task_id, "dependency": args.dependency}
@@ -4389,7 +4469,7 @@ def _parse_bulk_operations(raw: str) -> List[Dict[str, Any]]:
 
 def cmd_bulk(args) -> int:
     manager = TaskManager()
-    base_domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
+    base_domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
     default_task_id: Optional[str] = None
     default_task_domain: str = base_domain
     if getattr(args, "task", None):
@@ -4759,7 +4839,7 @@ def cmd_projects_sync_cli(args) -> int:
         return structured_error("projects sync", reason)
     sync.consume_conflicts()
     manager = TaskManager()
-    domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
+    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
     tasks = manager.list_tasks(domain)
     pulled = pushed = 0
     for task in tasks:
@@ -4797,6 +4877,7 @@ def _projects_status_payload() -> Dict[str, Any]:
     number = cfg.number if cfg else None
     project_id = getattr(sync, "project_id", None)
     project_url = sync.project_url() if hasattr(sync, "project_url") else None
+    workers = cfg.workers if cfg else None
     user_token = get_user_token()
     token_saved = bool(user_token)
     token_preview = user_token[-4:] if user_token else ""
@@ -4805,7 +4886,10 @@ def _projects_status_payload() -> Dict[str, Any]:
     token_env = "APPLY_TASK_GITHUB_TOKEN" if env_primary else ("GITHUB_TOKEN" if env_secondary else "")
     token_present = bool(sync.token)
     auto_sync = bool(cfg and cfg.enabled)
-    target_label = f"{owner}/{repo}#{number}" if owner and repo and number else "—"
+    if cfg and cfg.project_type == "user":
+        target_label = f"{owner}#{number}" if owner and number else "—"
+    else:
+        target_label = f"{owner}/{repo}#{number}" if owner and repo and number else "—"
     detect_error = getattr(sync, "detect_error", None)
     runtime_reason = sync.runtime_disabled_reason
     status_reason = detect_error or runtime_reason
@@ -4822,6 +4906,7 @@ def _projects_status_payload() -> Dict[str, Any]:
         "project_number": number,
         "project_id": project_id,
         "project_url": project_url,
+        "workers": workers,
         "target_label": target_label,
         "target_hint": "Определяется автоматически из git remote origin",
         "auto_sync": auto_sync,
@@ -4872,9 +4957,23 @@ def cmd_projects_autosync(args) -> int:
     )
 
 
+def cmd_projects_workers(args) -> int:
+    target = None if args.count == 0 else args.count
+    update_project_workers(target)
+    reload_projects_sync()
+    label = "auto" if target is None else str(target)
+    return structured_response(
+        "projects workers",
+        status="OK",
+        message=f"Пул синхронизации установлен: {label}",
+        payload={"workers": target},
+        summary=label,
+    )
+
+
 def cmd_edit(args) -> int:
     manager = TaskManager()
-    domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
+    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
     task = manager.load_task(normalize_task_id(args.task_id), domain)
     if not task:
         return structured_error("edit", f"Задача {args.task_id} не найдена")
@@ -4946,13 +5045,14 @@ def cmd_lint(args) -> int:
 
 def cmd_suggest(args) -> int:
     manager = TaskManager()
-    domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
-    tasks = manager.list_tasks(domain)
+    folder = getattr(args, "folder", "") or ""
+    domain = derive_domain_explicit(getattr(args, "domain", "") or folder, getattr(args, "phase", None), getattr(args, "component", None))
+    tasks = manager.list_tasks(domain, skip_sync=True)
     active = [t for t in tasks if t.status != "OK"]
-    filter_hint = f" (domain='{domain or '-'}', phase='{args.phase or '-'}', component='{args.component or '-'}')"
+    filter_hint = f" (folder='{folder or domain or '-'}', phase='{getattr(args, 'phase', None) or '-'}', component='{getattr(args, 'component', None) or '-'}')"
     if not active:
         payload = {
-            "filters": {"domain": domain or "", "phase": args.phase or "", "component": args.component or ""},
+            "filters": {"folder": folder or "", "domain": domain or "", "phase": getattr(args, "phase", None) or "", "component": getattr(args, "component", None) or ""},
             "suggestions": [],
         }
         return structured_response(
@@ -4971,7 +5071,7 @@ def cmd_suggest(args) -> int:
     sorted_tasks = sorted(active, key=score)
     save_last_task(sorted_tasks[0].id, sorted_tasks[0].domain)
     payload = {
-        "filters": {"domain": domain or "", "phase": args.phase or "", "component": args.component or ""},
+        "filters": {"folder": folder or "", "domain": domain or "", "phase": getattr(args, "phase", None) or "", "component": getattr(args, "component", None) or ""},
         "suggestions": [task_to_dict(task) for task in sorted_tasks[:5]],
     }
     return structured_response(
@@ -4986,13 +5086,14 @@ def cmd_suggest(args) -> int:
 def cmd_quick(args) -> int:
     """Быстрый обзор: топ-3 незавершённых задачи."""
     manager = TaskManager()
-    domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
-    tasks = [t for t in manager.list_tasks(domain) if t.status != "OK"]
+    folder = getattr(args, "folder", "") or ""
+    domain = derive_domain_explicit(getattr(args, "domain", "") or folder, getattr(args, "phase", None), getattr(args, "component", None))
+    tasks = [t for t in manager.list_tasks(domain, skip_sync=True) if t.status != "OK"]
     tasks.sort(key=lambda t: (t.priority, t.calculate_progress()))
-    filter_hint = f" (domain='{domain or '-'}', phase='{args.phase or '-'}', component='{args.component or '-'}')"
+    filter_hint = f" (folder='{folder or domain or '-'}', phase='{getattr(args, 'phase', None) or '-'}', component='{getattr(args, 'component', None) or '-'}')"
     if not tasks:
         payload = {
-            "filters": {"domain": domain or "", "phase": args.phase or "", "component": args.component or ""},
+            "filters": {"folder": folder or "", "domain": domain or "", "phase": getattr(args, "phase", None) or "", "component": getattr(args, "component", None) or ""},
             "top": [],
         }
         return structured_response(
@@ -5005,7 +5106,7 @@ def cmd_quick(args) -> int:
     top = tasks[:3]
     save_last_task(tasks[0].id, tasks[0].domain)
     payload = {
-        "filters": {"domain": domain or "", "phase": args.phase or "", "component": args.component or ""},
+        "filters": {"folder": folder or "", "domain": domain or "", "phase": getattr(args, "phase", None) or "", "component": getattr(args, "component", None) or ""},
         "top": [task_to_dict(task) for task in top],
     }
     return structured_response(
@@ -5301,6 +5402,9 @@ def build_parser() -> argparse.ArgumentParser:
     autosync_cmd = proj_sub.add_parser("autosync", help="Включить или выключить auto_sync без редактирования конфигов")
     autosync_cmd.add_argument("state", choices=["on", "off"], help="on/off")
     autosync_cmd.set_defaults(func=cmd_projects_autosync)
+    workers_cmd = proj_sub.add_parser("workers", help="Задать размер пула sync (0=auto)")
+    workers_cmd.add_argument("count", type=int, help="Количество потоков (0=auto)")
+    workers_cmd.set_defaults(func=cmd_projects_workers)
 
     # checkpoint wizard
     ckp = sub.add_parser(

@@ -77,3 +77,39 @@ def test_auto_sync_disabled(monkeypatch, tmp_path):
 
     assert dummy_sync.calls == []
     assert manager.auto_sync_message == ""
+
+
+def test_pool_size_respects_config(monkeypatch, tmp_path):
+    tasks_dir = tmp_path / ".tasks"
+    tasks_dir.mkdir()
+    _write_task(tasks_dir / "TASK-001.task", "TASK-001")
+    _write_task(tasks_dir / "TASK-002.task", "TASK-002")
+
+    dummy_sync = DummyProjects()
+    dummy_sync.config.workers = 1
+    monkeypatch.setattr(tasks, "get_projects_sync", lambda: dummy_sync)
+    monkeypatch.setattr(tasks.TaskManager, "load_config", staticmethod(lambda: {"auto_sync": True}))
+
+    captured = {}
+
+    class DummyPool:
+        def __init__(self, max_workers):
+            captured["max"] = max_workers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def submit(self, fn, arg):
+            class DummyFuture:
+                def result(self_inner):
+                    return fn(arg)
+            return DummyFuture()
+
+    monkeypatch.setattr(tasks, "ThreadPoolExecutor", DummyPool)
+    monkeypatch.setattr(tasks, "as_completed", lambda futs: futs)
+
+    manager = tasks.TaskManager(tasks_dir=tasks_dir)
+    assert captured["max"] == 1
