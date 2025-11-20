@@ -2242,7 +2242,8 @@ class TaskTrackerTUI:
             texts = "".join(text for _, text in line).strip()
             if not texts:
                 continue
-            border_chars = set("+-─═│|")
+            # treat pure table borders (ascii or box-drawing) as non-focusable
+            border_chars = set("+-=─═│|")
             if texts and all(ch in border_chars for ch in texts):
                 continue
             if any(

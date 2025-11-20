@@ -166,3 +166,19 @@ def test_single_subtask_view_skips_headers(tmp_path):
     # Заголовки (например, строка со словом 'Критерии выполнения') не должны быть в фокусируемых
     header_lines = [i for i, line in enumerate(tui._formatted_lines(tui._subtask_detail_buffer)) if any('status.' in (s or '') or 'header' in (s or '') for s, _ in line)]
     assert all(h not in focusables for h in header_lines)
+
+
+def test_border_lines_not_focusable(tmp_path):
+    tui = build_tui(tmp_path)
+    content_width = 12
+    formatted = [
+        ('class:border', '+' + '=' * content_width + '+\n'),
+        ('class:border', '| ' + 'body'.ljust(content_width - 1) + '|\n'),
+        ('class:border', '+' + '=' * content_width + '+'),
+    ]
+    lines = tui._formatted_lines(formatted)
+    focusables = tui._focusable_line_indices(lines)
+    # Верхняя и нижняя рамка не должны попадать в фокус
+    assert 0 not in focusables
+    assert 2 not in focusables
+    assert 1 in focusables  # строка с текстом остаётся кликабельной
