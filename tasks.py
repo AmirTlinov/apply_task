@@ -64,27 +64,6 @@ def validate_pat_token_http(token: str, timeout: float = 10.0) -> Tuple[bool, st
     return True, f"PAT активен (viewer={login})"
 
 
-def _read_auto_sync_config() -> Dict[str, Any]:
-    cfg_path = Path(".apply_taskrc.yaml")
-    if not cfg_path.exists():
-        return {}
-    try:
-        return yaml.safe_load(cfg_path.read_text()) or {}
-    except Exception:
-        return {}
-
-
-def set_auto_sync_flag(enabled: bool) -> bool:
-    cfg_path = Path(".apply_taskrc.yaml")
-    data = _read_auto_sync_config()
-    data["auto_sync"] = bool(enabled)
-    cfg_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
-    return data["auto_sync"]
-
-
-def get_auto_sync_flag() -> Optional[bool]:
-    data = _read_auto_sync_config()
-    return data.get("auto_sync")
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition
@@ -639,12 +618,14 @@ class TaskManager:
 
     @staticmethod
     def load_config() -> Dict:
-        cfg = Path(".apply_taskrc.yaml")
+        cfg = Path(".apply_task_projects.yaml")
         if cfg.exists():
             try:
-                return yaml.safe_load(cfg.read_text()) or {}
+                raw = yaml.safe_load(cfg.read_text()) or {}
             except Exception:
                 return {}
+            project = (raw.get("project") or {}) if isinstance(raw, dict) else {}
+            return {"auto_sync": project.get("enabled", True)}
         return {}
 
     def _next_id(self) -> str:
@@ -1443,12 +1424,6 @@ class TaskTrackerTUI:
         Status.FAIL: "selected.fail",
         Status.UNKNOWN: "selected.unknown",
     }
-    PROJECT_TYPE_LABELS: Dict[str, str] = {
-        "repository": "Репозиторий",
-        "organization": "Организация",
-        "user": "Пользователь",
-    }
-    PROJECT_TYPES: List[str] = ["repository", "organization", "user"]
     SPINNER_FRAMES: List[str] = ["⣿", "⡇", "⡏", "⡗", "⡟", "⡧", "⡯", "⡷", "⡿", "⢇", "⢏", "⢗", "⢟", "⢧", "⢯", "⢷", "⢿"]
 
     @staticmethod
@@ -2228,7 +2203,8 @@ class TaskTrackerTUI:
     def _sync_indicator_fragments(self, filter_flash: bool = False) -> List[Tuple[str, str]]:
         sync = get_projects_sync()
         cfg = getattr(sync, "config", None)
-        enabled = bool(sync and sync.enabled and cfg)
+        snapshot = self._project_config_snapshot()
+        enabled = bool(sync and sync.enabled and cfg and snapshot["config_enabled"])
         now = time.time()
         if self._last_sync_enabled is None:
             self._last_sync_enabled = enabled
@@ -2245,13 +2221,18 @@ class TaskTrackerTUI:
         else:
             style = "class:icon.check" if enabled or flash else "class:text.dim"
 
+        reason = snapshot.get("status_reason")
+
         def handler(mouse_event):
             if mouse_event.event_type == MouseEventType.MOUSE_UP and mouse_event.button == MouseButton.LEFT:
                 self.open_settings_dialog()
                 return None
             return NotImplemented
 
-        return [(style, f"Git Projects {square}", handler)]
+        label = f"Git Projects {square}"
+        if not enabled and reason:
+            label = f"{label} ({reason})"
+        return [(style, label, handler)]
 
     @staticmethod
     def _sync_target_label(cfg) -> str:
@@ -3067,26 +3048,6 @@ class TaskTrackerTUI:
                 self.force_render()
             return
 
-        if context == 'project_owner':
-            if not new_value:
-                self.set_status_message("Владелец обязателен")
-            else:
-                self._apply_project_target_change(owner=new_value)
-                self.set_status_message("Владелец обновлён")
-            self.cancel_edit()
-            if self.settings_mode:
-                self.force_render()
-            return
-
-        if context == 'project_repo':
-            self._apply_project_target_change(repo=new_value)
-            message = "Репозиторий обновлён" if new_value else "Репозиторий очищен"
-            self.set_status_message(message)
-            self.cancel_edit()
-            if self.settings_mode:
-                self.force_render()
-            return
-
         if context == 'project_number':
             try:
                 number_value = int(new_value)
@@ -3095,45 +3056,8 @@ class TaskTrackerTUI:
             except ValueError:
                 self.set_status_message("Номер проекта должен быть положительным целым")
             else:
-                self._apply_project_target_change(number=number_value)
+                self._set_project_number(number_value)
                 self.set_status_message("Номер проекта обновлён")
-            self.cancel_edit()
-            if self.settings_mode:
-                self.force_render()
-            return
-
-        if context == 'project_target':
-            if not new_value:
-                self.set_status_message("Формат: тип:владелец/репозиторий#номер")
-                self.cancel_edit()
-                if self.settings_mode:
-                    self.force_render()
-                return
-            try:
-                spec = new_value
-                if ':' in spec:
-                    ptype, rest = spec.split(':', 1)
-                else:
-                    ptype, rest = 'repository', spec
-                if '#' not in rest:
-                    raise ValueError
-                path_part, number_part = rest.split('#', 1)
-                number = int(number_part.strip())
-                path_part = path_part.strip()
-                if '/' in path_part:
-                    owner, repo = path_part.split('/', 1)
-                else:
-                    owner, repo = path_part, None
-                ptype = ptype.strip().lower()
-                owner = owner.strip()
-                if ptype not in ('repository', 'organization', 'user'):
-                    raise ValueError
-                if ptype == 'repository' and (not repo):
-                    raise ValueError
-                update_project_target(ptype, owner, repo.strip() if repo else None, number)
-                self.set_status_message("Project target обновлён")
-            except ValueError:
-                self.set_status_message("Неверный формат: тип:владелец/репозиторий#номер")
             self.cancel_edit()
             if self.settings_mode:
                 self.force_render()
@@ -3407,9 +3331,6 @@ class TaskTrackerTUI:
             'test': 'Редактирование теста',
             'blocker': 'Редактирование блокера',
             'token': 'GitHub PAT',
-            'project_target': 'Цель Projects',
-            'project_owner': 'Владелец проекта',
-            'project_repo': 'Репозиторий',
             'project_number': 'Номер проекта',
         }
         label = labels.get(self.edit_context, 'Редактирование')
@@ -3498,7 +3419,7 @@ class TaskTrackerTUI:
         })
 
         if not snapshot['config_exists']:
-            sync_value = "Недоступна (нет проекта)"
+            sync_value = "Недоступна (нет git remote)"
         elif not snapshot['config_enabled']:
             sync_value = "Выключена"
         elif not snapshot['token_active']:
@@ -3511,31 +3432,21 @@ class TaskTrackerTUI:
             "hint": "Enter — включить или выключить автоматическую синхронизацию",
             "action": "toggle_sync",
             "disabled": not snapshot['config_exists'],
-            "disabled_msg": "Сначала выбери проект",
+            "disabled_msg": snapshot['status_reason'] if not snapshot['config_exists'] else "",
         })
 
-        type_label = self.PROJECT_TYPE_LABELS.get(snapshot['type'], snapshot['type'])
+        target_value = snapshot['target_label']
+        target_hint = snapshot['target_hint']
+        if not snapshot['config_exists']:
+            target_value = "недоступно"
+            target_hint = snapshot['status_reason'] or "нет git remote"
+        elif snapshot['status_reason'] and not snapshot['config_enabled']:
+            target_hint = snapshot['status_reason']
         options.append({
-            "label": "Тип проекта",
-            "value": type_label,
-            "hint": "Enter — переключить между репозиторием, организацией и пользователем",
-            "action": "cycle_type",
-        })
-
-        options.append({
-            "label": "Владелец",
-            "value": snapshot['owner'] or '—',
-            "hint": "Enter — указать организацию или пользователя, к которому привязан проект",
-            "action": "edit_owner",
-        })
-
-        options.append({
-            "label": "Репозиторий",
-            "value": snapshot['repo'] or '—',
-            "hint": "Доступно только если выбран тип 'Репозиторий'",
-            "action": "edit_repo",
-            "disabled": snapshot['type'] != 'repository',
-            "disabled_msg": "Репозиторий нужен только для типа 'репозиторий'",
+            "label": "Проект GitHub",
+            "value": target_value,
+            "hint": snapshot['target_hint'],
+            "action": None,
         })
 
         options.append({
@@ -3564,43 +3475,25 @@ class TaskTrackerTUI:
         return options
 
     def _project_config_snapshot(self) -> Dict[str, Any]:
-        sync = get_projects_sync()
-        cfg = sync.config
-        user_token = get_user_token()
-        env_primary = os.getenv("APPLY_TASK_GITHUB_TOKEN")
-        env_secondary = os.getenv("GITHUB_TOKEN") if not env_primary else None
-        env_source = ""
-        if env_primary:
-            env_source = "APPLY_TASK_GITHUB_TOKEN"
-        elif env_secondary:
-            env_source = "GITHUB_TOKEN"
+        status = _projects_status_payload()
+        cfg_exists = bool(status["owner"] and status["repo"])
         return {
-            "type": cfg.project_type if cfg else "repository",
-            "owner": (cfg.owner if cfg and cfg.owner else ""),
-            "repo": (cfg.repo if cfg and cfg.repo else ""),
-            "number": cfg.number if cfg else 1,
-            "config_exists": bool(cfg),
-            "config_enabled": bool(cfg and cfg.enabled),
-            "token_saved": bool(user_token),
-            "token_preview": user_token[-4:] if user_token else "",
-            "token_env": env_source,
-            "token_active": bool(sync.token),
+            "owner": status["owner"],
+            "repo": status["repo"],
+            "number": status["project_number"] or 1,
+            "config_exists": cfg_exists,
+            "config_enabled": status["auto_sync"],
+            "token_saved": status["token_saved"],
+            "token_preview": status["token_preview"],
+            "token_env": status["token_env"],
+            "token_active": status["token_present"],
+            "target_label": status["target_label"],
+            "target_hint": status["target_hint"],
+            "status_reason": status["status_reason"],
         }
 
-    def _apply_project_target_change(self, **updates) -> None:
-        snapshot = self._project_config_snapshot()
-        project_type = updates.get("project_type", snapshot["type"])
-        owner = updates.get("owner", snapshot["owner"]).strip()
-        repo = updates.get("repo", snapshot["repo"]).strip()
-        number = updates.get("number", snapshot["number"]) or 1
-        update_project_target(project_type, owner, repo if repo else None, int(number))
-
-    def _next_project_type(self, current_type: str) -> str:
-        order = self.PROJECT_TYPES
-        if current_type not in order:
-            return order[0]
-        idx = order.index(current_type)
-        return order[(idx + 1) % len(order)]
+    def _set_project_number(self, number_value: int) -> None:
+        update_project_target(int(number_value))
 
     def move_settings_selection(self, delta: int) -> None:
         options = self._settings_options()
@@ -3619,6 +3512,8 @@ class TaskTrackerTUI:
             self.set_status_message(option.get("disabled_msg") or "Опция недоступна")
             return
         action = option.get("action")
+        if not action:
+            return
         if action == "edit_pat":
             self.set_status_message("Вставь PAT (оставь пустым чтобы очистить)")
             self.start_editing('token', '', None)
@@ -3630,21 +3525,6 @@ class TaskTrackerTUI:
             state = "включена" if desired else "выключена"
             self.set_status_message(f"Синхронизация {state}")
             self.force_render()
-        elif action == "cycle_type":
-            snapshot = self._project_config_snapshot()
-            new_type = self._next_project_type(snapshot['type'])
-            self._apply_project_target_change(project_type=new_type)
-            label = self.PROJECT_TYPE_LABELS.get(new_type, new_type)
-            self.set_status_message(f"Тип проекта: {label}")
-            self.force_render()
-        elif action == "edit_owner":
-            snapshot = self._project_config_snapshot()
-            self.start_editing('project_owner', snapshot['owner'], None)
-            self.edit_buffer.cursor_position = len(self.edit_buffer.text)
-        elif action == "edit_repo":
-            snapshot = self._project_config_snapshot()
-            self.start_editing('project_repo', snapshot['repo'], None)
-            self.edit_buffer.cursor_position = len(self.edit_buffer.text)
         elif action == "edit_number":
             snapshot = self._project_config_snapshot()
             self.start_editing('project_number', str(snapshot['number']), None)
@@ -4817,7 +4697,9 @@ def cmd_projects_sync_cli(args) -> int:
         return structured_error("projects sync", "Укажи --all для явного подтверждения")
     sync = get_projects_sync()
     if not sync.enabled:
-        return structured_error("projects sync", "Projects sync отключён или не настроен")
+        status = _projects_status_payload()
+        reason = status.get("status_reason") or "Projects sync отключён или не настроен"
+        return structured_error("projects sync", reason)
     sync.consume_conflicts()
     manager = TaskManager()
     domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
@@ -4845,9 +4727,82 @@ def cmd_projects_sync_cli(args) -> int:
     )
 
 
+def _projects_status_payload() -> Dict[str, Any]:
+    sync = get_projects_sync()
+    try:
+        if sync.enabled:
+            sync._ensure_project_metadata()
+    except Exception:
+        pass
+    cfg = sync.config
+    owner = (cfg.owner if cfg and cfg.owner else "") if cfg else ""
+    repo = (cfg.repo if cfg and cfg.repo else "") if cfg else ""
+    number = cfg.number if cfg else None
+    project_id = getattr(sync, "project_id", None)
+    project_url = sync.project_url() if hasattr(sync, "project_url") else None
+    user_token = get_user_token()
+    token_saved = bool(user_token)
+    token_preview = user_token[-4:] if user_token else ""
+    env_primary = os.getenv("APPLY_TASK_GITHUB_TOKEN")
+    env_secondary = os.getenv("GITHUB_TOKEN") if not env_primary else None
+    token_env = "APPLY_TASK_GITHUB_TOKEN" if env_primary else ("GITHUB_TOKEN" if env_secondary else "")
+    token_present = bool(sync.token)
+    auto_sync = bool(cfg and cfg.enabled)
+    target_label = f"{owner}/{repo}#{number}" if owner and repo and number else "—"
+    detect_error = getattr(sync, "detect_error", None)
+    runtime_reason = sync.runtime_disabled_reason
+    status_reason = detect_error or runtime_reason
+    if not status_reason:
+        if not cfg:
+            status_reason = "нет конфигурации"
+        elif not auto_sync:
+            status_reason = "auto-sync выключена"
+        elif not token_present:
+            status_reason = "нет PAT"
+    payload = {
+        "owner": owner,
+        "repo": repo,
+        "project_number": number,
+        "project_id": project_id,
+        "project_url": project_url,
+        "target_label": target_label,
+        "target_hint": "Определяется автоматически из git remote origin",
+        "auto_sync": auto_sync,
+        "runtime_enabled": sync.enabled,
+        "runtime_reason": runtime_reason,
+        "detect_error": detect_error,
+        "status_reason": status_reason or "",
+        "last_pull": sync.last_pull,
+        "last_push": sync.last_push,
+        "token_saved": token_saved,
+        "token_preview": token_preview,
+        "token_env": token_env,
+        "token_present": token_present,
+    }
+    return payload
+
+
+def cmd_projects_status(args) -> int:
+    payload = _projects_status_payload()
+    message = "Projects sync активна" if payload["runtime_enabled"] else "Projects sync отключена"
+    if payload.get("last_pull") or payload.get("last_push"):
+        message += f" (pull={payload.get('last_pull') or '—'}, push={payload.get('last_push') or '—'})"
+    if payload.get("project_id") or payload.get("project_url"):
+        message += f" | id={payload.get('project_id') or '—'}"
+        if payload.get("project_url"):
+            message += f" → {payload['project_url']}"
+    return structured_response(
+        "projects status",
+        status="OK",
+        message=message,
+        payload=payload,
+        summary=payload["target_label"],
+    )
+
+
 def cmd_projects_autosync(args) -> int:
     desired = args.state.lower() == "on"
-    set_auto_sync_flag(desired)
+    update_projects_enabled(desired)
     reload_projects_sync()
     state_label = "включён" if desired else "выключен"
     payload = {"auto_sync": desired}
@@ -5284,7 +5239,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync_cmd.add_argument("--all", action="store_true", help="Подтвердить синхронизацию всех задач")
     add_context_args(sync_cmd)
     sync_cmd.set_defaults(func=cmd_projects_sync_cli)
-    autosync_cmd = proj_sub.add_parser("autosync", help="Включить или выключить auto_sync без редактирования .apply_taskrc.yaml")
+    status_cmd = proj_sub.add_parser("status", help="Показать текущее состояние Projects sync")
+    status_cmd.set_defaults(func=cmd_projects_status)
+    autosync_cmd = proj_sub.add_parser("autosync", help="Включить или выключить auto_sync без редактирования конфигов")
     autosync_cmd.add_argument("state", choices=["on", "off"], help="on/off")
     autosync_cmd.set_defaults(func=cmd_projects_autosync)
 

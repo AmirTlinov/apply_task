@@ -113,7 +113,7 @@ class ProjectsSync:
         self.session = requests.Session()
         self.project_id: Optional[str] = None
         self.project_fields: Dict[str, Dict[str, Any]] = {}
-        self.conflicts_dir = Path(".tasks") / ".projects_conflicts"
+        self.conflicts_dir = PROJECT_ROOT / ".tasks" / ".projects_conflicts"
         self._pending_conflicts: List[Dict[str, Any]] = []
         self._seen_conflicts: Dict[Tuple[str, str], str] = {}
         self.last_pull: Optional[str] = None
@@ -468,6 +468,28 @@ class ProjectsSync:
             return []
         return (((data.get("user") or {}).get("projectsV2") or {}).get("nodes") or [])
 
+    def project_url(self) -> Optional[str]:
+        cfg = self.config
+        if not cfg or not cfg.number:
+            return None
+        num = cfg.number
+        if cfg.project_type == "repository" and cfg.owner and cfg.repo:
+            return f"https://github.com/{cfg.owner}/{cfg.repo}/projects/{num}"
+        if cfg.project_type == "organization" and cfg.owner:
+            return f"https://github.com/orgs/{cfg.owner}/projects/{num}"
+        if cfg.owner:
+            return f"https://github.com/users/{cfg.owner}/projects/{num}"
+        return None
+
+    def _log_event(self, event: str, details: str) -> None:
+        try:
+            self.conflicts_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            path = self.conflicts_dir / f"{event}-{stamp}.log"
+            path.write_text(details, encoding="utf-8")
+        except Exception:
+            pass
+
     def _repo_id_query(self) -> str:
         return (
             "query($owner:String!,$name:String!){ repository(owner:$owner,name:$name){ id name owner{ id login } } }"
@@ -496,11 +518,13 @@ class ProjectsSync:
                 )
                 try:
                     self._graphql(link, {"project": project_id, "repo": repo_id})
+                    self._log_event("project_link", f"Linked project {project_id} to repo {cfg.owner}/{cfg.repo}")
                 except Exception:
                     pass
             if number:
                 update_project_target(int(number))
                 self.config = self._load_config()
+                self._log_event("project_created", f"Created project {project_id or '?'} number={number} for repo {cfg.owner}/{cfg.repo}")
                 return True
         except Exception:
             return False
