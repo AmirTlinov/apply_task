@@ -2317,7 +2317,7 @@ class TaskTrackerTUI:
 
     @staticmethod
     def _item_style(group_id: int) -> str:
-        return f"class:text item-{group_id}"
+        return f"class:text class:item-{group_id}"
 
     @staticmethod
     def _extract_group(line: List[Tuple[str, str]]) -> Optional[int]:
