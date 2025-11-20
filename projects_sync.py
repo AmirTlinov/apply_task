@@ -692,7 +692,7 @@ class ProjectsSync:
         return (
             "query($owner:String!,$name:String!){"
             "  repository(owner:$owner,name:$name){"
-            "    projectsV2(first:10){ nodes{ number title } }"
+            "    projectsV2(first:20){ nodes{ number title } }"
             "  }"
             "}"
         )
@@ -700,7 +700,7 @@ class ProjectsSync:
     def _user_projects_list_query(self) -> str:
         return (
             "query($login:String!){"
-            "  user(login:$login){ projectsV2(first:10){ nodes{ number title } } }"
+            "  user(login:$login){ projectsV2(first:20){ nodes{ number title } } }"
             "}"
         )
     def _org_project_query(self) -> str:
@@ -743,6 +743,7 @@ class ProjectsSync:
         cfg = self.config
         if not cfg:
             return False
+        # 1) пытаемся взять первый repo project
         if cfg.project_type == "repository" and cfg.repo:
             nodes = self._list_repo_projects(cfg.owner, cfg.repo)
             if nodes:
@@ -751,15 +752,29 @@ class ProjectsSync:
                     update_project_target(int(number))
                     self.config = self._load_config()
                     return True
-        nodes = self._list_user_projects(cfg.owner)
-        if nodes:
-            number = nodes[0].get("number")
-            if number:
-                _update_project_entry(type="user", repo="", number=int(number))
-                self.config = self._load_config()
-                return True
+        # 2) fallback: user projects от имени viewer
+        login = cfg.owner or self._fetch_viewer_login()
+        if login:
+            nodes = self._list_user_projects(login)
+            if nodes:
+                number = nodes[0].get("number")
+                if number:
+                    _update_project_entry(type="user", repo="", number=int(number), owner=login)
+                    self.config = self._load_config()
+                    return True
         self.detect_error = "GitHub Projects не найдены для указанного владельца"
         return False
+
+    def _fetch_viewer_login(self) -> Optional[str]:
+        if self._viewer_login:
+            return self._viewer_login
+        query = "query { viewer { login } }"
+        try:
+            data = self._graphql(query, {})
+            self._viewer_login = ((data.get("viewer") or {}).get("login")) or None
+        except Exception:
+            self._viewer_login = None
+        return self._viewer_login
 
     def _list_repo_projects(self, owner: str, repo: str) -> List[Dict[str, Any]]:
         try:
