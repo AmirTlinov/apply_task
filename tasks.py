@@ -2529,6 +2529,7 @@ class TaskTrackerTUI:
 
             self.load_tasks(preserve_selection=True, selected_task_file=selected_task_file, skip_sync=True)
             self._last_signature = sig
+            self.set_status_message("Автообновление: задачи обновлены (CLI/внешний)", ttl=3)
 
             if prev_detail:
                 for t in self.tasks:
@@ -5949,6 +5950,22 @@ def build_parser() -> argparse.ArgumentParser:
     okp.add_argument("--blockers-note")
     add_context_args(okp)
     okp.set_defaults(func=cmd_ok)
+
+    # alias: apply_task sub ok
+    subok = sub.add_parser(
+        "sub",
+        help="Группа алиасов для подзадач; sub ok == ok",
+        description="Короткий алиас: `apply_task sub ok TASK IDX [--criteria-note ... --tests-note ... --blockers-note ...]`",
+    )
+    subok_sub = subok.add_subparsers(dest="subcommand", required=True)
+    subok_ok = subok_sub.add_parser("ok", help="Подтвердить критерии/тесты/блокеры и закрыть подзадачу (алиас ok)")
+    subok_ok.add_argument("task_id")
+    subok_ok.add_argument("index", type=int)
+    subok_ok.add_argument("--criteria-note")
+    subok_ok.add_argument("--tests-note")
+    subok_ok.add_argument("--blockers-note")
+    add_context_args(subok_ok)
+    subok_ok.set_defaults(func=cmd_ok)
 
     # note macro
     notep = sub.add_parser("note", help="Добавить заметку/подтверждение к чекпоинту")
