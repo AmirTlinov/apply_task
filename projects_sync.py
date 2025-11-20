@@ -265,6 +265,7 @@ class ProjectsSync:
         self.last_push: Optional[str] = None
         self._runtime_disabled_reason: Optional[str] = None
         self._rate_limiter = _RATE_LIMITER
+        self._project_lookup_failed: bool = False
 
     # ------------------------------------------------------------------
     # Helpers for conflict detection / reporting
@@ -573,7 +574,9 @@ class ProjectsSync:
                         with _SCHEMA_CACHE_LOCK:
                             _SCHEMA_CACHE.pop(cache_key, None)
                         _persist_project_schema_cache()
-                        self._disable_runtime("project not found and auto-create failed")
+                        if not self._project_lookup_failed:
+                            self._disable_runtime(f"Project {cfg.owner}/{cfg.repo}#{variables.get('number')} not found")
+                            self._project_lookup_failed = True
                         raise ProjectsSyncPermissionError("project not found")
                     raise
             repo_node = (data.get("repository") or {})
