@@ -2857,24 +2857,53 @@ class TaskTrackerTUI:
             items.append(("risk", risk, -1))
 
         total_items = len(items)
-        # Рассчитываем доступные строки после уже добавленных блоков
+        # Compute line budget after header/metadata fragments
         used_lines = 0
         for frag in result:
             if isinstance(frag, tuple) and len(frag) >= 2:
                 used_lines += frag[1].count('\n')
-        available_lines = self.get_terminal_height() - self.footer_height - used_lines - 2
-        visible = max(3, available_lines)
-        max_offset = max(0, total_items - visible)
-        if self.detail_selected_index < self.detail_view_offset:
-            self.detail_view_offset = self.detail_selected_index
-        elif self.detail_selected_index >= self.detail_view_offset + visible:
-            self.detail_view_offset = self.detail_selected_index - visible + 1
-        self.detail_view_offset = max(0, min(self.detail_view_offset, max_offset))
-        start = self.detail_view_offset
-        end = min(total_items, start + visible)
+        list_budget = max(1, self.get_terminal_height() - self.footer_height - used_lines - 2)
 
-        hidden_above = start
-        hidden_below = total_items - end
+        # Initial visible window that honors the budget
+        if total_items:
+            self.detail_selected_index = max(0, min(self.detail_selected_index, total_items - 1))
+            visible = min(total_items, list_budget)
+
+            def _adjust_offset(vis: int) -> int:
+                max_offset = max(0, total_items - vis)
+                offset = min(self.detail_view_offset, max_offset)
+                if self.detail_selected_index < offset:
+                    offset = self.detail_selected_index
+                elif self.detail_selected_index >= offset + vis:
+                    offset = self.detail_selected_index - vis + 1
+                return max(0, min(offset, max_offset))
+
+            self.detail_view_offset = _adjust_offset(visible)
+            start = self.detail_view_offset
+            end = min(total_items, start + visible)
+            hidden_above = start
+            hidden_below = total_items - end
+
+            # Keep marker rows (↑/↓) inside the same height budget
+            while True:
+                marker_lines = int(hidden_above > 0) + int(hidden_below > 0)
+                if visible + marker_lines <= list_budget:
+                    break
+                if visible == 1:
+                    hidden_above = 0
+                    hidden_below = 0
+                    break
+                visible = max(1, min(total_items, list_budget - marker_lines))
+                self.detail_view_offset = _adjust_offset(visible)
+                start = self.detail_view_offset
+                end = min(total_items, start + visible)
+                hidden_above = start
+                hidden_below = total_items - end
+        else:
+            visible = 0
+            start = end = 0
+            hidden_above = hidden_below = 0
+            self.detail_view_offset = 0
 
         completed = sum(1 for st in detail.subtasks if st.completed)
         line_counter = 0

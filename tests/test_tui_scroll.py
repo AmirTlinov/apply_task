@@ -48,3 +48,27 @@ def test_move_selection_clamps_detail_mode(tmp_path):
 
     tui.move_vertical_selection(-20)
     assert tui.detail_selected_index == 0
+
+
+def test_subtasks_view_stays_within_height(tmp_path):
+    tui = build_tui(tmp_path)
+    tui.get_terminal_height = lambda: 15
+    detail = TaskDetail(
+        id="TASK-TEST",
+        title="Detail",
+        status="WARN",
+        description="\n".join(f"Line {i}" for i in range(12)),
+    )
+    detail.subtasks = [SubTask(False, f"Subtask {i} long text goes here {i}") for i in range(8)]
+
+    tui.detail_mode = True
+    tui.current_task_detail = detail
+    tui.detail_selected_index = 6
+    tui._set_footer_height(0)
+
+    rendered = "".join(text for _, text in tui.get_detail_text())
+    lines = rendered.split("\n")
+
+    assert len(lines) <= tui.get_terminal_height()
+    assert f"> {tui.detail_selected_index + 1}. " in rendered
+    assert "↑" in rendered and "↓" in rendered
