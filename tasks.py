@@ -3553,6 +3553,13 @@ class TaskTrackerTUI:
     def _settings_options(self) -> List[Dict[str, Any]]:
         snapshot = self._project_config_snapshot()
         options: List[Dict[str, Any]] = []
+        status_line = "Sync ON" if snapshot.get("runtime_enabled") else f"Sync OFF ({snapshot.get('status_reason')})"
+        options.append({
+            "label": "Статус sync",
+            "value": status_line,
+            "hint": snapshot.get("status_reason") or "Текущая доступность синхронизации",
+            "action": None,
+        })
         if snapshot['token_saved']:
             pat_value = f"Сохранён (…{snapshot['token_preview']})"
         elif snapshot['token_env']:
@@ -5000,6 +5007,7 @@ def _projects_status_payload() -> Dict[str, Any]:
         "token_preview": token_preview,
         "token_env": token_env,
         "token_present": token_present,
+        "runtime_disabled_reason": runtime_reason,
     }
     return payload
 
