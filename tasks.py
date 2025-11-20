@@ -62,6 +62,29 @@ def validate_pat_token_http(token: str, timeout: float = 10.0) -> Tuple[bool, st
     if not login:
         return False, "Ответ без viewer"
     return True, f"PAT активен (viewer={login})"
+
+
+def _read_auto_sync_config() -> Dict[str, Any]:
+    cfg_path = Path(".apply_taskrc.yaml")
+    if not cfg_path.exists():
+        return {}
+    try:
+        return yaml.safe_load(cfg_path.read_text()) or {}
+    except Exception:
+        return {}
+
+
+def set_auto_sync_flag(enabled: bool) -> bool:
+    cfg_path = Path(".apply_taskrc.yaml")
+    data = _read_auto_sync_config()
+    data["auto_sync"] = bool(enabled)
+    cfg_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    return data["auto_sync"]
+
+
+def get_auto_sync_flag() -> Optional[bool]:
+    data = _read_auto_sync_config()
+    return data.get("auto_sync")
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition
@@ -4822,6 +4845,21 @@ def cmd_projects_sync_cli(args) -> int:
     )
 
 
+def cmd_projects_autosync(args) -> int:
+    desired = args.state.lower() == "on"
+    set_auto_sync_flag(desired)
+    reload_projects_sync()
+    state_label = "включён" if desired else "выключен"
+    payload = {"auto_sync": desired}
+    return structured_response(
+        "projects autosync",
+        status="OK",
+        message=f"Auto-sync {state_label}",
+        payload=payload,
+        summary=f"auto-sync {args.state}",
+    )
+
+
 def cmd_edit(args) -> int:
     manager = TaskManager()
     domain = derive_domain_explicit(args.domain, getattr(args, "phase", None), getattr(args, "component", None))
@@ -5246,6 +5284,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync_cmd.add_argument("--all", action="store_true", help="Подтвердить синхронизацию всех задач")
     add_context_args(sync_cmd)
     sync_cmd.set_defaults(func=cmd_projects_sync_cli)
+    autosync_cmd = proj_sub.add_parser("autosync", help="Включить или выключить auto_sync без редактирования .apply_taskrc.yaml")
+    autosync_cmd.add_argument("state", choices=["on", "off"], help="on/off")
+    autosync_cmd.set_defaults(func=cmd_projects_autosync)
 
     # checkpoint wizard
     ckp = sub.add_parser(

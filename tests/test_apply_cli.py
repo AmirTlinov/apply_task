@@ -93,12 +93,38 @@ class ApplyTaskResolveTests(unittest.TestCase):
         self.history_dir = Path(tempfile.mkdtemp(prefix="apply_history"))
         self.history_file = self.history_dir / "history.jsonl"
         os.environ["APPLY_TASK_HISTORY"] = str(self.history_file)
+        self.repo_root = root
+        self.tasks_dir = self.repo_root / ".tasks"
+        self.last_file = self.repo_root / ".last"
+        self._sandbox_dir = Path(tempfile.mkdtemp(prefix="tasks_sandbox"))
+        self._tasks_backup = self._sandbox_dir / "tasks"
+        if self.tasks_dir.exists():
+            shutil.copytree(self.tasks_dir, self._tasks_backup)
+            shutil.rmtree(self.tasks_dir)
+        self.tasks_dir.mkdir(exist_ok=True)
+        self._last_backup = None
+        if self.last_file.exists():
+            self._last_backup = self._sandbox_dir / "last"
+            self._last_backup.write_text(self.last_file.read_text())
+            self.last_file.unlink()
 
     def tearDown(self):
         os.environ.clear()
         os.environ.update(self.orig_env)
         if self.history_dir.exists():
             shutil.rmtree(self.history_dir)
+        if self.tasks_dir.exists():
+            shutil.rmtree(self.tasks_dir)
+        if self._tasks_backup.exists():
+            shutil.copytree(self._tasks_backup, self.tasks_dir)
+        else:
+            self.tasks_dir.mkdir(exist_ok=True)
+        if self._last_backup and self._last_backup.exists():
+            self.last_file.write_text(self._last_backup.read_text())
+        elif self.last_file.exists():
+            self.last_file.unlink()
+        if self._sandbox_dir.exists():
+            shutil.rmtree(self._sandbox_dir)
 
     def _run_apply(self, args, stdin_data=None):
         root = Path(__file__).resolve().parents[1]
@@ -237,6 +263,30 @@ class ApplyTaskResolveTests(unittest.TestCase):
             body = _json_body(result)
             self.assertEqual(body["status"], "OK")
             self.assertEqual(body["payload"]["argv"], expected)
+
+    def test_projects_autosync_toggle(self):
+        cfg_path = self.repo_root / ".apply_task_projects.yaml"
+        assert cfg_path.exists()
+        result = self._run_apply(["projects", "autosync", "off"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = _json_body(result)
+        self.assertFalse(body["payload"]["auto_sync"])
+        data = yaml.safe_load(cfg_path.read_text())
+        self.assertFalse((data.get("project") or {}).get("enabled", True))
+        result = self._run_apply(["projects", "autosync", "on"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = _json_body(result)
+        self.assertTrue(body["payload"]["auto_sync"])
+        data = yaml.safe_load(cfg_path.read_text())
+        self.assertTrue((data.get("project") or {}).get("enabled", False))
+
+    def test_projects_status_command(self):
+        result = self._run_apply(["projects", "status"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = _json_body(result)
+        payload = body["payload"]
+        self.assertIn("target_label", payload)
+        self.assertIn("auto_sync", payload)
 
     def test_create_requires_tests(self):
         result = self._run_apply(["MyTitle", "--parent", "TASK-001"])

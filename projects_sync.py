@@ -5,27 +5,38 @@ import json
 import logging
 import os
 import random
+import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import requests
 import yaml
 
-from config import get_user_token
+from config import get_user_token, set_user_token
 
+PROJECT_ROOT = Path(os.environ.get("APPLY_TASK_PROJECT_ROOT") or Path.cwd()).resolve()
 GRAPHQL_URL = "https://api.github.com/graphql"
-CONFIG_PATH = Path(".apply_task_projects.yaml")
+CONFIG_PATH = PROJECT_ROOT / ".apply_task_projects.yaml"
 logger = logging.getLogger("apply_task.projects")
 _PROJECTS_SYNC: Optional["ProjectsSync"] = None
+_REPO_SLUG_CACHE: Optional[Tuple[str, str]] = None
+_REPO_ROOT_CACHE: Optional[Path] = None
+
+
+class ProjectsSyncPermissionError(RuntimeError):
+    """Raised when GitHub denies Projects mutations due to permissions."""
 
 
 def _read_project_file(path: Optional[Path] = None) -> Dict[str, Any]:
     target = path or CONFIG_PATH
     if not target.exists():
-        return {}
+        data = _default_config_data()
+        _write_project_file(data, target)
+        return data
     try:
         return yaml.safe_load(target.read_text()) or {}
     except Exception:
@@ -39,6 +50,31 @@ def _write_project_file(data: Dict[str, Any], path: Optional[Path] = None) -> No
             target.unlink()
         return
     target.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+
+
+def _default_config_data() -> Dict[str, Any]:
+    return {
+        "project": {
+            "type": "repository",
+            "owner": "",
+            "repo": "",
+            "number": None,
+            "enabled": True,
+        },
+        "fields": {
+            "status": {
+                "name": "Status",
+                "options": {
+                    "OK": "Done",
+                    "WARN": "In progress",
+                    "FAIL": "Backlog",
+                },
+            },
+            "progress": {"name": "Progress"},
+            "domain": {"name": "Domain"},
+            "subtasks": {"name": "Subtasks"},
+        },
+    }
 
 
 @dataclass
@@ -60,8 +96,20 @@ class ProjectConfig:
 class ProjectsSync:
     def __init__(self, config_path: Optional[Path] = None) -> None:
         self.config_path = config_path or CONFIG_PATH
+        self.detect_error: Optional[str] = None
         self.config: Optional[ProjectConfig] = self._load_config()
-        self.token = os.getenv("APPLY_TASK_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or get_user_token()
+        if self.config and (not self.config.number or self.config.number <= 0):
+            if self._auto_set_project_number():
+                self.config = self._load_config()
+        env_token = os.getenv("APPLY_TASK_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN")
+        saved_token = get_user_token()
+        self.token = env_token or saved_token
+        # если токен пришёл из окружения, но ещё не сохранён глобально — запомним его для всех проектов
+        if env_token and not saved_token:
+            try:
+                set_user_token(env_token)
+            except Exception:
+                pass
         self.session = requests.Session()
         self.project_id: Optional[str] = None
         self.project_fields: Dict[str, Dict[str, Any]] = {}
@@ -70,6 +118,7 @@ class ProjectsSync:
         self._seen_conflicts: Dict[Tuple[str, str], str] = {}
         self.last_pull: Optional[str] = None
         self.last_push: Optional[str] = None
+        self._runtime_disabled_reason: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Helpers for conflict detection / reporting
@@ -152,37 +201,57 @@ class ProjectsSync:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.config and self.config.enabled and self.token)
+        return bool(self.config and self.config.enabled and self.token and not self._runtime_disabled_reason)
+
+    @property
+    def runtime_disabled_reason(self) -> Optional[str]:
+        return self._runtime_disabled_reason
+
+    def _disable_runtime(self, reason: str) -> None:
+        if self._runtime_disabled_reason:
+            return
+        self._runtime_disabled_reason = reason
+        logger.warning("Projects sync disabled: %s", reason)
 
     def sync_task(self, task) -> bool:
         if not self.enabled:
             return False
         try:
             self._ensure_project_metadata()
+        except ProjectsSyncPermissionError:
+            return False
         except Exception as exc:  # pragma: no cover - defensive log
             logger.warning("projects sync disabled: %s", exc)
             return False
 
         changed = False
         body = self._build_body(task)
-        if not getattr(task, "project_item_id", None):
-            item_id, draft_id = self._create_draft_issue(task, body)
-            if item_id:
-                task.project_item_id = item_id
-                changed = True
-            if draft_id:
-                task.project_draft_id = draft_id
-                changed = True
-        else:
-            self._update_draft_issue(task, body)
+        try:
+            if not getattr(task, "project_item_id", None):
+                item_id, draft_id = self._create_draft_issue(task, body)
+                if not self.enabled:
+                    return False
+                if item_id:
+                    task.project_item_id = item_id
+                    changed = True
+                if draft_id:
+                    task.project_draft_id = draft_id
+                    changed = True
+            else:
+                self._update_draft_issue(task, body)
+            if not self.enabled:
+                return False
 
-        if getattr(task, "project_item_id", None):
-            self._update_fields(task)
-        repo_changed = self._ensure_repo_issue(task, body)
+            if getattr(task, "project_item_id", None):
+                self._update_fields(task)
+            if not self.enabled:
+                return False
+            repo_changed = self._ensure_repo_issue(task, body)
+        except ProjectsSyncPermissionError:
+            return False
 
         if changed or repo_changed:
             self._persist_metadata(task)
-        if changed or repo_changed:
             self.last_push = datetime.now().strftime("%Y-%m-%d %H:%M")
         return changed or repo_changed
 
@@ -198,25 +267,49 @@ class ProjectsSync:
         fields_cfg = {}
         for alias, cfg in (data.get("fields") or {}).items():
             fields_cfg[alias] = FieldConfig(name=cfg.get("name", alias), options=cfg.get("options", {}))
-        try:
-            project_type = (project.get("type") or "repository").lower()
-            owner = project["owner"]
-            number = int(project.get("number", 1))
-            repo = project.get("repo")
-        except KeyError:
-            return None
+        stored_type = (project.get("type") or "repository").lower()
+        raw_number = project.get("number")
+        number = int(raw_number) if isinstance(raw_number, int) and raw_number > 0 else None
         enabled = project.get("enabled", True)
-        return ProjectConfig(project_type=project_type, owner=owner, number=number, repo=repo, fields=fields_cfg, enabled=bool(enabled))
+        try:
+            owner, repo = detect_repo_slug()
+            self.detect_error = None
+        except RuntimeError as exc:
+            self.detect_error = str(exc)
+            owner = ""
+            repo = ""
+        if stored_type == "user":
+            repo = ""
+        return ProjectConfig(project_type=stored_type, owner=owner, number=number or 0, repo=repo, fields=fields_cfg, enabled=bool(enabled))
 
     def _graphql(self, query: str, variables: Dict[str, Any]) -> Dict[str, Any]:
         headers = {"Authorization": f"bearer {self.token}", "Accept": "application/vnd.github+json"}
         response = self.session.post(GRAPHQL_URL, json={"query": query, "variables": variables}, headers=headers, timeout=30)
+        if response.status_code in (401, 403):
+            self._disable_runtime(f"GitHub token lacks Projects access (HTTP {response.status_code})")
+            raise ProjectsSyncPermissionError("projects sync disabled due to insufficient permissions")
         if response.status_code >= 400:
             raise RuntimeError(f"GitHub API error: {response.status_code} {response.text}")
         payload = response.json()
-        if payload.get("errors"):
-            raise RuntimeError(payload["errors"])
+        errors = payload.get("errors")
+        if errors:
+            if self._looks_like_permission_error(errors):
+                reason = errors[0].get("message", "permission denied")
+                self._disable_runtime(reason)
+                raise ProjectsSyncPermissionError(reason)
+            raise RuntimeError(errors)
         return payload["data"]
+
+    @staticmethod
+    def _looks_like_permission_error(errors: Any) -> bool:
+        if not errors:
+            return False
+        keywords = ("resource not accessible", "must have push access", "forbidden", "access denied", "insufficient")
+        for err in errors:
+            message = str(err.get("message", "")).lower()
+            if any(key in message for key in keywords):
+                return True
+        return False
 
     def _ensure_project_metadata(self) -> None:
         if self.project_id:
@@ -224,13 +317,34 @@ class ProjectsSync:
         cfg = self.config
         if not cfg:
             raise RuntimeError("projects config missing")
+        retry = False
         if cfg.project_type == "repository":
             if not cfg.repo:
                 raise RuntimeError("repo is required for repository projects")
             query = self._repo_project_query()
             variables = {"owner": cfg.owner, "name": cfg.repo, "number": cfg.number}
-            data = self._graphql(query, variables)
-            node = (data.get("repository") or {}).get("projectV2")
+            while True:
+                try:
+                    data = self._graphql(query, variables)
+                    break
+                except RuntimeError as exc:
+                    if not retry and self._auto_set_project_number():
+                        cfg = self.config
+                        if not cfg or not cfg.repo:
+                            raise
+                        variables["number"] = cfg.number
+                        retry = True
+                        continue
+                    if not retry and self._auto_create_repo_project():
+                        cfg = self.config
+                        if not cfg or not cfg.repo:
+                            raise
+                        variables["number"] = cfg.number
+                        retry = True
+                        continue
+                    raise
+            repo_node = (data.get("repository") or {})
+            node = repo_node.get("projectV2")
         elif cfg.project_type == "organization":
             query = self._org_project_query()
             variables = {"login": cfg.owner, "number": cfg.number}
@@ -251,6 +365,8 @@ class ProjectsSync:
         return (
             "query($owner:String!,$name:String!,$number:Int!){\n"
             "  repository(owner:$owner,name:$name){\n"
+            "    id name\n"
+            "    owner{ id __typename login }\n"
             "    projectV2(number:$number){\n"
             "      id title\n"
             "      fields(first:50){\n"
@@ -265,6 +381,21 @@ class ProjectsSync:
             "}"
         )
 
+    def _repo_projects_list_query(self) -> str:
+        return (
+            "query($owner:String!,$name:String!){"
+            "  repository(owner:$owner,name:$name){"
+            "    projectsV2(first:10){ nodes{ number title } }"
+            "  }"
+            "}"
+        )
+
+    def _user_projects_list_query(self) -> str:
+        return (
+            "query($login:String!){"
+            "  user(login:$login){ projectsV2(first:10){ nodes{ number title } } }"
+            "}"
+        )
     def _org_project_query(self) -> str:
         return (
             "query($login:String!,$number:Int!){\n"
@@ -300,6 +431,80 @@ class ProjectsSync:
             "  }\n"
             "}"
         )
+
+    def _auto_set_project_number(self) -> bool:
+        cfg = self.config
+        if not cfg:
+            return False
+        if cfg.project_type == "repository" and cfg.repo:
+            nodes = self._list_repo_projects(cfg.owner, cfg.repo)
+            if nodes:
+                number = nodes[0].get("number")
+                if number:
+                    update_project_target(int(number))
+                    self.config = self._load_config()
+                    return True
+        nodes = self._list_user_projects(cfg.owner)
+        if nodes:
+            number = nodes[0].get("number")
+            if number:
+                _update_project_entry(type="user", repo="", number=int(number))
+                self.config = self._load_config()
+                return True
+        self.detect_error = "GitHub Projects не найдены для указанного владельца"
+        return False
+
+    def _list_repo_projects(self, owner: str, repo: str) -> List[Dict[str, Any]]:
+        try:
+            data = self._graphql(self._repo_projects_list_query(), {"owner": owner, "name": repo})
+        except Exception:
+            return []
+        return (((data.get("repository") or {}).get("projectsV2") or {}).get("nodes") or [])
+
+    def _list_user_projects(self, owner: str) -> List[Dict[str, Any]]:
+        try:
+            data = self._graphql(self._user_projects_list_query(), {"login": owner})
+        except Exception:
+            return []
+        return (((data.get("user") or {}).get("projectsV2") or {}).get("nodes") or [])
+
+    def _repo_id_query(self) -> str:
+        return (
+            "query($owner:String!,$name:String!){ repository(owner:$owner,name:$name){ id name owner{ id login } } }"
+        )
+
+    def _auto_create_repo_project(self) -> bool:
+        cfg = self.config
+        if not cfg or cfg.project_type != "repository" or not cfg.repo:
+            return False
+        try:
+            info = self._graphql(self._repo_id_query(), {"owner": cfg.owner, "name": cfg.repo})
+            repo = (info.get("repository") or {})
+            repo_id = repo.get("id")
+            owner_id = (repo.get("owner") or {}).get("id")
+            title = f"{repo.get('name') or cfg.repo} backlog"
+            mutation = (
+                "mutation($owner:ID!,$title:String!){ createProjectV2(input:{ownerId:$owner,title:$title}){ projectV2{ id number title } } }"
+            )
+            created = self._graphql(mutation, {"owner": owner_id, "title": title})
+            project = ((created.get("createProjectV2") or {}).get("projectV2") or {})
+            project_id = project.get("id")
+            number = project.get("number")
+            if project_id and repo_id:
+                link = (
+                    "mutation($project:ID!,$repo:ID!){ linkProjectV2ToRepository(input:{projectId:$project,repositoryId:$repo}){ projectV2{ id } } }"
+                )
+                try:
+                    self._graphql(link, {"project": project_id, "repo": repo_id})
+                except Exception:
+                    pass
+            if number:
+                update_project_target(int(number))
+                self.config = self._load_config()
+                return True
+        except Exception:
+            return False
+        return False
 
     def _map_fields(self, nodes: Any) -> Dict[str, Dict[str, Any]]:
         result: Dict[str, Dict[str, Any]] = {}
@@ -346,6 +551,8 @@ class ProjectsSync:
             draft = (item.get("content") or {}) if item else {}
             draft_id = draft.get("id") if draft.get("__typename") == "DraftIssue" else None
             return item.get("id"), draft_id
+        except ProjectsSyncPermissionError:
+            return None, None
         except Exception as exc:  # pragma: no cover - network failure
             logger.warning("GitHub draft creation failed: %s", exc)
             return None, None
@@ -370,18 +577,19 @@ class ProjectsSync:
         if not draft_id:
             return
         mutation = (
-            "mutation($projectId:ID!,$draftId:ID!,$title:String!,$body:String!){"
-            "  updateProjectV2DraftIssue(input:{projectId:$projectId,draftIssueId:$draftId,title:$title,body:$body}){ draftIssue{ id } }"
+            "mutation($draftId:ID!,$title:String!,$body:String!){"
+            "  updateProjectV2DraftIssue(input:{draftIssueId:$draftId,title:$title,body:$body}){ draftIssue{ id } }"
             "}"
         )
         variables = {
-            "projectId": self.project_id,
             "draftId": draft_id,
             "title": f"{task.id}: {task.title}",
             "body": body,
         }
         try:
             self._graphql(mutation, variables)
+        except ProjectsSyncPermissionError:
+            return
         except Exception as exc:  # pragma: no cover
             logger.warning("GitHub draft update failed: %s", exc)
 
@@ -421,6 +629,8 @@ class ProjectsSync:
             }
             try:
                 self._graphql(mutation, variables)
+            except ProjectsSyncPermissionError:
+                return
             except Exception as exc:  # pragma: no cover
                 logger.warning("Field update failed (%s): %s", alias, exc)
 
@@ -522,6 +732,9 @@ class ProjectsSync:
         while True:
             attempt += 1
             resp = getattr(self.session, method)(url, json=payload, headers=headers, timeout=30)
+            if resp.status_code in (401, 403):
+                self._disable_runtime(f"GitHub token lacks repo issue access (HTTP {resp.status_code})")
+                raise ProjectsSyncPermissionError("issues sync disabled due to insufficient permissions")
             if resp.status_code < 500 or attempt >= 3:
                 if resp.status_code >= 500:
                     logger.warning("issue sync retry #%s failed: %s %s", attempt, resp.status_code, resp.text)
@@ -540,10 +753,15 @@ class ProjectsSync:
             return False
         try:
             self._ensure_project_metadata()
+        except ProjectsSyncPermissionError:
+            return False
         except Exception as exc:  # pragma: no cover
             logger.warning("projects metadata unavailable: %s", exc)
             return False
-        data = self._fetch_remote_state(task.project_item_id)
+        try:
+            data = self._fetch_remote_state(task.project_item_id)
+        except ProjectsSyncPermissionError:
+            return False
         if not data:
             return False
         updates: Dict[str, Any] = {}
@@ -575,28 +793,31 @@ class ProjectsSync:
 
     def _fetch_remote_state(self, item_id: str) -> Dict[str, Any]:
         cfg_fields = self.config.fields if self.config else {}
-        field_aliases = []
         variables: Dict[str, Any] = {"item": item_id}
+        variable_defs = ["$item:ID!"]
         query_sections = []
         if "status" in cfg_fields:
             variables["statusName"] = cfg_fields["status"].name
+            variable_defs.append("$statusName:String!")
             query_sections.append(
                 "status: fieldValueByName(name:$statusName){ ... on ProjectV2ItemFieldSingleSelectValue { optionId } }"
             )
         if "progress" in cfg_fields:
             variables["progressName"] = cfg_fields["progress"].name
+            variable_defs.append("$progressName:String!")
             query_sections.append(
                 "progress: fieldValueByName(name:$progressName){ ... on ProjectV2ItemFieldNumberValue { number } }"
             )
         if "domain" in cfg_fields:
             variables["domainName"] = cfg_fields["domain"].name
+            variable_defs.append("$domainName:String!")
             query_sections.append(
                 "domain: fieldValueByName(name:$domainName){ ... on ProjectV2ItemFieldTextValue { text } }"
             )
         if not query_sections:
             return {}
         query = (
-            "query($item:ID!,$statusName:String,$progressName:String,$domainName:String){"
+            f"query({','.join(variable_defs)}){{"
             "  node(id:$item){"
             "    ... on ProjectV2Item {"
             f"      {' '.join(query_sections)} updatedAt"
@@ -747,26 +968,100 @@ def reload_projects_sync() -> ProjectsSync:
     return _PROJECTS_SYNC
 
 
-def update_projects_enabled(enabled: bool) -> bool:
+def _update_project_entry(**changes) -> None:
     data = _read_project_file()
     project = data.get("project") or {}
-    project["enabled"] = bool(enabled)
+    for key, value in changes.items():
+        if value is None:
+            project.pop(key, None)
+        else:
+            project[key] = value
     data["project"] = project
     _write_project_file(data)
     reload_projects_sync()
+
+
+def update_projects_enabled(enabled: bool) -> bool:
+    _update_project_entry(enabled=bool(enabled))
     return bool(enabled)
 
 
-def update_project_target(project_type: str, owner: str, repo: Optional[str], number: int) -> None:
-    data = _read_project_file()
-    project = data.get("project") or {}
-    project["type"] = project_type
-    project["owner"] = owner
-    project["number"] = int(number)
-    if project_type == "repository":
-        project["repo"] = repo or ""
+def update_project_target(number: int) -> None:
+    _update_project_entry(number=int(number))
+
+
+def _git_repo_root() -> Path:
+    global _REPO_ROOT_CACHE
+    if _REPO_ROOT_CACHE and _REPO_ROOT_CACHE.exists():
+        return _REPO_ROOT_CACHE
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        raise RuntimeError("текущая директория не является git-репозиторием") from exc
+    root = Path(result.stdout.strip())
+    if not root.exists():
+        raise RuntimeError("git репозиторий не найден")
+    _REPO_ROOT_CACHE = root
+    return root
+
+
+def detect_repo_slug() -> Tuple[str, str]:
+    """Возвращает (owner, repo) для текущего git-репозитория."""
+    global _REPO_SLUG_CACHE
+    if _REPO_SLUG_CACHE:
+        return _REPO_SLUG_CACHE
+    repo_root: Optional[Path] = None
+    env_root = os.environ.get("APPLY_TASK_PROJECT_ROOT")
+    if env_root:
+        candidate = Path(env_root).resolve()
+        if (candidate / ".git").exists():
+            repo_root = candidate
+    if repo_root is None:
+        repo_root = _git_repo_root()
+    try:
+        result = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=str(repo_root),
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        raise RuntimeError("remote.origin.url не настроен") from exc
+    url = result.stdout.strip()
+    if not url:
+        raise RuntimeError("remote.origin.url пустой")
+    host = ""
+    path = ""
+    if url.startswith("git@"):
+        try:
+            host_part, path = url.split(":", 1)
+            host = host_part.split("@", 1)[1]
+        except ValueError as exc:
+            raise RuntimeError("remote.origin.url имеет неверный формат") from exc
     else:
-        project.pop("repo", None)
-    data["project"] = project
-    _write_project_file(data)
-    reload_projects_sync()
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        path = parsed.path or ""
+    host = host.lower()
+    if host.endswith("github.com"):
+        host = "github.com"
+    if host != "github.com":
+        raise RuntimeError("remote origin не указывает на github.com")
+    path = path.lstrip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if not path or "/" not in path:
+        raise RuntimeError("remote origin не содержит owner/repo")
+    owner, repo = path.split("/", 1)
+    owner = owner.strip()
+    repo = repo.strip("/")
+    if not owner or not repo:
+        raise RuntimeError("remote origin некорректен")
+    _REPO_SLUG_CACHE = (owner, repo)
+    return _REPO_SLUG_CACHE

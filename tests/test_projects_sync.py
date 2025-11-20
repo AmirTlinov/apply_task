@@ -1,179 +1,172 @@
 from pathlib import Path
+import sys
 
 import pytest
-
-import json
-
-from projects_sync import ProjectsSync
-from tasks import SubTask, TaskFileParser
 import yaml
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-def test_projects_sync_disabled_without_config(tmp_path):
-    sync = ProjectsSync(config_path=tmp_path / "missing.yaml")
-    assert sync.enabled is False
-
-
-def test_projects_sync_body_preview(tmp_path, monkeypatch):
-    cfg = tmp_path / "projects.yaml"
-    cfg.write_text(
-        """
-project:
-  type: repository
-  owner: dummy
-  repo: demo
-  number: 1
-fields:
-  status:
-    name: Status
-    options:
-      OK: Done
-  progress:
-    name: Progress
-"""
-    )
-    monkeypatch.setenv("APPLY_TASK_GITHUB_TOKEN", "token")
-    sync = ProjectsSync(config_path=cfg)
-    assert sync.enabled is True
-
-    task = DummyTask()
-    body = sync._build_body(task)
-    assert "TASK-001" in body
-    assert "Subtasks" in body
+import projects_sync
+import tasks
 
 
-class DummyTask:
-    id = "TASK-001"
-    title = "Demo"
-    status = "OK"
-    domain = "demo/core"
-    description = "Body"
-    success_criteria = ["Ship" ]
-    risks = ["Latency"]
+class DummyResponse:
+    def __init__(self, status_code=200, payload=None):
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.text = str(self._payload)
 
-    def __init__(self) -> None:
-        st = SubTask(False, "Alpha")
-        st.criteria_confirmed = True
-        st.tests_confirmed = False
-        st.blockers_resolved = False
-        self.subtasks = [st]
-
-    def calculate_progress(self) -> int:
-        return 33
+    def json(self):
+        return self._payload
 
 
-def test_projects_webhook_updates_task(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    tasks_dir = tmp_path / ".tasks"
-    tasks_dir.mkdir()
-    task_file = tasks_dir / "TASK-001.task"
-    task_file.write_text(
-        "---\n"
-        "id: TASK-001\n"
-        "status: FAIL\n"
-        "progress: 0\n"
-        "domain: old\n"
-        "project_item_id: ITEM-1\n"
-        "---\n# Demo\n",
-        encoding="utf-8",
-    )
-    cfg = tmp_path / ".apply_task_projects.yaml"
-    cfg.write_text(
-        """
-project:
-  type: repository
-  owner: dummy
-  repo: demo
-  number: 1
-fields:
-  status:
-    name: Status
-    options:
-      OK: Done
-  progress:
-    name: Progress
-"""
-    )
-    monkeypatch.setenv("APPLY_TASK_GITHUB_TOKEN", "token")
-    sync = ProjectsSync(config_path=cfg)
-    sync.project_id = "proj"
-    sync.project_fields = {
-        "status": {"id": "F_STATUS", "typename": "ProjectV2SingleSelectField", "options": {}, "reverse": {"opt-done": "OK"}},
-        "progress": {"id": "F_PROGRESS", "typename": "ProjectV2NumberField"},
+class DummySession:
+    def __init__(self, post_payload=None):
+        self.post_calls = []
+        self.patch_calls = []
+        self._post_payload = post_payload or {"number": 42}
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        self.post_calls.append((url, json, headers))
+        return DummyResponse(201, self._post_payload)
+
+    def patch(self, url, json=None, headers=None, timeout=None):
+        self.patch_calls.append((url, json, headers))
+        return DummyResponse(200, {})
+
+
+def _sync_with_repo(tmp_path, monkeypatch=None):
+    if monkeypatch:
+        monkeypatch.setattr(projects_sync, "detect_repo_slug", lambda: ("octo", "demo"))
+    cfg = projects_sync.ProjectConfig(project_type="repository", owner="octo", repo="demo", number=1)
+    sync = projects_sync.ProjectsSync(config_path=tmp_path / "cfg.yaml")
+    sync.config = cfg
+    sync.token = "tok"
+    return sync
+
+
+def _write_project_cfg(path, project_type="user"):
+    data = {
+        "project": {"type": project_type, "owner": "octo", "repo": "demo", "number": 1, "enabled": True},
+        "fields": {
+            "status": {"name": "Status", "options": {"OK": "Done"}},
+            "progress": {"name": "Progress"},
+            "domain": {"name": "Domain"},
+        },
     }
-    payload = json.dumps(
-        {
-            "action": "edited",
-            "projects_v2_item": {"id": "ITEM-1", "project_node_id": "proj"},
-            "changes": {"field_value": {"field_node_id": "F_STATUS", "single_select_option_id": "opt-done"}},
-        }
-    )
-    updated = sync.handle_webhook(payload, None, None)
-    assert updated.endswith("TASK-001.task")
-    metadata = yaml.safe_load(task_file.read_text().split("---", 2)[1])
-    assert metadata["status"] == "OK"
+    if project_type != "repository":
+        data["project"].pop("repo", None)
+    path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
 
 
-def test_pull_task_fields_updates_local_file(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    tasks_dir = tmp_path / ".tasks"
-    tasks_dir.mkdir()
-    task_file = tasks_dir / "TASK-050.task"
-    task_file.write_text(
-        "---\n"
-        "id: TASK-050\n"
-        "status: FAIL\n"
-        "progress: 0\n"
-        "domain: legacy\n"
-        "project_item_id: ITEM-50\n"
-        "---\n# Demo\n",
-        encoding="utf-8",
-    )
-    cfg = tmp_path / ".apply_task_projects.yaml"
-    cfg.write_text(
-        """
-project:
-  type: repository
-  owner: dummy
-  repo: demo
-  number: 1
-fields:
-  status:
-    name: Status
-    options:
-      OK: Done
-  progress:
-    name: Progress
-  domain:
-    name: Domain
-"""
-    )
-    monkeypatch.setenv("APPLY_TASK_GITHUB_TOKEN", "token")
-    sync = ProjectsSync(config_path=cfg)
-    sync.project_id = "proj"
+def test_repo_issue_created(tmp_path, monkeypatch):
+    sync = _sync_with_repo(tmp_path, monkeypatch)
+    dummy = DummySession(post_payload={"number": 77})
+    sync.session = dummy
+    task = tasks.TaskDetail(id="TASK-001", title="Test", status="FAIL")
+
+    created = sync._ensure_repo_issue(task, "body")
+
+    assert created is True
+    assert task.project_issue_number == 77
+    assert dummy.post_calls
+
+
+def test_repo_issue_updated(tmp_path, monkeypatch):
+    sync = _sync_with_repo(tmp_path, monkeypatch)
+    dummy = DummySession()
+    sync.session = dummy
+    task = tasks.TaskDetail(id="TASK-002", title="Done", status="OK", project_issue_number=10)
+
+    created = sync._ensure_repo_issue(task, "body")
+
+    assert created is False  # update doesn't change metadata
+    assert dummy.patch_calls
+    url, payload, headers = dummy.patch_calls[0]
+    assert payload["state"] == "closed"
+
+
+def test_permission_error_disables_sync(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "projects.yaml"
+    _write_project_cfg(cfg_path, project_type="user")
+    monkeypatch.setattr(projects_sync, "detect_repo_slug", lambda: ("octo", "demo"))
+    monkeypatch.setenv("APPLY_TASK_GITHUB_TOKEN", "tok")
+    sync = projects_sync.ProjectsSync(config_path=cfg_path)
+    sync.project_id = "P"
+    sync.project_fields = {"status": {"reverse": {}}, "progress": {}, "domain": {}}
+    sync.token = "tok"
+
+    class PermissionResponse:
+        status_code = 200
+
+        def json(self):
+            return {"errors": [{"message": "Resource not accessible by integration"}]}
+
+    sync.session.post = lambda *a, **k: PermissionResponse()
+    monkeypatch.setattr(sync, "_persist_metadata", lambda *a, **k: True)
+    task = tasks.TaskDetail(id="TASK-123", title="Demo", status="FAIL")
+
+    assert sync.sync_task(task) is False
+    assert not sync.enabled
+    assert "resource not accessible" in (sync.runtime_disabled_reason or "").lower()
+
+
+def test_fetch_remote_state_parses_text_and_numbers(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "projects.yaml"
+    _write_project_cfg(cfg_path, project_type="user")
+    monkeypatch.setattr(projects_sync, "detect_repo_slug", lambda: ("octo", "demo"))
+    monkeypatch.setenv("APPLY_TASK_GITHUB_TOKEN", "tok")
+    sync = projects_sync.ProjectsSync(config_path=cfg_path)
     sync.project_fields = {
-        "status": {"id": "F_STATUS", "typename": "ProjectV2SingleSelectField", "options": {}, "reverse": {"opt-done": "OK"}},
-        "progress": {"id": "F_PROGRESS", "typename": "ProjectV2NumberField"},
-        "domain": {"id": "F_DOMAIN", "typename": "ProjectV2TextField"},
+        "status": {"reverse": {"opt-ok": "OK"}},
+        "progress": {},
+        "domain": {},
     }
 
-    task = TaskFileParser.parse(task_file)
-
-    def fake_graphql(query, variables):
+    def fake_graphql(self, query, variables):
+        assert "$statusName:String!" in query
+        assert variables["statusName"] == "Status"
+        assert variables["progressName"] == "Progress"
+        assert variables["domainName"] == "Domain"
         return {
             "node": {
-                "status": {"optionId": "opt-done"},
-                "progress": {"number": 80},
-                "domain": {"text": "new/core"},
+                "status": {"optionId": "opt-ok"},
+                "progress": {"number": 42},
+                "domain": {"text": "desktop/devtools"},
+                "updatedAt": "2025-01-01T00:00:00Z",
             }
         }
 
-    monkeypatch.setattr(sync, "_graphql", fake_graphql)
-    changed = sync.pull_task_fields(task)
-    assert changed is True
-    new_file = Path(".tasks/new/core/TASK-050.task")
-    assert new_file.exists()
-    metadata = yaml.safe_load(new_file.read_text().split("---", 2)[1])
-    assert metadata["status"] == "OK"
-    assert metadata["progress"] == 80
-    assert metadata["domain"] == "new/core"
+    sync._graphql = fake_graphql.__get__(sync, projects_sync.ProjectsSync)
+    data = sync._fetch_remote_state("ITEM-1")
+    assert data["status"] == "OK"
+    assert data["progress"] == 42
+    assert data["domain"] == "desktop/devtools"
+    assert data["remote_updated"] == "2025-01-01T00:00:00Z"
+
+
+def test_auto_switches_to_user_projects(monkeypatch, tmp_path):
+    cfg_path = tmp_path / ".apply_task_projects.yaml"
+    _write_project_cfg(cfg_path, project_type="repository")
+    cfg_text = yaml.safe_dump({"project": {"enabled": True}}, allow_unicode=True)
+    cfg_path.write_text(cfg_text, encoding="utf-8")
+
+    monkeypatch.setattr(projects_sync, "CONFIG_PATH", cfg_path)
+    projects_sync._PROJECTS_SYNC = None
+    monkeypatch.setattr(projects_sync, "detect_repo_slug", lambda: ("octo", "demo"))
+
+    def fake_graphql(self, query, variables):
+        if "repository(" in query and "projectsV2(first:10)" in query:
+            return {"repository": {"projectsV2": {"nodes": []}}}
+        if "user(" in query and "projectsV2(first:10)" in query:
+            return {"user": {"projectsV2": {"nodes": [{"number": 14}]}}}
+        if "projectV2" in query:
+            return {"user": {"projectV2": {"id": "ID", "fields": {"nodes": []}}}}
+        return {}
+
+    monkeypatch.setattr(projects_sync.ProjectsSync, "_graphql", fake_graphql, raising=False)
+    sync = projects_sync.ProjectsSync(config_path=cfg_path)
+    assert sync.config.project_type == "user"
+    assert sync.config.number == 14

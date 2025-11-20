@@ -168,7 +168,9 @@ def run_tasks_py(args, verbose: bool = False):
 
     project_root = git_root if git_root else Path.cwd()
     cmd = [str(tasks_py)] + args
-    result = subprocess.run(cmd, cwd=project_root)
+    env = os.environ.copy()
+    env["APPLY_TASK_PROJECT_ROOT"] = str(project_root)
+    result = subprocess.run(cmd, cwd=project_root, env=env)
     return result.returncode
 
 
