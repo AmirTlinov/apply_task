@@ -1535,6 +1535,9 @@ class TaskTrackerTUI:
         self._last_click_time: float = 0.0
         self._last_subtask_click_index: Optional[int] = None
         self._last_subtask_click_time: float = 0.0
+        self.subtask_detail_scroll: int = 0
+        self._subtask_detail_buffer: List[Tuple[str, str]] = []
+        self._subtask_detail_total_lines: int = 0
         self._last_rate_wait: float = 0.0
         self.clipboard = self._build_clipboard()
         self.spinner_active = False
@@ -2016,6 +2019,14 @@ class TaskTrackerTUI:
         ):
             self._paste_from_clipboard()
             return None
+        if getattr(self, "single_subtask_view", None):
+            if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+                self.move_vertical_selection(1)
+                return None
+            if mouse_event.event_type == MouseEventType.SCROLL_UP:
+                self.move_vertical_selection(-1)
+                return None
+            return NotImplemented
         if self.editing_mode:
             return NotImplemented
         if self.settings_mode and not self.editing_mode:
@@ -2073,6 +2084,19 @@ class TaskTrackerTUI:
 
         Works both in list mode (task rows) and detail mode (subtasks/dependencies).
         """
+        if getattr(self, "single_subtask_view", None):
+            total = self._subtask_detail_total_lines or 0
+            if total <= 0:
+                return
+            avail = max(5, self.get_terminal_height() - self.footer_height - 1)
+            max_offset = max(0, total - avail)
+            self.subtask_detail_scroll = max(0, min(self.subtask_detail_scroll + delta, max_offset))
+            # content_width равен ширине при последнем рендере; если нет — берем терминал
+            term_width = self.get_terminal_width()
+            content_width = max(40, term_width - 2)
+            self._render_single_subtask_view(content_width)
+            self.force_render()
+            return
         if self.detail_mode:
             items = self.get_detail_items_count()
             if items <= 0:
@@ -2168,6 +2192,86 @@ class TaskTrackerTUI:
                 result.append(('class:text', scrolled))
 
         return result
+
+    @staticmethod
+    def _formatted_lines(items: List[Tuple[str, str]]) -> List[List[Tuple[str, str]]]:
+        lines: List[List[Tuple[str, str]]] = []
+        current: List[Tuple[str, str]] = []
+
+        def push_line():
+            nonlocal current
+            lines.append(current or [('', '')])
+            current = []
+
+        for style, text in items:
+            parts = text.split('\n')
+            for idx, part in enumerate(parts):
+                if idx > 0:
+                    push_line()
+                current.append((style, part))
+            if text.endswith('\n'):
+                push_line()
+        if current:
+            push_line()
+        return lines
+
+    @staticmethod
+    def _formatted_line_count(items: List[Tuple[str, str]]) -> int:
+        return len(TaskTrackerTUI._formatted_lines(items))
+
+    def _slice_formatted_lines(self, items: List[Tuple[str, str]], start: int, end: int) -> List[Tuple[str, str]]:
+        """
+        Возвращает отформатированный срез по номеру строк [start, end).
+        Сохраняет стили, деля куски по newline.
+        """
+        lines = self._formatted_lines(items)
+        sliced = lines[start:end]
+        output: List[Tuple[str, str]] = []
+        for i, line in enumerate(sliced):
+            output.extend(line)
+            if i < len(sliced) - 1:
+                output.append(('', '\n'))
+        return output
+
+    def _render_single_subtask_view(self, content_width: int) -> None:
+        """Применяет вертикальный скролл к карточке подзадачи."""
+        if not getattr(self, "_subtask_detail_buffer", None):
+            return
+        total = self._subtask_detail_total_lines
+        avail = max(5, self.get_terminal_height() - self.footer_height - 1)
+        offset = max(0, min(self.subtask_detail_scroll, max(0, total - 1)))
+
+        indicator_top = 1 if offset > 0 else 0
+        visible_content = max(1, avail - indicator_top)
+        max_offset = max(0, total - visible_content)
+        offset = max(0, min(offset, max_offset))
+        indicator_top = 1 if offset > 0 else 0
+        indicator_bottom = 1 if offset + visible_content < total else 0
+        visible_content = max(1, avail - indicator_top - indicator_bottom)
+        max_offset = max(0, total - visible_content)
+        offset = max(0, min(offset, max_offset))
+        remaining_below = max(0, total - (offset + visible_content))
+
+        sliced = self._slice_formatted_lines(self._subtask_detail_buffer, offset, offset + visible_content)
+
+        rendered: List[Tuple[str, str]] = []
+        if indicator_top:
+            rendered.extend([
+                ('class:border', '| '),
+                ('class:text.dim', f"↑ +{offset}".ljust(content_width - 2)),
+                ('class:border', ' |\n'),
+            ])
+
+        rendered.extend(sliced)
+
+        if indicator_bottom:
+            rendered.extend([
+                ('class:border', '| '),
+                ('class:text.dim', f"↓ +{remaining_below}".ljust(content_width - 2)),
+                ('class:border', ' |\n'),
+            ])
+
+        self.single_subtask_view = FormattedText(rendered)
 
     @property
     def filtered_tasks(self) -> List[Task]:
@@ -3169,7 +3273,11 @@ class TaskTrackerTUI:
 
         lines.append(('class:border', '+' + '='*content_width + '+'))
 
-        self.single_subtask_view = FormattedText(lines)
+        # сохраняем полный буфер и строим вьюпорт с учетом вертикального скролла
+        self._subtask_detail_buffer = lines
+        self._subtask_detail_total_lines = self._formatted_line_count(lines)
+        self.subtask_detail_scroll = 0
+        self._render_single_subtask_view(content_width)
 
     def delete_current_item(self):
         """Удалить текущий выбранный элемент (задачу или подзадачу)"""

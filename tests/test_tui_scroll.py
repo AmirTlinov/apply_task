@@ -115,3 +115,23 @@ def test_last_subtask_visible_with_long_header(tmp_path):
     rendered = "".join(text for _, text in tui.get_detail_text())
     assert f"> {len(detail.subtasks)}. " in rendered  # последний виден
     # нижний маркер может отсутствовать, но последний элемент должен быть в окне
+
+
+def test_single_subtask_view_scrolls_content(tmp_path):
+    tui = build_tui(tmp_path)
+    tui.get_terminal_height = lambda: 10
+    st = SubTask(
+        False,
+        "Subtask with long content",
+        success_criteria=[f"Criterion {i}" for i in range(8)],
+        tests=[f"Test {i}" for i in range(4)],
+        blockers=[f"Blocker {i}" for i in range(3)],
+        criteria_notes=[f"Note {i}" for i in range(2)],
+    )
+    tui.show_subtask_details(st, 0)
+    # Прокручиваем сразу к низу
+    tui.subtask_detail_scroll = 50
+    tui._render_single_subtask_view(max(40, tui.get_terminal_width() - 2))
+    rendered = "".join(text for _, text in tui.single_subtask_view)
+
+    assert "Blocker 2" in rendered  # нижняя часть стала видимой после скролла
