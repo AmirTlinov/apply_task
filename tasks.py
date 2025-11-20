@@ -3275,12 +3275,6 @@ class TaskTrackerTUI:
                 lines.append(('class:text', ' ' * (inner_width - consumed)))
             lines.append(('class:border', ' |\n'))
 
-        append_indicator_row([
-            ("Критерии", subtask.criteria_confirmed),
-            ("Тесты", subtask.tests_confirmed),
-            ("Блокеры", subtask.blockers_resolved),
-        ])
-
         def add_section_header(label: str, confirmed: bool):
             status = Status.OK if confirmed else Status.FAIL
             symbol, icon_style = self._status_indicator(status)
