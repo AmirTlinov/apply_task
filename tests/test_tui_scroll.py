@@ -85,9 +85,11 @@ def test_selection_stops_at_last_item(tmp_path):
     tui.detail_selected_index = len(detail.subtasks) - 1  # уже на последнем
     tui._set_footer_height(0)
 
-    # Дополнительный скролл вниз не должен сдвигать подсветку
-    tui.move_vertical_selection(1)
-    rendered = "".join(text for _, text in tui.get_detail_text())
+    # Дополнительные скроллы вниз не должны убирать подсветку
+    for _ in range(3):
+        tui.move_vertical_selection(1)
+        rendered = "".join(text for _, text in tui.get_detail_text())
+        assert f"> {len(detail.subtasks)}. " in rendered
 
     assert tui.detail_selected_index == len(detail.subtasks) - 1
     # подсветка последнего элемента остаётся на экране
