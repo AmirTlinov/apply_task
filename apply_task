@@ -398,7 +398,7 @@ def main():
                 "history [N] / replay N — история и повтор команд.",
                 "move --glob '*.task' --to phaseX — пакетное перемещение; clean --glob '*.task' или --tag/--status — пакетное удаление.",
                 "lint [--fix] — проверка структуры .tasks.",
-                "automation task-template|task-create|checkpoint|health|projects-health — devtools обёртки с дефолтами в .tmp.",
+                "automation task-template|task-create|checkpoint|health|projects-health — devtools обёртки с дефолтами в .tmp. Пример кавычек: --risks \"perf;deps\" --sla \"p95<=200ms\".",
             ],
             "discipline": [
                 "Каждая задача дробится на атомарные результаты (<1 рабочего дня).",
