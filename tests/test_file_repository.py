@@ -116,3 +116,35 @@ def test_move_updates_domain_and_path(tmp_path: Path):
     # старый путь удалён
     old_path = (tmp_path / ".tasks" / "phase1" / "api" / f"{task.id}.task")
     assert not old_path.exists()
+
+
+def test_delete_glob(tmp_path: Path):
+    repo = FileTaskRepository(tmp_path / ".tasks")
+    for i in range(3):
+        t = _sample_task()
+        t.id = f"TASK-10{i}"
+        t.domain = "demo"
+        repo.save(t)
+    removed = repo.delete_glob("demo/TASK-10*.task")
+    assert removed == 3
+
+
+def test_clean_filtered(tmp_path: Path):
+    repo = FileTaskRepository(tmp_path / ".tasks")
+    t1 = _sample_task()
+    t1.id = "TASK-201"
+    t1.tags = ["alpha", "beta"]
+    t1.status = "OK"
+    repo.save(t1)
+
+    t2 = _sample_task()
+    t2.id = "TASK-202"
+    t2.tags = ["beta"]
+    t2.status = "FAIL"
+    repo.save(t2)
+
+    matched, removed = repo.clean_filtered(tag="alpha", status="OK")
+    assert matched == ["TASK-201"]
+    assert removed == 1
+    assert repo.load("TASK-201") is None
+    assert repo.load("TASK-202") is not None

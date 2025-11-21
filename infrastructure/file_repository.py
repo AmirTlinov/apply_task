@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from core import TaskDetail
 from application.ports import TaskRepository
@@ -112,3 +112,44 @@ class FileTaskRepository(TaskRepository):
                 if self.move(tid, new_domain, current_domain=str(rel.parent)) or self.move(tid, new_domain):
                     moved += 1
         return moved
+
+    def delete_glob(self, pattern: str) -> int:
+        removed = 0
+        for file in self.tasks_dir.rglob("TASK-*.task"):
+            try:
+                rel = file.relative_to(self.tasks_dir)
+            except Exception:
+                rel = file
+            if rel.match(pattern):
+                try:
+                    file.unlink()
+                    removed += 1
+                except OSError:
+                    continue
+        return removed
+
+    def clean_filtered(self, tag: str = "", status: str = "", phase: str = "") -> Tuple[List[str], int]:
+        matched: list[str] = []
+        removed = 0
+        norm_tag = tag.strip().lower() if tag else ""
+        norm_status = status.strip().upper() if status else ""
+        norm_phase = phase.strip().lower() if phase else ""
+
+        for file in self.tasks_dir.rglob("TASK-*.task"):
+            parsed = TaskFileParser.parse(file)
+            if not parsed:
+                continue
+            tags = [t.strip().lower() for t in (parsed.tags or [])]
+            if norm_tag and norm_tag not in tags:
+                continue
+            if norm_status and (parsed.status or "").upper() != norm_status:
+                continue
+            if norm_phase and (parsed.phase or "").strip().lower() != norm_phase:
+                continue
+            matched.append(parsed.id)
+            try:
+                file.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return matched, removed

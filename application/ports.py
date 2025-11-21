@@ -1,4 +1,4 @@
-from typing import Protocol, List, Optional
+from typing import Protocol, List, Optional, Tuple
 from core import TaskDetail
 
 
@@ -25,4 +25,10 @@ class TaskRepository(Protocol):
         ...
 
     def move_glob(self, pattern: str, new_domain: str) -> int:
+        ...
+
+    def delete_glob(self, pattern: str) -> int:
+        ...
+
+    def clean_filtered(self, tag: str = "", status: str = "", phase: str = "") -> Tuple[List[str], int]:
         ...

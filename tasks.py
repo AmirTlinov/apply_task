@@ -31,6 +31,8 @@ from core import Status, SubTask, TaskDetail
 from application.ports import TaskRepository
 from infrastructure.file_repository import FileTaskRepository
 from infrastructure.task_file_parser import TaskFileParser
+from infrastructure.projects_sync_service import ProjectsSyncService
+from application.sync_service import SyncService
 
 import projects_sync
 from projects_sync import (
@@ -45,6 +47,11 @@ from config import get_user_token, set_user_token
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M"
 GITHUB_GRAPHQL = "https://api.github.com/graphql"
+
+
+def _get_sync_service() -> ProjectsSyncService:
+    """Factory used outside TaskManager to obtain sync adapter."""
+    return ProjectsSyncService(get_projects_sync())
 
 
 def current_timestamp() -> str:
@@ -247,11 +254,13 @@ class Task:
 
 
 class TaskManager:
-    def __init__(self, tasks_dir: Path = Path(".tasks"), repository: Optional[TaskRepository] = None, sync_provider=None):
+    def __init__(self, tasks_dir: Path = Path(".tasks"), repository: Optional[TaskRepository] = None, sync_service: Optional[SyncService] = None, sync_provider=None):
         self.tasks_dir = tasks_dir
         self.tasks_dir.mkdir(exist_ok=True)
         self.repo: TaskRepository = repository or FileTaskRepository(tasks_dir)
-        self.sync_provider = sync_provider or (lambda: get_projects_sync())
+        # sync_provider оставлен для обратной совместимости; sync_service — основной путь
+        base_sync = sync_service or (ProjectsSyncService(sync_provider()) if sync_provider else ProjectsSyncService(get_projects_sync()))
+        self.sync_service: SyncService = base_sync
         self.config = self.load_config()
         self.auto_sync_message = ""
         self.last_sync_error = ""
@@ -318,7 +327,7 @@ class TaskManager:
             task.status = "OK"
         task.domain = self.sanitize_domain(task.domain)
         self.repo.save(task)
-        sync = self.sync_provider()
+        sync = self.sync_service
         if sync.enabled:
             changed = bool(sync.sync_task(task))
             if getattr(task, "_sync_error", None):
@@ -336,7 +345,7 @@ class TaskManager:
             if prog == 100 and not task.blocked and task.status != "OK":
                 task.status = "OK"
                 self.save_task(task)
-        sync = self.sync_provider()
+        sync = self.sync_service
         if sync.enabled and task.project_item_id:
             sync.pull_task_fields(task)
         return task
@@ -354,7 +363,7 @@ class TaskManager:
                     parsed.status = "OK"
                     self.save_task(parsed)
             if not skip_sync:
-                sync = self.sync_provider()
+                sync = self.sync_service
                 if sync.enabled and parsed.project_item_id:
                     sync.pull_task_fields(parsed)
         return sorted(tasks, key=lambda t: t.id)
@@ -362,18 +371,11 @@ class TaskManager:
     def _auto_sync_all(self) -> int:
         if not self.config.get("auto_sync", True):
             return 0
-        base_sync = self.sync_provider()
+        base_sync = self.sync_service
         if not base_sync.enabled or getattr(base_sync, "_full_sync_done", False):
             return 0
         setattr(base_sync, "_full_sync_done", True)
-        repo_requires_issue = bool(base_sync.config and base_sync.config.project_type == "repository" and base_sync.config.repo)
-        tasks_to_sync: List[Tuple[TaskDetail, Path]] = []
-        for task in self.repo.list("", skip_sync=True):
-            needs_item = not getattr(task, "project_item_id", None)
-            needs_issue = repo_requires_issue and not getattr(task, "project_issue_number", None)
-            if not needs_item and not needs_issue:
-                continue
-            tasks_to_sync.append((task, Path(task.filepath)))
+        tasks_to_sync: List[Tuple[TaskDetail, Path]] = [(t, Path(t.filepath)) for t in self.repo.list("", skip_sync=True)]
         if not tasks_to_sync:
             return 0
 
@@ -403,12 +405,8 @@ class TaskManager:
         return changed_count
 
     def _make_parallel_sync(self, base_sync):
-        """Создает независимую копию ProjectsSync для безопасной работы в пуле."""
-        clone = projects_sync.ProjectsSync(config_path=projects_sync.CONFIG_PATH)
-        clone.token = base_sync.token
-        clone.config = base_sync.config
-        clone.project_fields = base_sync.project_fields
-        return clone
+        """Сохраняем совместимость с тестами: возвращаем клон сервиса."""
+        return base_sync.clone() if hasattr(base_sync, "clone") else base_sync
 
     def _compute_worker_count(self, queue_size: int) -> int:
         env_override = os.getenv("APPLY_TASK_SYNC_WORKERS")
@@ -416,7 +414,7 @@ class TaskManager:
             value = int(env_override)
             if value > 0:
                 return max(1, min(value, queue_size or value))
-        sync = self.sync_provider()
+        sync = self.sync_service
         cfg_workers = getattr(sync.config, "workers", None) if sync and sync.config else None
         if cfg_workers:
             return max(1, min(int(cfg_workers), queue_size or int(cfg_workers)))
@@ -540,25 +538,36 @@ class TaskManager:
         return self.repo.move_glob(pattern, target_domain)
 
     def clean_tasks(self, tag: Optional[str] = None, status: Optional[str] = None, phase: Optional[str] = None, dry_run: bool = False) -> Tuple[List[str], int]:
-        matched: List[str] = []
-        removed = 0
-        norm_tag = (tag or "").strip().lower()
-        norm_status = (status or "").strip().upper()
-        norm_phase = (phase or "").strip().lower()
+        if dry_run:
+            matched = [
+                d.id
+                for d in self.repo.list("", skip_sync=True)
+                if (not tag or tag.strip().lower() in [t.lower() for t in d.tags])
+                and (not status or (d.status or "").upper() == status.strip().upper())
+                and (not phase or (d.phase or "").strip().lower() == phase.strip().lower())
+            ]
+            return matched, 0
+        try:
+            return self.repo.clean_filtered(tag or "", status or "", phase or "")
+        except NotImplementedError:
+            matched: List[str] = []
+            removed = 0
+            norm_tag = (tag or "").strip().lower()
+            norm_status = (status or "").strip().upper()
+            norm_phase = (phase or "").strip().lower()
 
-        for detail in self.repo.list("", skip_sync=True):
-            tags = [t.strip().lower() for t in (detail.tags or [])]
-            if norm_tag and norm_tag not in tags:
-                continue
-            if norm_status and (detail.status or "").upper() != norm_status:
-                continue
-            if norm_phase and (detail.phase or "").strip().lower() != norm_phase:
-                continue
-            matched.append(detail.id)
-            if not dry_run:
+            for detail in self.repo.list("", skip_sync=True):
+                tags = [t.strip().lower() for t in (detail.tags or [])]
+                if norm_tag and norm_tag not in tags:
+                    continue
+                if norm_status and (detail.status or "").upper() != norm_status:
+                    continue
+                if norm_phase and (detail.phase or "").strip().lower() != norm_phase:
+                    continue
+                matched.append(detail.id)
                 if self.repo.delete(detail.id, detail.domain):
                     removed += 1
-        return matched, removed
+            return matched, removed
 
     def delete_task(self, task_id: str, domain: str = "") -> bool:
         return self.repo.delete(task_id, domain)
@@ -2313,7 +2322,7 @@ class TaskTrackerTUI:
         return None
 
     def _sync_status_summary(self) -> str:
-        sync = get_projects_sync()
+        sync = self.manager.sync_service if hasattr(self, "manager") else get_projects_sync()
         cfg = getattr(sync, "config", None)
         if not cfg:
             return "OFF"
@@ -2325,7 +2334,7 @@ class TaskTrackerTUI:
         return f"{prefix} {target}"
 
     def _sync_indicator_fragments(self, filter_flash: bool = False) -> List[Tuple[str, str]]:
-        sync = get_projects_sync()
+        sync = self.manager.sync_service if hasattr(self, "manager") else get_projects_sync()
         cfg = getattr(sync, "config", None)
         snapshot = self._project_config_snapshot()
         enabled = bool(sync and sync.enabled and cfg and snapshot["config_enabled"])
@@ -4941,7 +4950,7 @@ def cmd_projects_auth(args) -> int:
 
 
 def cmd_projects_webhook(args) -> int:
-    sync = get_projects_sync()
+    sync = _get_sync_service()._sync
     if not sync.enabled:
         return structured_error("projects-webhook", "Projects sync disabled (missing token or config)")
     body = _load_input_source(args.payload, "--payload")
@@ -4967,7 +4976,7 @@ def cmd_projects_webhook(args) -> int:
 
 
 def cmd_projects_webhook_serve(args) -> int:
-    sync = get_projects_sync()
+    sync = _get_sync_service()._sync
     if not sync.enabled:
         return structured_error("projects-webhook-serve", "Projects sync disabled (missing token or config)")
 
@@ -5011,7 +5020,8 @@ def cmd_projects_webhook_serve(args) -> int:
 def cmd_projects_sync_cli(args) -> int:
     if not args.all:
         return structured_error("projects sync", "Укажи --all для явного подтверждения")
-    sync = get_projects_sync()
+    sync_service = _get_sync_service()
+    sync = sync_service._sync
     if not sync.enabled:
         status = _projects_status_payload()
         reason = status.get("status_reason") or "Projects sync отключён или не настроен"
@@ -5044,7 +5054,8 @@ def cmd_projects_sync_cli(args) -> int:
 
 
 def _projects_status_payload() -> Dict[str, Any]:
-    sync = get_projects_sync()
+    sync_service = _get_sync_service()
+    sync = sync_service._sync
     try:
         if sync.enabled:
             sync._ensure_project_metadata()
