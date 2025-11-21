@@ -1402,18 +1402,37 @@ class TaskTrackerTUI:
         @kb.add("left")
         def _(event):
             """Left - collapse or go to parent in detail tree"""
-            if self.detail_mode and not getattr(self, "single_subtask_view", None):
-                self._toggle_collapse_selected(expand=False)
+            if getattr(self, "single_subtask_view", None):
+                self.exit_detail_view()
                 return
-            # в остальных режимах пока нет действий
+            if self.detail_mode:
+                entry = self._selected_subtask_entry()
+                if entry:
+                    _, _, _, collapsed, has_children = entry
+                    if has_children and not collapsed:
+                        self._toggle_collapse_selected(expand=False)
+                        return
+                self.exit_detail_view()
+                return
+            # в списке задач: поведение как backspace недоступно — оставляем без действия
 
         @kb.add("right")
         def _(event):
             """Right - expand or go to first child in detail tree"""
-            if self.detail_mode and not getattr(self, "single_subtask_view", None):
+            if not self.detail_mode:
+                if self.filtered_tasks:
+                    self.show_task_details(self.filtered_tasks[self.selected_index])
+                return
+            if getattr(self, "single_subtask_view", None):
+                return
+            entry = self._selected_subtask_entry()
+            if not entry:
+                return
+            path, _, _, collapsed, has_children = entry
+            if has_children and collapsed:
                 self._toggle_collapse_selected(expand=True)
                 return
-            # в остальных режимах пока нет действий
+            self.show_subtask_details(path)
 
         @kb.add("home")
         def _(event):
