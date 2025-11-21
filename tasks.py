@@ -3103,22 +3103,25 @@ class TaskTrackerTUI:
                 detail_lines.append(('class:header', header[: content_width - 2].ljust(content_width - 2)))
                 detail_lines.append(('class:border', ' |\n'))
 
-                def _append_section(label: str, rows: List[str]) -> None:
+                def _append_block(title: str, rows: List[str]) -> None:
                     if not rows:
                         return
+                    detail_lines.append(('class:border', '| '))
+                    detail_lines.append(('class:text.dim', f" {title}:".ljust(content_width - 2)))
+                    detail_lines.append(('class:border', ' |\n'))
                     for idxr, row in enumerate(rows, 1):
-                        text = f"{label} {idxr}. {row}"
+                        prefix = f"  {idxr}. "
+                        raw = prefix + row
                         if self.horizontal_offset > 0:
-                            text = text[self.horizontal_offset:] if len(text) > self.horizontal_offset else ""
-                        chunks = [text[i:i + content_width - 4] for i in range(0, len(text), content_width - 4)] or [""]
-                        for chunk in chunks:
+                            raw = raw[self.horizontal_offset:] if len(raw) > self.horizontal_offset else ""
+                        for chunk, _ in self._wrap_with_prefix(row, content_width - 2, prefix):
                             detail_lines.append(('class:border', '| '))
-                            detail_lines.append(('class:text', f"  {chunk}".ljust(content_width - 2)))
+                            detail_lines.append(('class:text', chunk))
                             detail_lines.append(('class:border', ' |\n'))
 
-                _append_section("Критерий", st_sel.success_criteria)
-                _append_section("Тест", st_sel.tests)
-                _append_section("Блокер", st_sel.blockers)
+                _append_block("Критерии", st_sel.success_criteria)
+                _append_block("Тесты", st_sel.tests)
+                _append_block("Блокеры", st_sel.blockers)
 
                 sliced = self._slice_formatted_lines(detail_lines, 0, remaining)
                 result.extend(sliced)
