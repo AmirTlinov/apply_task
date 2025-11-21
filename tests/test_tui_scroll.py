@@ -127,6 +127,25 @@ def test_collapse_expand_toggles_visibility(tmp_path):
     assert "0.0" in expanded
 
 
+def test_collapse_state_persists_per_task(tmp_path):
+    tui = build_tui(tmp_path)
+    child = SubTask(False, "Child", success_criteria=["c"], tests=["t"], blockers=["b"])
+    parent = SubTask(False, "Parent", success_criteria=["p"], tests=["t"], blockers=["b"], children=[child])
+    detail = TaskDetail(id="TASK-PERSIST", title="Demo", status="WARN")
+    detail.subtasks = [parent]
+    task = Task(name="Demo", status=Status.FAIL, description="", category="", task_file="")
+    task.detail = detail
+
+    tui.show_task_details(task)
+    tui._toggle_collapse_selected(expand=False)
+    collapsed = "".join(text for _, text in tui.get_detail_text())
+    assert "0.0" not in collapsed
+
+    tui.show_task_details(task)  # reopen should keep collapsed
+    reopened = "".join(text for _, text in tui.get_detail_text())
+    assert "0.0" not in reopened
+
+
 def test_selection_stops_at_last_item(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 12

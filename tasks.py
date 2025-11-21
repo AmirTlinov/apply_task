@@ -1232,6 +1232,7 @@ class TaskTrackerTUI:
         if getattr(self.manager, "last_sync_error", ""):
             self.set_status_message(self.manager.last_sync_error, ttl=6)
         self.detail_collapsed: Set[str] = set()
+        self.collapsed_by_task: Dict[str, Set[str]] = {}
 
         # Editing mode
         self.editing_mode = False
@@ -1691,6 +1692,8 @@ class TaskTrackerTUI:
                 parent_path = ".".join(path.split(".")[:-1])
                 self._select_subtask_by_path(parent_path)
                 self._rebuild_detail_flat(parent_path)
+        if self.current_task_detail:
+            self.collapsed_by_task[self.current_task_detail.id] = set(self.detail_collapsed)
         self._ensure_detail_selection_visible(len(self.detail_flat_subtasks))
         self.force_render()
 
@@ -3126,7 +3129,7 @@ class TaskTrackerTUI:
         self.current_task_detail = task.detail or TaskFileParser.parse(Path(task.task_file))
         self.detail_mode = True
         self.detail_selected_index = 0
-        self.detail_collapsed = set()
+        self.detail_collapsed = set(self.collapsed_by_task.get(self.current_task_detail.id, set()))
         self._rebuild_detail_flat()
         self.detail_view_offset = 0
         self._set_footer_height(0)
