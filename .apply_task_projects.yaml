@@ -14,7 +14,7 @@ fields:
 project:
   enabled: true
   number: null
-  owner: ""
-  repo: ""
+  owner: AmirTlinov
+  repo: apply_task
   type: repository
   workers: 0
