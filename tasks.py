@@ -158,6 +158,38 @@ def _flatten_subtasks(subtasks: List[SubTask], prefix: str = "") -> List[Tuple[s
     return flat
 
 
+def _find_subtask_by_path(subtasks: List[SubTask], path: str) -> Tuple[Optional[SubTask], Optional[SubTask], Optional[int]]:
+    parts_raw = [p for p in path.split(".") if p.strip() != ""]
+    if not parts_raw:
+        return None, None, None
+    try:
+        parts = [int(p) for p in parts_raw]
+    except ValueError:
+        return None, None, None
+    current_list = subtasks
+    parent_node = None
+    for pos, idx in enumerate(parts):
+        if idx < 0 or idx >= len(current_list):
+            return None, None, None
+        target = current_list[idx]
+        if pos == len(parts) - 1:
+            return target, parent_node, idx
+        parent_node = target
+        current_list = target.children
+    return None, None, None
+
+
+def _attach_subtask(subtasks: List[SubTask], parent_path: Optional[str], new_subtask: SubTask) -> bool:
+    if not parent_path:
+        subtasks.append(new_subtask)
+        return True
+    parent, _, _ = _find_subtask_by_path(subtasks, parent_path)
+    if not parent:
+        return False
+    parent.children.append(new_subtask)
+    return True
+
+
 def subtask_to_dict(subtask: SubTask) -> Dict[str, Any]:
     """Структурированное представление подзадачи."""
     return {
@@ -480,7 +512,7 @@ class TaskManager:
         self.save_task(task)
         return True, None
 
-    def add_subtask(self, task_id: str, title: str, domain: str = "", criteria: Optional[List[str]] = None, tests: Optional[List[str]] = None, blockers: Optional[List[str]] = None) -> Tuple[bool, Optional[str]]:
+    def add_subtask(self, task_id: str, title: str, domain: str = "", criteria: Optional[List[str]] = None, tests: Optional[List[str]] = None, blockers: Optional[List[str]] = None, parent_path: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         task = self.load_task(task_id, domain)
         if not task:
             return False, "not_found"
@@ -489,18 +521,28 @@ class TaskManager:
         bl = [b.strip() for b in (blockers or []) if b.strip()]
         if not crit or not tst or not bl:
             return False, "missing_fields"
-        task.subtasks.append(SubTask(False, title, crit, tst, bl))
+        if parent_path:
+            ok = _attach_subtask(task.subtasks, parent_path, SubTask(False, title, crit, tst, bl))
+            if not ok:
+                return False, "path"
+        else:
+            task.subtasks.append(SubTask(False, title, crit, tst, bl))
         task.update_status_from_progress()
         self.save_task(task)
         return True, None
 
-    def set_subtask(self, task_id: str, index: int, completed: bool, domain: str = "") -> Tuple[bool, Optional[str]]:
+    def set_subtask(self, task_id: str, index: int, completed: bool, domain: str = "", path: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         task = self.load_task(task_id, domain)
         if not task:
             return False, "not_found"
-        if index < 0 or index >= len(task.subtasks):
-            return False, "index"
-        st = task.subtasks[index]
+        if path:
+            st, _, _ = _find_subtask_by_path(task.subtasks, path)
+            if not st:
+                return False, "index"
+        else:
+            if index < 0 or index >= len(task.subtasks):
+                return False, "index"
+            st = task.subtasks[index]
         if completed and not st.ready_for_completion():
             missing = []
             if not st.criteria_confirmed:
@@ -515,13 +557,18 @@ class TaskManager:
         self.save_task(task)
         return True, None
 
-    def update_subtask_checkpoint(self, task_id: str, index: int, checkpoint: str, value: bool, note: str = "", domain: str = "") -> Tuple[bool, Optional[str]]:
+    def update_subtask_checkpoint(self, task_id: str, index: int, checkpoint: str, value: bool, note: str = "", domain: str = "", path: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         task = self.load_task(task_id, domain)
         if not task:
             return False, "not_found"
-        if index < 0 or index >= len(task.subtasks):
-            return False, "index"
-        st = task.subtasks[index]
+        if path:
+            st, _, _ = _find_subtask_by_path(task.subtasks, path)
+            if not st:
+                return False, "index"
+        else:
+            if index < 0 or index >= len(task.subtasks):
+                return False, "index"
+            st = task.subtasks[index]
         checkpoint = checkpoint.lower()
         attr_map = {
             "criteria": ("criteria_confirmed", "criteria_notes"),
@@ -4452,12 +4499,17 @@ def cmd_subtask(args) -> int:
 
     action = active[0]
 
-    def _snapshot(index: Optional[int] = None) -> Dict[str, Any]:
+    def _snapshot(index: Optional[int] = None, path: Optional[str] = None) -> Dict[str, Any]:
         detail = manager.load_task(task_id, domain)
         payload: Dict[str, Any] = {"task_id": task_id}
         if detail:
             payload["task"] = task_to_dict(detail, include_subtasks=True)
-            if index is not None and 0 <= index < len(detail.subtasks):
+            if path:
+                payload["path"] = path
+                target, _, _ = _find_subtask_by_path(detail.subtasks, path)
+                if target:
+                    payload["subtask"] = {"path": path, **subtask_to_dict(target)}
+            if index is not None and 0 <= index < len(detail.subtasks) and "subtask" not in payload:
                 payload["subtask"] = {"index": index, **subtask_to_dict(detail.subtasks[index])}
         return payload
 
@@ -4467,9 +4519,9 @@ def cmd_subtask(args) -> int:
         blockers = _parse_semicolon_list(args.blockers)
         if not args.add or len(args.add.strip()) < 20:
             return structured_error("subtask", "Подзадача должна содержать как минимум 20 символов с деталями")
-        ok, err = manager.add_subtask(task_id, args.add.strip(), domain, criteria, tests, blockers)
+        ok, err = manager.add_subtask(task_id, args.add.strip(), domain, criteria, tests, blockers, parent_path=args.path)
         if ok:
-            payload = _snapshot()
+            payload = _snapshot(path=args.path)
             payload["operation"] = "add"
             payload["subtask_title"] = args.add.strip()
             return structured_response(
@@ -4488,16 +4540,16 @@ def cmd_subtask(args) -> int:
         return structured_error("subtask", f"Задача {task_id} не найдена", payload={"task_id": task_id})
 
     if action == "done":
-        ok, msg = manager.set_subtask(task_id, args.done, True, domain)
+        ok, msg = manager.set_subtask(task_id, args.done, True, domain, path=args.path)
         if ok:
-            payload = _snapshot(args.done)
+            payload = _snapshot(args.done, path=args.path)
             payload["operation"] = "done"
             return structured_response(
                 "subtask",
                 status="OK",
-                message=f"Подзадача {args.done} отмечена выполненной в {task_id}",
+                message=f"Подзадача {args.path or args.done} отмечена выполненной в {task_id}",
                 payload=payload,
-                summary=f"{task_id} subtask#{args.done} DONE",
+                summary=f"{task_id} subtask#{args.path or args.done} DONE",
             )
         if msg == "not_found":
             return structured_error("subtask", f"Задача {task_id} не найдена", payload={"task_id": task_id})
@@ -4506,16 +4558,16 @@ def cmd_subtask(args) -> int:
         return structured_error("subtask", msg or "Операция не выполнена", payload={"task_id": task_id})
 
     if action == "undo":
-        ok, msg = manager.set_subtask(task_id, args.undo, False, domain)
+        ok, msg = manager.set_subtask(task_id, args.undo, False, domain, path=args.path)
         if ok:
-            payload = _snapshot(args.undo)
+            payload = _snapshot(args.undo, path=args.path)
             payload["operation"] = "undo"
             return structured_response(
                 "subtask",
                 status="OK",
-                message=f"Подзадача {args.undo} возвращена в работу в {task_id}",
+                message=f"Подзадача {args.path or args.undo} возвращена в работу в {task_id}",
                 payload=payload,
-                summary=f"{task_id} subtask#{args.undo} UNDO",
+                summary=f"{task_id} subtask#{args.path or args.undo} UNDO",
             )
         if msg == "not_found":
             return structured_error("subtask", f"Задача {task_id} не найдена", payload={"task_id": task_id})
@@ -4525,17 +4577,17 @@ def cmd_subtask(args) -> int:
 
     note = (args.note or "").strip()
     if action == "criteria_done":
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.criteria_done, "criteria", True, note, domain)
+        ok, msg = manager.update_subtask_checkpoint(task_id, args.criteria_done, "criteria", True, note, domain, path=args.path)
     elif action == "criteria_undo":
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.criteria_undo, "criteria", False, note, domain)
+        ok, msg = manager.update_subtask_checkpoint(task_id, args.criteria_undo, "criteria", False, note, domain, path=args.path)
     elif action == "tests_done":
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.tests_done, "tests", True, note, domain)
+        ok, msg = manager.update_subtask_checkpoint(task_id, args.tests_done, "tests", True, note, domain, path=args.path)
     elif action == "tests_undo":
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.tests_undo, "tests", False, note, domain)
+        ok, msg = manager.update_subtask_checkpoint(task_id, args.tests_undo, "tests", False, note, domain, path=args.path)
     elif action == "blockers_done":
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.blockers_done, "blockers", True, note, domain)
+        ok, msg = manager.update_subtask_checkpoint(task_id, args.blockers_done, "blockers", True, note, domain, path=args.path)
     else:  # blockers_undo
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.blockers_undo, "blockers", False, note, domain)
+        ok, msg = manager.update_subtask_checkpoint(task_id, args.blockers_undo, "blockers", False, note, domain, path=args.path)
 
     if ok:
         labels = {
@@ -4554,7 +4606,7 @@ def cmd_subtask(args) -> int:
             "blockers_done": args.blockers_done,
             "blockers_undo": args.blockers_undo,
         }
-        payload = _snapshot(index_map.get(action))
+        payload = _snapshot(index_map.get(action), path=args.path)
         payload["operation"] = action
         if note:
             payload["note"] = note
@@ -5855,6 +5907,7 @@ def build_parser() -> argparse.ArgumentParser:
     okp.add_argument("--criteria-note")
     okp.add_argument("--tests-note")
     okp.add_argument("--blockers-note")
+    okp.add_argument("--path", help="Путь подзадачи (0.1.2) вместо индекса")
     add_context_args(okp)
     okp.set_defaults(func=cmd_ok)
 
@@ -5871,6 +5924,7 @@ def build_parser() -> argparse.ArgumentParser:
     subok_ok.add_argument("--criteria-note")
     subok_ok.add_argument("--tests-note")
     subok_ok.add_argument("--blockers-note")
+    subok_ok.add_argument("--path", help="Путь подзадачи (0.1.2) вместо индекса")
     add_context_args(subok_ok)
     subok_ok.set_defaults(func=cmd_ok)
 
@@ -5881,6 +5935,7 @@ def build_parser() -> argparse.ArgumentParser:
     notep.add_argument("--checkpoint", choices=["criteria", "tests", "blockers"], required=True)
     notep.add_argument("--note", required=True)
     notep.add_argument("--undo", action="store_true", help="сбросить подтверждение вместо установки")
+    notep.add_argument("--path", help="Путь подзадачи (0.1.2) вместо индекса")
     add_context_args(notep)
     notep.set_defaults(func=cmd_note)
 
@@ -5961,6 +6016,7 @@ def build_parser() -> argparse.ArgumentParser:
     stp.add_argument("--blockers-done", type=int, dest="blockers_done", help="подтвердить снятие блокеров (индекс)")
     stp.add_argument("--blockers-undo", type=int, dest="blockers_undo", help="сбросить подтверждение блокеров (индекс)")
     stp.add_argument("--note", help="описание/доказательство при отметке чекпоинтов")
+    stp.add_argument("--path", help="Путь подзадачи (0.1.2). Для плоских индексов оставь пустым.")
     add_context_args(stp)
     stp.set_defaults(func=cmd_subtask)
 
