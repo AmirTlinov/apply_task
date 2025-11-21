@@ -3092,30 +3092,37 @@ class TaskTrackerTUI:
 
         # Детали выбранной подзадачи (критерии/тесты/блокеры)
         selected_entry = self._selected_subtask_entry() if items else None
-        if selected_entry and not compact:
-            _, st_sel, _, _, _ = selected_entry
-            result.append(('class:border', '+' + '-'*content_width + '+\n'))
-            result.append(('class:border', '| '))
-            header = f"ДЕТАЛИ ПОДЗАДАЧИ: {self.detail_selected_path or ''}"
-            result.append(('class:header', header[: content_width - 2].ljust(content_width - 2)))
-            result.append(('class:border', ' |\n'))
+        if selected_entry:
+            remaining = max(0, self.get_terminal_height() - self.footer_height - line_counter - 1)
+            if remaining > 2:
+                _, st_sel, _, _, _ = selected_entry
+                detail_lines: List[Tuple[str, str]] = []
+                detail_lines.append(('class:border', '+' + '-'*content_width + '+\n'))
+                detail_lines.append(('class:border', '| '))
+                header = f"ДЕТАЛИ ПОДЗАДАЧИ: {self.detail_selected_path or ''}"
+                detail_lines.append(('class:header', header[: content_width - 2].ljust(content_width - 2)))
+                detail_lines.append(('class:border', ' |\n'))
 
-            def _append_section(label: str, rows: List[str]):
-                if not rows:
-                    return
-                for idxr, row in enumerate(rows, 1):
-                    text = f"{label} {idxr}. {row}"
-                    if self.horizontal_offset > 0:
-                        text = text[self.horizontal_offset:] if len(text) > self.horizontal_offset else ""
-                    chunks = [text[i:i + content_width - 4] for i in range(0, len(text), content_width - 4)] or [""]
-                    for chunk in chunks:
-                        result.append(('class:border', '| '))
-                        result.append(('class:text', f"  {chunk}".ljust(content_width - 2)))
-                        result.append(('class:border', ' |\n'))
+                def _append_section(label: str, rows: List[str]) -> None:
+                    if not rows:
+                        return
+                    for idxr, row in enumerate(rows, 1):
+                        text = f"{label} {idxr}. {row}"
+                        if self.horizontal_offset > 0:
+                            text = text[self.horizontal_offset:] if len(text) > self.horizontal_offset else ""
+                        chunks = [text[i:i + content_width - 4] for i in range(0, len(text), content_width - 4)] or [""]
+                        for chunk in chunks:
+                            detail_lines.append(('class:border', '| '))
+                            detail_lines.append(('class:text', f"  {chunk}".ljust(content_width - 2)))
+                            detail_lines.append(('class:border', ' |\n'))
 
-            _append_section("Критерий", st_sel.success_criteria)
-            _append_section("Тест", st_sel.tests)
-            _append_section("Блокер", st_sel.blockers)
+                _append_section("Критерий", st_sel.success_criteria)
+                _append_section("Тест", st_sel.tests)
+                _append_section("Блокер", st_sel.blockers)
+
+                sliced = self._slice_formatted_lines(detail_lines, 0, remaining)
+                result.extend(sliced)
+                line_counter += remaining
 
         # Дополнительные секции: next, deps, success criteria, problems, risks
         section_titles = {

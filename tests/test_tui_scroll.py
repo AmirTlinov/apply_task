@@ -148,6 +148,7 @@ def test_collapse_state_persists_per_task(tmp_path):
 
 def test_selected_subtask_details_rendered(tmp_path):
     tui = build_tui(tmp_path)
+    tui.get_terminal_height = lambda: 40
     detail = TaskDetail(id="TASK-DETAIL", title="Detail", status="WARN")
     detail.subtasks = [
         SubTask(
