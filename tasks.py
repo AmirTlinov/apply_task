@@ -2902,6 +2902,32 @@ class TaskTrackerTUI:
             result.append(('class:border', ' |\n'))
         result.append(('class:border', '+' + '-'*content_width + '+\n'))
 
+        # Compact summary: description + task-level blockers (minimal height)
+        summary_rows: List[Tuple[str, str]] = []
+        if detail.description:
+            for ch, _ in self._wrap_with_prefix(detail.description, content_width - 2, "  Описание: "):
+                summary_rows.append(('class:border', '| '))
+                summary_rows.append(('class:text', ch))
+                summary_rows.append(('class:border', ' |\n'))
+        if detail.blockers:
+            blockers_text = "; ".join(detail.blockers)
+            for ch, _ in self._wrap_with_prefix(blockers_text, content_width - 2, "  Блокеры: "):
+                summary_rows.append(('class:border', '| '))
+                summary_rows.append(('class:text', ch))
+                summary_rows.append(('class:border', ' |\n'))
+        if summary_rows:
+            current_lines = sum(frag[1].count('\n') for frag in result if isinstance(frag, tuple) and len(frag) >= 2)
+            remaining = max(0, self.get_terminal_height() - self.footer_height - current_lines - 1)
+            if remaining > 4:
+                summary_lines: List[Tuple[str, str]] = []
+                summary_lines.append(('class:border', '+' + '-'*content_width + '+\n'))
+                summary_lines.extend(summary_rows)
+                summary_lines.append(('class:border', '+' + '-'*content_width + '+\n'))
+                total_summary = self._formatted_line_count(summary_lines)
+                if remaining >= total_summary:
+                    summary_lines = self._slice_formatted_lines(summary_lines, 0, remaining)
+                    result.extend(summary_lines)
+
         if not compact:
             # Metadata
             if detail.domain or detail.phase or detail.component:
