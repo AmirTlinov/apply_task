@@ -2900,41 +2900,25 @@ class TaskTrackerTUI:
         if self.get_terminal_height() > 18:
             current_lines = sum(frag[1].count('\n') for frag in result if isinstance(frag, tuple) and len(frag) >= 2)
             remaining = max(0, self.get_terminal_height() - self.footer_height - current_lines - 1)
-            # резервируем 2 линии под рамки
-            budget = max(0, remaining - 2)
+            budget = max(0, remaining)
             if budget > 0:
-                desc_lines: List[Tuple[str, str]] = []
-                block_lines: List[Tuple[str, str]] = []
-
-                if detail.description:
-                    wrapped = self._wrap_with_prefix(detail.description, content_width - 2, " Описание: ")
-                    for ch, _ in wrapped[: min(len(wrapped), max(1, min(2, budget)))]:
-                        desc_lines.append(('class:border', '| '))
-                        desc_lines.append(('class:text', ch))
-                        desc_lines.append(('class:border', ' |\n'))
-                    budget -= max(0, len(desc_lines) // 3)
+                summary: List[Tuple[str, str]] = []
+                desc_limit = min(2, budget)
+                if detail.description and desc_limit > 0:
+                    wrapped = self._wrap_with_prefix(detail.description, content_width - 2, "Описание: ")
+                    for ch, _ in wrapped[:desc_limit]:
+                        summary.append(('class:border', '| '))
+                        summary.append(('class:text', ch))
+                        summary.append(('class:border', ' |\n'))
+                    budget -= min(desc_limit, len(wrapped))
                 if detail.blockers and budget > 0:
-                    block_lines.append(('class:border', '| '))
-                    block_lines.append(('class:text.dim', ' Блокеры:'.ljust(content_width - 2)))
-                    block_lines.append(('class:border', ' |\n'))
-                    blockers_text = "; ".join(detail.blockers)
-                    wrapped_bl = self._wrap_with_prefix(blockers_text, content_width - 2, "  ")
-                    for ch, _ in wrapped_bl[:max(1, min(len(wrapped_bl), budget))]:
-                        block_lines.append(('class:border', '| '))
-                        block_lines.append(('class:text', ch))
-                        block_lines.append(('class:border', ' |\n'))
-
-                if desc_lines or block_lines:
-                    summary_lines: List[Tuple[str, str]] = []
-                    summary_lines.append(('class:border', '+' + '-'*content_width + '+\n'))
-                    summary_lines.extend(desc_lines)
-                    summary_lines.extend(block_lines)
-                    summary_lines.append(('class:border', '+' + '-'*content_width + '+\n'))
-                    total_summary = self._formatted_line_count(summary_lines)
-                    take = min(remaining, total_summary)
-                    if take > 0:
-                        truncated = self._slice_formatted_lines(summary_lines, 0, take)
-                        result.extend(truncated)
+                    wrapped_bl = self._wrap_with_prefix("; ".join(detail.blockers), content_width - 2, "Блокеры: ")
+                    for ch, _ in wrapped_bl[:max(1, min(budget, 1))]:
+                        summary.append(('class:border', '| '))
+                        summary.append(('class:text', ch))
+                        summary.append(('class:border', ' |\n'))
+                if summary:
+                    result.extend(summary)
 
         if not compact:
             # Metadata
