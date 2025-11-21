@@ -30,6 +30,7 @@
    - Diff coverage ≥ 85%, cyclomatic complexity ≤ 10, no mocks/stubs in production.
    - One file — one responsibility; avoid >300 LOC without a reason.
    - Before delivery: `pytest -q`; log notes with executed tests.
+   - Always keep explicit blockers/tests/criteria on every node; missing any means the node is invalid.
 
 7) GitHub Projects (if sync needed):
    - Config `.apply_task_projects.yaml`, token `APPLY_TASK_GITHUB_TOKEN|GITHUB_TOKEN`.
