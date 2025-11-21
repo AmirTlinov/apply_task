@@ -90,3 +90,13 @@ def test_next_id_increments(tmp_path: Path):
     first.id = repo.next_id()
     repo.save(first)
     assert repo.next_id() == "TASK-002"
+
+
+def test_delete_removes_file(tmp_path: Path):
+    repo = FileTaskRepository(tmp_path / ".tasks")
+    task = _sample_task()
+    task.id = "TASK-050"
+    repo.save(task)
+    assert repo.load(task.id, task.domain) is not None
+    assert repo.delete(task.id, task.domain)
+    assert repo.load(task.id, task.domain) is None

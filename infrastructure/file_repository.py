@@ -1,6 +1,7 @@
 import time
 from pathlib import Path
 from typing import List, Optional
+from fnmatch import fnmatch
 
 from core import TaskDetail
 from application.ports import TaskRepository
@@ -70,3 +71,17 @@ class FileTaskRepository(TaskRepository):
                 continue
         next_num = (max(ids) + 1) if ids else 1
         return f"TASK-{next_num:03d}"
+
+    def delete(self, task_id: str, domain: str = "") -> bool:
+        path = self._resolve_path(task_id, domain)
+        candidates = [path]
+        if not path.exists():
+            candidates = list(self.tasks_dir.rglob(f"{task_id}.task"))
+        deleted = False
+        for candidate in candidates:
+            try:
+                candidate.unlink()
+                deleted = True
+            except OSError:
+                continue
+        return deleted

@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from contextlib import contextmanager
+from fnmatch import fnmatch
 
 import yaml
 import textwrap
@@ -690,40 +691,34 @@ class TaskManager:
         detail = self.load_task(task_id)
         if not detail:
             return False
-        old_path = Path(detail.filepath)
+        old_domain = detail.domain
         detail.domain = target_domain
         self.save_task(detail)
-        if old_path.exists() and old_path != Path(detail.filepath):
-            try:
-                old_path.unlink()
-            except Exception:
-                pass
+        if old_domain != target_domain:
+            self.repo.delete(task_id, old_domain)
         return True
 
     def move_glob(self, pattern: str, new_domain: str) -> int:
         target_domain = self.sanitize_domain(new_domain)
         matched = 0
-        for f in self.tasks_dir.rglob(pattern):
-            if f.is_file() and f.stem.startswith("TASK-") and f.suffix == ".task":
-                tid = f.stem
-                if self.move_task(tid, target_domain):
+        for t in self.repo.list("", skip_sync=True):
+            try:
+                rel_path = Path(t.filepath).relative_to(self.tasks_dir)
+            except Exception:
+                rel_path = Path(t.filepath)
+            if rel_path.match(pattern):
+                if self.move_task(t.id, target_domain):
                     matched += 1
         return matched
 
     def clean_tasks(self, tag: Optional[str] = None, status: Optional[str] = None, phase: Optional[str] = None, dry_run: bool = False) -> Tuple[List[str], int]:
-        base = Path(".tasks")
-        if not base.exists():
-            return [], 0
         matched: List[str] = []
         removed = 0
         norm_tag = (tag or "").strip().lower()
         norm_status = (status or "").strip().upper()
         norm_phase = (phase or "").strip().lower()
 
-        for file in base.rglob("*.task"):
-            detail = TaskFileParser.parse(file)
-            if not detail:
-                continue
+        for detail in self.repo.list("", skip_sync=True):
             tags = [t.strip().lower() for t in (detail.tags or [])]
             if norm_tag and norm_tag not in tags:
                 continue
@@ -733,11 +728,8 @@ class TaskManager:
                 continue
             matched.append(detail.id)
             if not dry_run:
-                try:
-                    file.unlink()
+                if self.repo.delete(detail.id, detail.domain):
                     removed += 1
-                except OSError:
-                    pass
         return matched, removed
 
 

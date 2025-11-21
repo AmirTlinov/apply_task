@@ -17,3 +17,6 @@ class TaskRepository(Protocol):
 
     def next_id(self) -> str:
         ...
+
+    def delete(self, task_id: str, domain: str = "") -> bool:
+        ...
