@@ -1,38 +1,42 @@
-# apply_task — жёсткие правила для ИИ-агентов
+# apply_task — hardline rules for AI agents
 
-1) Работай только через `apply_task`. Не правь `.tasks/` руками. Держи контекст через `.last` (`TASK@domain`).
+1) Operate only via `apply_task`. Never edit `.tasks/` directly. Track context via `.last` (`TASK@domain`).
 
-2) Декомпозируй требование: один корень-задача + иерархия подзадач (вложенность без ограничений). Каждая подзадача (любого уровня) обязана иметь:
-   - `title` ≥ 20 символов, атомарная.
-   - `success_criteria` (конкретные проверяемые пункты).
-   - `tests` (команды/сuites/данные, как проверять).
-   - `blockers` (зависимости, риски, допуски).
-   - Чекпоинты отмечаются только через `ok/note/bulk --path`.
+2) Decompose the requirement: one root task + hierarchical subtasks (infinite nesting). Every subtask (any depth) must have:
+   - `title` ≥ 20 chars, atomic.
+   - `success_criteria` (specific, verifiable).
+   - `tests` (commands/suites/data to prove it).
+   - `blockers` (dependencies/risks/approvals).
+   - Confirm checkpoints only via `ok/note/bulk --path`.
 
-3) Создание задач (повелительный сценарий):
-   - Вычисли домен (`--domain/-F` обязателен; слои см. [DOMAIN_STRUCTURE.md](DOMAIN_STRUCTURE.md)).
-   - Сгенерируй каркас подзадач: `apply_task template subtasks --count N > .tmp/subtasks.json`, дополни критерии/тесты/блокеры.
-   - Создай задачу:  
+3) Create tasks (imperative flow):
+   - Resolve domain (`--domain/-F` required; see [DOMAIN_STRUCTURE.md](DOMAIN_STRUCTURE.md)).
+   - Generate subtask skeleton: `apply_task template subtasks --count N > .tmp/subtasks.json`, fill criteria/tests/blockers.
+   - Create task:  
      `apply_task create "Title #tags" --domain <d> --description "<what/why/acceptance>" --tests "<proj tests>" --risks "<proj risks>" --subtasks @.tmp/subtasks.json`
-   - Для вложенных уровней используй `apply_task subtask TASK --add "<title>" --criteria "...;..." --tests "...;..." --blockers "...;..." --parent-path 0.1` (индексация 0-базовая, путь вида `0.1.2`).
+   - Add nested levels with `apply_task subtask TASK --add "<title>" --criteria "...;..." --tests "...;..." --blockers "...;..." --parent-path 0.1` (0-based path like `0.1.2`).
 
-4) Ведение подзадач:
-   - Добавление: `apply_task subtask TASK --add "<title>" ... [--parent-path X.Y]`.
-   - Чекпоинты: `apply_task ok TASK --path X.Y --criteria --note "evidence"` (аналогично `--tests/--blockers`).
-   - Завершение подзадачи: только если все чекпоинты в OK, `apply_task subtask TASK --done --path X.Y`.
-   - Отметки: `apply_task note TASK --path X.Y --note "what changed"`; использовать для фиксации прогресса.
+4) Maintain subtasks:
+   - Add: `apply_task subtask TASK --add "<title>" ... [--parent-path X.Y]`.
+   - Checkpoints: `apply_task ok TASK --path X.Y --criteria --note "evidence"` (same for `--tests/--blockers`).
+   - Complete subtask only if all checkpoints are OK: `apply_task subtask TASK --done --path X.Y`.
+   - Log progress: `apply_task note TASK --path X.Y --note "what changed"`.
 
-5) Статусы задачи:
-   - Начинай с `fail` (backlog), переводи в `warn` только после старта работ, в `ok` — когда все подзадачи завершены.
-   - Команды: `apply_task start/done/fail TASK`.
+5) Task statuses:
+   - Start at `fail` (backlog), move to `warn` only after work starts, `ok` only when all subtasks are done.
+   - Commands: `apply_task start/done/fail TASK`.
 
-6) Качество реализации (обязательные рамки для всего кода):
-   - Покрытие диффа ≥ 85%, цикломатическая сложность ≤ 10, без моков/заглушек в проде.
-   - Один файл — одна ответственность; не превышай ~300 строк без причины.
-   - Перед сдачей: `pytest -q`; фиксируй ноты с перечислением пройденных тестов.
+6) Quality gates (apply to all code):
+   - Diff coverage ≥ 85%, cyclomatic complexity ≤ 10, no mocks/stubs in production.
+   - One file — one responsibility; avoid >300 LOC without a reason.
+   - Before delivery: `pytest -q`; log notes with executed tests.
 
-7) GitHub Projects (если нужен sync):
-   - Конфиг `.apply_task_projects.yaml`, токен `APPLY_TASK_GITHUB_TOKEN|GITHUB_TOKEN`.
-   - Если нет токена или remote, sync отключён, CLI продолжает работать оффлайн.
+7) GitHub Projects (if sync needed):
+   - Config `.apply_task_projects.yaml`, token `APPLY_TASK_GITHUB_TOKEN|GITHUB_TOKEN`.
+   - If no token/remote, sync stays off; CLI works offline.
+
+Language rule: when talking to the user, mirror their language unless they explicitly request another. Internal task content (titles/descriptions/notes) follow the user’s language; code/tests/documentation stay in English.
+
+Remember: every move through CLI, with explicit criteria/tests/blockers on every tree node. No checkpoints — no done.***
 
 Запомни: любое действие — через CLI, с явными критериями/тестами/блокерами на каждом узле дерева. Нет чекпоинтов = нет done.***
