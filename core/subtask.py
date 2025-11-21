@@ -17,9 +17,11 @@ class SubTask:
     tests_notes: List[str] = field(default_factory=list)
     blockers_notes: List[str] = field(default_factory=list)
     project_item_id: str = ""
+    children: List["SubTask"] = field(default_factory=list)
 
     def ready_for_completion(self) -> bool:
-        return self.criteria_confirmed and self.tests_confirmed and self.blockers_resolved
+        children_ready = all(ch.completed for ch in self.children) if self.children else True
+        return self.criteria_confirmed and self.tests_confirmed and self.blockers_resolved and children_ready
 
     def status_value(self) -> Status:
         if self.completed:

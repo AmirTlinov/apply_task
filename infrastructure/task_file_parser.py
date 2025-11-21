@@ -85,39 +85,51 @@ class TaskFileParser:
         elif section == "Контекст":
             task.context = content
         elif section == "Подзадачи":
-            current_subtask = None
-            for line in lines:
-                m = cls.SUBTASK_PATTERN.match(line.strip())
-                if m:
-                    if current_subtask:
-                        task.subtasks.append(current_subtask)
-                    current_subtask = SubTask(m.group(1).lower() == "x", m.group(2))
-                elif current_subtask and line.strip().startswith("- "):
-                    stripped = line.strip()[2:]
-                    if stripped.startswith("Критерии:"):
-                        current_subtask.success_criteria = [c.strip() for c in stripped[len("Критерии:") :].split(";") if c.strip()]
-                    elif stripped.startswith("Тесты:"):
-                        current_subtask.tests = [t.strip() for t in stripped[len("Тесты:") :].split(";") if t.strip()]
-                    elif stripped.startswith("Блокеры:"):
-                        current_subtask.blockers = [b.strip() for b in stripped[len("Блокеры:") :].split(";") if b.strip()]
-                    elif stripped.startswith("Чекпоинты:"):
-                        tokens = stripped[len("Чекпоинты:") :].split(";")
-                        for token in tokens:
-                            token = token.strip()
-                            if token.startswith("Критерии="):
-                                current_subtask.criteria_confirmed = token.split("=")[1].strip().upper() == "OK"
-                            elif token.startswith("Тесты="):
-                                current_subtask.tests_confirmed = token.split("=")[1].strip().upper() == "OK"
-                            elif token.startswith("Блокеры="):
-                                current_subtask.blockers_resolved = token.split("=")[1].strip().upper() == "OK"
-                    elif stripped.startswith("Отметки критериев:"):
-                        current_subtask.criteria_notes = [n.strip() for n in stripped.split(":", 1)[1].split(";") if n.strip()]
-                    elif stripped.startswith("Отметки тестов:"):
-                        current_subtask.tests_notes = [n.strip() for n in stripped.split(":", 1)[1].split(";") if n.strip()]
-                    elif stripped.startswith("Отметки блокеров:"):
-                        current_subtask.blockers_notes = [n.strip() for n in stripped.split(":", 1)[1].split(";") if n.strip()]
-            if current_subtask:
-                task.subtasks.append(current_subtask)
+            stack: list[tuple[int, SubTask]] = []
+            for raw_line in lines:
+                if not raw_line.strip():
+                    continue
+                indent = len(raw_line) - len(raw_line.lstrip(" "))
+                line = raw_line.strip()
+                match = cls.SUBTASK_PATTERN.match(line)
+                if match:
+                    st = SubTask(match.group(1).lower() == "x", match.group(2))
+                    while stack and stack[-1][0] >= indent:
+                        stack.pop()
+                    if stack:
+                        stack[-1][1].children.append(st)
+                    else:
+                        task.subtasks.append(st)
+                    stack.append((indent, st))
+                    continue
+                if not stack:
+                    continue
+                current = stack[-1][1]
+                if not line.startswith("- "):
+                    continue
+                stripped = line[2:]
+                if stripped.startswith("Критерии:"):
+                    current.success_criteria = [c.strip() for c in stripped[len("Критерии:") :].split(";") if c.strip()]
+                elif stripped.startswith("Тесты:"):
+                    current.tests = [t.strip() for t in stripped[len("Тесты:") :].split(";") if t.strip()]
+                elif stripped.startswith("Блокеры:"):
+                    current.blockers = [b.strip() for b in stripped[len("Блокеры:") :].split(";") if b.strip()]
+                elif stripped.startswith("Чекпоинты:"):
+                    tokens = stripped[len("Чекпоинты:") :].split(";")
+                    for token in tokens:
+                        token = token.strip()
+                        if token.startswith("Критерии="):
+                            current.criteria_confirmed = token.split("=")[1].strip().upper() == "OK"
+                        elif token.startswith("Тесты="):
+                            current.tests_confirmed = token.split("=")[1].strip().upper() == "OK"
+                        elif token.startswith("Блокеры="):
+                            current.blockers_resolved = token.split("=")[1].strip().upper() == "OK"
+                elif stripped.startswith("Отметки критериев:"):
+                    current.criteria_notes = [n.strip() for n in stripped.split(":", 1)[1].split(";") if n.strip()]
+                elif stripped.startswith("Отметки тестов:"):
+                    current.tests_notes = [n.strip() for n in stripped.split(":", 1)[1].split(";") if n.strip()]
+                elif stripped.startswith("Отметки блокеров:"):
+                    current.blockers_notes = [n.strip() for n in stripped.split(":", 1)[1].split(";") if n.strip()]
         elif section == "Критерии успеха":
             task.success_criteria = cls._parse_list(lines)
         elif section == "Следующие шаги":

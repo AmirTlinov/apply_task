@@ -41,10 +41,17 @@ class TaskDetail:
     history: List[str] = field(default_factory=list)
 
     def calculate_progress(self) -> int:
-        if not self.subtasks:
+        def flatten(nodes):
+            out = []
+            for st in nodes:
+                out.append(st)
+                out.extend(flatten(st.children))
+            return out
+        flat = flatten(self.subtasks)
+        if not flat:
             return self.progress
-        completed = sum(1 for st in self.subtasks if st.completed)
-        return int((completed / len(self.subtasks)) * 100)
+        completed = sum(1 for st in flat if st.completed)
+        return int((completed / len(flat)) * 100)
 
     @property
     def folder(self) -> str:
@@ -122,7 +129,32 @@ class TaskDetail:
             lines.append("")
         if self.subtasks:
             lines.append("## Подзадачи")
-            lines.extend(st.to_markdown() for st in self.subtasks)
+            def dump_subtask(st: SubTask, indent: int = 0):
+                pad = "  " * indent
+                lines.append(f"{pad}- [{'x' if st.completed else ' '}] {st.title}")
+                pad_detail = pad + "  "
+                if st.success_criteria:
+                    lines.append(f"{pad_detail}- Критерии: " + "; ".join(st.success_criteria))
+                if st.tests:
+                    lines.append(f"{pad_detail}- Тесты: " + "; ".join(st.tests))
+                if st.blockers:
+                    lines.append(f"{pad_detail}- Блокеры: " + "; ".join(st.blockers))
+                status_tokens = [
+                    f"Критерии={'OK' if st.criteria_confirmed else 'TODO'}",
+                    f"Тесты={'OK' if st.tests_confirmed else 'TODO'}",
+                    f"Блокеры={'OK' if st.blockers_resolved else 'TODO'}",
+                ]
+                lines.append(f"{pad_detail}- Чекпоинты: " + "; ".join(status_tokens))
+                if st.criteria_notes:
+                    lines.append(f"{pad_detail}- Отметки критериев: " + "; ".join(st.criteria_notes))
+                if st.tests_notes:
+                    lines.append(f"{pad_detail}- Отметки тестов: " + "; ".join(st.tests_notes))
+                if st.blockers_notes:
+                    lines.append(f"{pad_detail}- Отметки блокеров: " + "; ".join(st.blockers_notes))
+                for child in st.children:
+                    dump_subtask(child, indent + 1)
+            for st in self.subtasks:
+                dump_subtask(st, 0)
             lines.append("")
         add_section("Текущие проблемы", [f"{i + 1}. {p}" for i, p in enumerate(self.problems)])
         add_section("Следующие шаги", [f"- {s}" for s in self.next_steps])

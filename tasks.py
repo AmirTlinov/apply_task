@@ -20,6 +20,7 @@ import logging
 import requests
 import webbrowser
 from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -146,6 +147,15 @@ def _load_input_source(raw: str, label: str) -> str:
 
 def _load_subtasks_source(raw: str) -> str:
     return _load_input_source(raw, "JSON массивом подзадач")
+
+
+def _flatten_subtasks(subtasks: List[SubTask], prefix: str = "") -> List[Tuple[str, SubTask]]:
+    flat: List[Tuple[str, SubTask]] = []
+    for idx, st in enumerate(subtasks):
+        path = f"{prefix}.{idx}" if prefix else str(idx)
+        flat.append((path, st))
+        flat.extend(_flatten_subtasks(st.children, path))
+    return flat
 
 
 def subtask_to_dict(subtask: SubTask) -> Dict[str, Any]:
@@ -715,7 +725,7 @@ def validate_subtasks_quality(subtasks: List[SubTask]) -> Tuple[bool, List[str]]
     """Проверяет, что каждая подзадача детализирована: есть двоеточия, ключевые блоки, достаточная длина."""
     issues: List[str] = []
     present: Dict[str, SubTask] = {}
-    for st in subtasks:
+    for _, st in _flatten_subtasks(subtasks):
         low = st.title.lower()
         for name, keywords, _, anchors in CHECKLIST_SECTIONS:
             if any(k in low for k in keywords) and any(a in low for a in anchors):
@@ -739,7 +749,7 @@ def validate_subtasks_quality(subtasks: List[SubTask]) -> Tuple[bool, List[str]]
 def validate_subtasks_structure(subtasks: List[SubTask]) -> Tuple[bool, List[str]]:
     """Каждая подзадача должна содержать критерии, тесты и блокеры."""
     issues: List[str] = []
-    for idx, st in enumerate(subtasks, 1):
+    for idx, (_, st) in enumerate(_flatten_subtasks(subtasks), 1):
         missing = []
         if not st.success_criteria:
             missing.append("критерии")
@@ -761,14 +771,15 @@ def validate_flagship_subtasks(subtasks: List[SubTask]) -> Tuple[bool, List[str]
     - Быть атомарной (не содержать составных действий)
     - Минимум 20 символов в описании
     """
-    if not subtasks:
+    flat = _flatten_subtasks(subtasks)
+    if not flat:
         return False, ["Задача должна быть декомпозирована на подзадачи"]
 
-    if len(subtasks) < 3:
-        return False, [f"Недостаточно подзадач ({len(subtasks)}). Минимум 3 для flagship-качества"]
+    if len(flat) < 3:
+        return False, [f"Недостаточно подзадач ({len(flat)}). Минимум 3 для flagship-качества"]
 
     all_issues = []
-    for idx, st in enumerate(subtasks, 1):
+    for idx, (_, st) in enumerate(flat, 1):
         valid, issues = st.is_valid_flagship()
         if not valid:
             all_issues.extend([f"Подзадача {idx}: {issue}" for issue in issues])

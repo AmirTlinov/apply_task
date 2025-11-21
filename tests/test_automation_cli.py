@@ -7,8 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import tasks
-from core import SubTask
+import tasks  # type: ignore
+from core import SubTask  # type: ignore
 
 
 SCRIPT = ROOT / "apply_task"
