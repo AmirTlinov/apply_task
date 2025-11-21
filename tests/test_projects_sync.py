@@ -182,6 +182,37 @@ def test_permission_signatures_detected():
     assert projects_sync.ProjectsSync._looks_like_permission_error(errors)
 
 
+def test_project_metadata_skips_network_without_token(monkeypatch, tmp_path):
+    cfg_path = tmp_path / ".apply_task_projects.yaml"
+    _write_project_cfg(cfg_path, project_type="repository")
+    data = yaml.safe_load(cfg_path.read_text())
+    data["project"]["number"] = None
+    cfg_path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    monkeypatch.setattr(projects_sync, "CONFIG_PATH", cfg_path)
+    monkeypatch.setattr(projects_sync, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(projects_sync, "SCHEMA_CACHE_PATH", tmp_path / ".tasks" / ".projects_schema_cache.yaml")
+    monkeypatch.setattr(projects_sync, "_PROJECTS_SYNC", None)
+    monkeypatch.setattr(projects_sync, "_PROJECTS_DISABLED_REASON", None)
+    monkeypatch.setattr(projects_sync, "_REPO_SLUG_CACHE", ("octo", "demo"))
+    monkeypatch.setattr(projects_sync, "get_user_token", lambda: "")
+    monkeypatch.delenv("APPLY_TASK_GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    calls = {"auto": 0}
+
+    def fail_auto(self):
+        calls["auto"] += 1
+        raise AssertionError("auto discovery must not run without token")
+
+    monkeypatch.setattr(projects_sync.ProjectsSync, "_auto_set_project_number", fail_auto)
+    sync = projects_sync.ProjectsSync(config_path=cfg_path)
+    with pytest.raises(projects_sync.ProjectsSyncPermissionError):
+        sync._ensure_project_metadata()
+
+    assert calls["auto"] == 0
+    assert not sync.enabled
+
+
 def test_graphql_schema_cache(monkeypatch, tmp_path):
     cfg_path = tmp_path / ".apply_task_projects.yaml"
     _write_project_cfg(cfg_path, project_type="repository")

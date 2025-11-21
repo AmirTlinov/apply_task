@@ -248,10 +248,6 @@ class ProjectsSync:
         if self.config and self.config.rate_reset_behavior:
             global _RATE_RESET_MODE
             _RATE_RESET_MODE = self.config.rate_reset_behavior.lower()
-        self._runtime_disabled_reason: Optional[str] = self.config.runtime_disabled_reason if self.config else None
-        if self.config and (not self.config.number or self.config.number <= 0):
-            if self._auto_set_project_number():
-                self.config = self._load_config()
         env_token = os.getenv("APPLY_TASK_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN")
         saved_token = get_user_token()
         self.token = env_token or saved_token
@@ -261,6 +257,17 @@ class ProjectsSync:
                 set_user_token(env_token)
             except Exception:
                 pass
+        self._runtime_disabled_reason: Optional[str] = self.config.runtime_disabled_reason if self.config else None
+        if (
+            self.config
+            and (not self.config.number or self.config.number <= 0)
+            and self.token
+            and self.config.enabled
+            and not self.detect_error
+            and not self._runtime_disabled_reason
+        ):
+            if self._auto_set_project_number():
+                self.config = self._load_config()
         self.session = requests.Session()
         self.project_id: Optional[str] = None
         self.project_fields: Dict[str, Dict[str, Any]] = {}
@@ -597,6 +604,10 @@ class ProjectsSync:
         return False
 
     def _ensure_project_metadata(self) -> None:
+        if not self.token:
+            raise ProjectsSyncPermissionError("GitHub token missing")
+        if self.detect_error:
+            raise ProjectsSyncPermissionError(self.detect_error)
         if self._runtime_disabled_reason:
             raise ProjectsSyncPermissionError(self._runtime_disabled_reason)
         if self._project_lookup_failed:
@@ -763,6 +774,8 @@ class ProjectsSync:
     def _auto_set_project_number(self) -> bool:
         cfg = self.config
         if not cfg:
+            return False
+        if not self.token or self.detect_error or self._runtime_disabled_reason:
             return False
         # 1) пытаемся взять первый repo project
         if cfg.project_type == "repository" and cfg.repo:
