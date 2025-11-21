@@ -6393,9 +6393,6 @@ def build_parser() -> argparse.ArgumentParser:
     add_context_args(auto_ckp)
     auto_ckp.set_defaults(func=cmd_automation_checkpoint)
 
-    ai_help = sub.add_parser("help-ai", help="Жёсткие правила для ИИ-агентов (дублирует README/AGENTS)")
-    ai_help.set_defaults(func=lambda _: print(AI_HELP.strip()))
-
     return parser
 
 
@@ -6408,7 +6405,8 @@ def main() -> int:
     if args.command == "help":
         parser.print_help()
         print("\nКонтекст: --domain или phase/component формируют путь; .last хранит TASK@domain.")
-        print("\nAI агентам: `apply_task help-ai` выводит обязательные правила использования CLI.")
+        print("\nПравила для ИИ-агентов:\n")
+        print(AI_HELP.strip())
         return 0
     return args.func(args)
 
