@@ -54,6 +54,28 @@ def _get_sync_service() -> ProjectsSyncService:
     return ProjectsSyncService(get_projects_sync())
 
 
+def _sync_status_fragments(snapshot: Dict[str, Any], enabled: bool, flash: bool, filter_flash: bool) -> List[Tuple[str, str]]:
+    """
+    Единый формат отображения статуса синхронизации.
+    Возвращает список (style, text) — используется TUI и CLI.
+    """
+    entries: List[Tuple[str, str]] = []
+    if flash and not filter_flash:
+        entries.append(("class:icon.warn", "Git Projects ■"))
+    status_reason = snapshot.get("status_reason")
+    label = "Git Projects ■" if enabled else "Git Projects □"
+    if snapshot.get("last_pull") or snapshot.get("last_push"):
+        lp = snapshot.get("last_pull") or "—"
+        lpsh = snapshot.get("last_push") or "—"
+        label = f"{label} pull={lp} push={lpsh}"
+    if status_reason:
+        label = f"{label} ({status_reason})"
+    style = "class:icon.check" if enabled else "class:text.dim"
+    if status_reason and not enabled:
+        style = "class:icon.warn"
+    entries.append((style, label))
+    return entries
+
 def current_timestamp() -> str:
     """Возвращает локальное время с точностью до минут для метаданных задач."""
     return datetime.now().strftime(TIMESTAMP_FORMAT)
@@ -2346,31 +2368,10 @@ class TaskTrackerTUI:
             self._sync_flash_until = now + 1.0
         self._last_sync_enabled = enabled
 
-        # Legacy return format: list of (label, style) entries
-        entries: List[Tuple[str, str]] = []
-        if self._sync_flash_until and now < self._sync_flash_until:
-            entries.append(("class:icon.warn", "Git Projects ■"))
-            if filter_flash:
-                return entries
-
-        status = getattr(sync, "status", None)
-        style = "class:icon.check" if enabled else "class:text.dim"
-        if status == "syncing":
-            style = "class:icon.warn"
-        elif status == "error":
-            style = "class:icon.fail"
-
-        label = "Git Projects ■" if enabled else "Git Projects □"
-        if snapshot.get("last_pull") or snapshot.get("last_push"):
-            lp = snapshot.get("last_pull") or "—"
-            lpsh = snapshot.get("last_push") or "—"
-            label = f"{label} pull={lp} push={lpsh}"
-        if snapshot.get("status_reason"):
-            label = f"{label} ({snapshot.get('status_reason')})"
-
-        entries.append((style, label))
-        entries.append(("class:text.dim", " | "))
-        return entries
+        flash = bool(self._sync_flash_until and now < self._sync_flash_until)
+        fragments = _sync_status_fragments(snapshot, enabled, flash, filter_flash)
+        fragments.append(("class:text.dim", " | "))
+        return fragments
 
     @staticmethod
     def _sync_target_label(cfg) -> str:
@@ -4882,9 +4883,38 @@ def cmd_move(args) -> int:
 
 
 def cmd_clean(args) -> int:
-    if not any([args.tag, args.status, args.phase]):
-        return structured_error("clean", "Укажи хотя бы один фильтр: --tag/--status/--phase")
+    if not any([args.tag, args.status, args.phase, args.glob]):
+        return structured_error("clean", "Укажи хотя бы один фильтр: --tag/--status/--phase или --glob")
     manager = TaskManager()
+    if args.glob:
+        is_dry = args.dry_run
+        base = manager.tasks_dir.resolve()
+        matched = []
+        for detail in manager.repo.list("", skip_sync=True):
+            try:
+                rel = Path(detail.filepath).resolve().relative_to(base)
+            except Exception:
+                continue
+            if rel.match(args.glob):
+                matched.append(detail.id)
+        if is_dry:
+            payload = {"mode": "dry-run", "matched": matched, "glob": args.glob}
+            return structured_response(
+                "clean",
+                status="OK",
+                message=f"Будут удалены {len(matched)} задач(и) по glob",
+                payload=payload,
+                summary=f"dry-run {len(matched)} задач",
+            )
+        removed = manager.repo.delete_glob(args.glob)
+        payload = {"removed": removed, "matched": matched, "glob": args.glob}
+        return structured_response(
+            "clean",
+            status="OK",
+            message=f"Удалено задач: {removed} по glob {args.glob}",
+            payload=payload,
+            summary=f"Удалено {removed}",
+        )
     matched, removed = manager.clean_tasks(tag=args.tag, status=args.status, phase=args.phase, dry_run=args.dry_run)
     if args.dry_run:
         payload = {
@@ -5107,13 +5137,8 @@ def _projects_status_payload() -> Dict[str, Any]:
 
 def cmd_projects_status(args) -> int:
     payload = _projects_status_payload()
-    message = "Projects sync активна" if payload["runtime_enabled"] else "Projects sync отключена"
-    if payload.get("last_pull") or payload.get("last_push"):
-        message += f" (pull={payload.get('last_pull') or '—'}, push={payload.get('last_push') or '—'})"
-    if payload.get("project_id") or payload.get("project_url"):
-        message += f" | id={payload.get('project_id') or '—'}"
-        if payload.get("project_url"):
-            message += f" → {payload['project_url']}"
+    fragments = _sync_status_fragments(payload, payload["runtime_enabled"], flash=False, filter_flash=False)
+    message = " ".join(text for _, text in fragments)
     return structured_response(
         "projects status",
         status="OK",
@@ -5677,6 +5702,7 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("--tag", help="тег без #")
     cl.add_argument("--status", choices=["OK", "WARN", "FAIL"], help="фильтр по статусу")
     cl.add_argument("--phase", help="фаза/итерация")
+    cl.add_argument("--glob", help="glob-шаблон (.tasks relative), например 'phase1/*.task'")
     cl.add_argument("--dry-run", action="store_true", help="только показать задачи без удаления")
     cl.set_defaults(func=cmd_clean)
 
