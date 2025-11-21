@@ -9,6 +9,17 @@ def build_tui(tmp_path):
     return TaskTrackerTUI(tasks_dir=tasks_dir)
 
 
+def open_subtask_detail(tui: TaskTrackerTUI, subtask: SubTask, *, task_id: str = "TASK-TEST"):
+    detail = TaskDetail(id=task_id, title="Detail", status="FAIL")
+    detail.subtasks = [subtask]
+    tui.detail_mode = True
+    tui.current_task_detail = detail
+    tui._rebuild_detail_flat()
+    tui.detail_selected_path = "0"
+    tui.show_subtask_details("0")
+    return detail
+
+
 def test_move_selection_clamps_task_list(tmp_path):
     tui = build_tui(tmp_path)
     tui.tasks = [
@@ -70,8 +81,26 @@ def test_subtasks_view_stays_within_height(tmp_path):
     lines = rendered.split("\n")
 
     assert len(lines) <= tui.get_terminal_height()
-    assert f"> {tui.detail_selected_index + 1}. " in rendered
+    assert f"> {tui.detail_selected_index} " in rendered
     assert "↑" in rendered and "↓" in rendered
+
+
+def test_detail_renders_nested_subtasks_with_paths(tmp_path):
+    tui = build_tui(tmp_path)
+    detail = TaskDetail(id="TASK-NEST", title="Detail", status="WARN")
+    child = SubTask(False, "Child item", success_criteria=["c"], tests=["t"], blockers=["b"])
+    parent = SubTask(False, "Parent item", success_criteria=["p"], tests=["t"], blockers=["b"], children=[child])
+    detail.subtasks = [parent]
+    tui.detail_mode = True
+    tui.current_task_detail = detail
+    tui.detail_selected_index = 0
+    tui._rebuild_detail_flat()
+
+    rendered = "".join(text for _, text in tui.get_detail_text())
+
+    assert "ПОДЗАДАЧИ (0/2 завершено)" in rendered
+    assert "| > 0 " in rendered  # родитель
+    assert "|     0.0 " in rendered  # вложенная подзадача с отступом
 
 
 def test_selection_stops_at_last_item(tmp_path):
@@ -89,11 +118,11 @@ def test_selection_stops_at_last_item(tmp_path):
     for _ in range(3):
         tui.move_vertical_selection(1)
         rendered = "".join(text for _, text in tui.get_detail_text())
-        assert f"> {len(detail.subtasks)}. " in rendered
+        assert f"> {tui.detail_selected_index} " in rendered
 
     assert tui.detail_selected_index == len(detail.subtasks) - 1
     # подсветка последнего элемента остаётся на экране
-    assert f"> {len(detail.subtasks)}. " in rendered
+    assert f"> {tui.detail_selected_index} " in rendered
 
 
 def test_last_subtask_visible_with_long_header(tmp_path):
@@ -113,7 +142,7 @@ def test_last_subtask_visible_with_long_header(tmp_path):
     tui._set_footer_height(0)
 
     rendered = "".join(text for _, text in tui.get_detail_text())
-    assert f"> {len(detail.subtasks)}. " in rendered  # последний виден
+    assert f"> {tui.detail_selected_index} " in rendered  # последний виден
     # нижний маркер может отсутствовать, но последний элемент должен быть в окне
 
 
@@ -128,7 +157,7 @@ def test_single_subtask_view_scrolls_content(tmp_path):
         blockers=[f"Blocker {i}" for i in range(3)],
         criteria_notes=[f"Note {i}" for i in range(2)],
     )
-    tui.show_subtask_details(st, 0)
+    open_subtask_detail(tui, st)
     # Прокручиваем сразу к низу
     tui.subtask_detail_scroll = 50
     tui._render_single_subtask_view(max(40, tui.get_terminal_width() - 2))
@@ -145,7 +174,7 @@ def test_single_subtask_cursor_stays_visible_with_footer(tmp_path):
         "Subtask",
         success_criteria=[f"Criterion {i}" for i in range(15)],
     )
-    tui.show_subtask_details(st, 0)
+    open_subtask_detail(tui, st)
     tui._set_footer_height(3)  # имитируем высокий футер
     tui.move_vertical_selection(50)  # уйдём в конец
     styles = [style for style, _ in tui.single_subtask_view]
@@ -164,7 +193,7 @@ def test_single_subtask_long_lines_do_not_wrap(tmp_path):
             "Дважды проверить ✅ emoji и длинные слова_without_breaks_here_to_force_trim",
         ],
     )
-    tui.show_subtask_details(st, 0)
+    open_subtask_detail(tui, st)
     tui.move_vertical_selection(10)
     lines = tui._formatted_lines(tui.single_subtask_view)
     max_width = max(tui._display_width("".join(t for _, t in line)) for line in lines)
@@ -182,7 +211,7 @@ def test_wrapped_bullet_entire_group_highlighted(tmp_path):
         "Subtask",
         success_criteria=["Очень длинная строка без переноса чтобы занять две строки подряд и проверить выделение"],
     )
-    tui.show_subtask_details(st, 0)
+    open_subtask_detail(tui, st)
     # перейти к следующей фокусируемой строке (вероятно вторая часть переноса)
     tui.move_vertical_selection(1)
     styles = [style for style, _ in tui.single_subtask_view]
@@ -203,7 +232,7 @@ def test_wrapped_bullet_moves_in_single_step(tmp_path):
             "Вторая строка короче",
         ],
     )
-    tui.show_subtask_details(st, 0)
+    open_subtask_detail(tui, st)
     # курсор на первом элементе
     start_cursor = tui.subtask_detail_cursor
     lines = tui._formatted_lines(tui._subtask_detail_buffer)
@@ -220,7 +249,7 @@ def test_selection_not_paint_border(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 12
     st = SubTask(False, "Subtask", success_criteria=["a" * 10, "b" * 10])
-    tui.show_subtask_details(st, 0)
+    open_subtask_detail(tui, st)
     styles = [style or "" for style, _ in tui.single_subtask_view]
     # выбрана первая линия; бордеры должны остаться без selected
     assert all("selected" not in s for s in styles if "border" in s)
@@ -256,7 +285,7 @@ def test_single_subtask_view_highlight(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 12
     st = SubTask(False, "Subtask", success_criteria=[f"Criterion {i}" for i in range(3)])
-    tui.show_subtask_details(st, 0)
+    open_subtask_detail(tui, st)
     styles = [style for style, _ in tui.single_subtask_view]
     assert any("selected" in (style or "") for style in styles)
 
@@ -276,7 +305,7 @@ def test_single_subtask_view_skips_headers(tmp_path):
         tests=["line c"],
         blockers=["line d"],
     )
-    tui.show_subtask_details(st, 0)
+    open_subtask_detail(tui, st)
     focusables = tui._focusable_line_indices(tui._formatted_lines(tui._subtask_detail_buffer))
     # Заголовки (например, строка со словом 'Критерии выполнения') не должны быть в фокусируемых
     header_lines = [i for i, line in enumerate(tui._formatted_lines(tui._subtask_detail_buffer)) if any('status.' in (s or '') or 'header' in (s or '') for s, _ in line)]
@@ -307,11 +336,11 @@ def test_single_subtask_header_sticks_on_scroll(tmp_path):
         "Subtask title fits here",
         success_criteria=[f"Criterion {i}" for i in range(12)],
     )
-    tui.show_subtask_details(st, 0)
+    open_subtask_detail(tui, st)
     tui.subtask_detail_scroll = 5
     tui._render_single_subtask_view(max(40, tui.get_terminal_width() - 2))
     rendered_lines = "".join(text for _, text in tui.single_subtask_view).split("\n")
 
     visible_nonempty = [ln for ln in rendered_lines if ln.strip()]
-    # Первые строки вида должны содержать шапку SUBTASK 1, даже после скролла
-    assert any("SUBTASK 1" in ln for ln in visible_nonempty[:3])
+    # Первые строки вида должны содержать шапку SUBTASK 0, даже после скролла
+    assert any("SUBTASK 0" in ln for ln in visible_nonempty[:3])
