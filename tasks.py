@@ -2915,18 +2915,19 @@ class TaskTrackerTUI:
                 summary_rows.append(('class:border', '| '))
                 summary_rows.append(('class:text', ch))
                 summary_rows.append(('class:border', ' |\n'))
-        if summary_rows:
+        if summary_rows and self.get_terminal_height() > 18:
             current_lines = sum(frag[1].count('\n') for frag in result if isinstance(frag, tuple) and len(frag) >= 2)
             remaining = max(0, self.get_terminal_height() - self.footer_height - current_lines - 1)
-            if remaining > 4:
+            if remaining > 2:
                 summary_lines: List[Tuple[str, str]] = []
                 summary_lines.append(('class:border', '+' + '-'*content_width + '+\n'))
                 summary_lines.extend(summary_rows)
                 summary_lines.append(('class:border', '+' + '-'*content_width + '+\n'))
                 total_summary = self._formatted_line_count(summary_lines)
-                if remaining >= total_summary:
-                    summary_lines = self._slice_formatted_lines(summary_lines, 0, remaining)
-                    result.extend(summary_lines)
+                take = min(remaining, total_summary)
+                if take > 0:
+                    truncated = self._slice_formatted_lines(summary_lines, 0, take)
+                    result.extend(truncated)
 
         if not compact:
             # Metadata

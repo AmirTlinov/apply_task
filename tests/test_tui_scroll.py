@@ -172,6 +172,26 @@ def test_selected_subtask_details_rendered(tmp_path):
     assert "block A" in rendered
 
 
+def test_compact_summary_shows_blockers_when_room(tmp_path):
+    tui = build_tui(tmp_path)
+    tui.get_terminal_height = lambda: 30
+    detail = TaskDetail(
+        id="TASK-SUMMARY",
+        title="Detail",
+        status="WARN",
+        description="Line one; Line two;",
+    )
+    detail.blockers = ["dep a", "dep b"]
+    detail.subtasks = [SubTask(False, "Subtask 1 long body text") for _ in range(2)]
+    tui.detail_mode = True
+    tui.current_task_detail = detail
+    rendered = "".join(text for _, text in tui.get_detail_text())
+
+    assert "Описание:" in rendered
+    assert "Блокеры:" in rendered
+    assert "dep a" in rendered
+
+
 def test_selection_stops_at_last_item(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 12
