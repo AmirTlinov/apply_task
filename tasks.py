@@ -4717,7 +4717,12 @@ def _parse_bulk_operations(raw: str) -> List[Dict[str, Any]]:
         raise SubtaskParseError(f"Невалидный JSON payload для bulk: {exc}") from exc
     if not isinstance(data, list):
         raise SubtaskParseError("Bulk payload должен быть массивом операций")
-    return data
+    cleaned = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise SubtaskParseError("Каждый элемент bulk payload должен быть объектом")
+        cleaned.append(item)
+    return cleaned
 
 
 def cmd_bulk(args) -> int:
@@ -4772,7 +4777,7 @@ def cmd_bulk(args) -> int:
                 continue
             done = bool(spec.get("done", True))
             note = spec.get("note", "") or ""
-            ok, msg = manager.update_subtask_checkpoint(task_id, index, checkpoint, done, note, op_domain)
+            ok, msg = manager.update_subtask_checkpoint(task_id, index, checkpoint, done, note, op_domain, path=op.get("path"))
             if not ok:
                 entry_payload["status"] = "ERROR"
                 entry_payload["message"] = msg or f"Не удалось обновить {checkpoint}"
@@ -4782,7 +4787,7 @@ def cmd_bulk(args) -> int:
             results.append(entry_payload)
             continue
         if op.get("complete"):
-            ok, msg = manager.set_subtask(task_id, index, True, op_domain)
+            ok, msg = manager.set_subtask(task_id, index, True, op_domain, path=op.get("path"))
             if not ok:
                 entry_payload["status"] = "ERROR"
                 entry_payload["message"] = msg or "Не удалось закрыть подзадачу"
@@ -4834,33 +4839,43 @@ def cmd_checkpoint(args) -> int:
     if not detail.subtasks:
         return structured_error("checkpoint", f"Задача {task_id} не содержит подзадач")
 
-    def pick_subtask_index() -> int:
+    def pick_path_and_subtask() -> Tuple[str, int, SubTask]:
+        if getattr(args, "path", None):
+            path = args.path
+            st, _, _ = _find_subtask_by_path(detail.subtasks, path)
+            if not st:
+                raise ValueError("Неверный путь подзадачи")
+            return path, int(path.split(".")[-1] or 0), st
         if args.subtask is not None:
-            return args.subtask
+            idx = args.subtask
+            if idx < 0:
+                raise ValueError("Индекс подзадачи неверный")
+            if idx < len(detail.subtasks):
+                return str(idx), idx, detail.subtasks[idx]
+            raise ValueError("Индекс подзадачи неверный")
         if auto_mode:
-            for idx, st in enumerate(detail.subtasks):
+            flat = _flatten_subtasks(detail.subtasks)
+            for path, st in flat:
                 if not st.completed:
-                    return idx
-            return 0
-        print("\n[Шаг 1] Выбор подзадачи")
-        for idx, st in enumerate(detail.subtasks):
+                    return path, int(path.split(".")[-1] or 0), st
+            return flat[-1][0], int(flat[-1][0].split(".")[-1] or 0), flat[-1][1]
+        print("\n[Шаг 1] Выбор подзадачи (формат 0 или 0.1.2)")
+        flat = _flatten_subtasks(detail.subtasks)
+        for path, st in flat:
             flags = subtask_flags(st)
             glyphs = ''.join(['✓' if flags[k] else '·' for k in ("criteria", "tests", "blockers")])
-            print(f"  {idx}. [{glyphs}] {'[OK]' if st.completed else '[ ]'} {st.title}")
+            print(f"  {path}. [{glyphs}] {'[OK]' if st.completed else '[ ]'} {st.title}")
         while True:
-            raw = prompt("Введите индекс подзадачи", default="0")
-            try:
-                value = int(raw)
-            except ValueError:
-                print("  [!] Используй целое число")
-                continue
-            if 0 <= value < len(detail.subtasks):
-                return value
-            print("  [!] Недопустимый индекс")
+            raw = prompt("Введите путь подзадачи", default="0")
+            st, _, _ = _find_subtask_by_path(detail.subtasks, raw)
+            if st:
+                return raw, int(raw.split(".")[-1] or 0), st
+            print("  [!] Недопустимый путь (используй 0.1.2)")
 
-    subtask_index = pick_subtask_index()
-    if subtask_index < 0 or subtask_index >= len(detail.subtasks):
-        return structured_error("checkpoint", "Неверный индекс подзадачи")
+    try:
+        path, subtask_index, subtask_obj = pick_path_and_subtask()
+    except ValueError as exc:
+        return structured_error("checkpoint", str(exc))
 
     checkpoint_labels = [
         ("criteria", "Критерии"),
@@ -4873,11 +4888,13 @@ def cmd_checkpoint(args) -> int:
         st = manager.load_task(task_id, domain)
         if not st:
             return structured_error("checkpoint", "Задача недоступна")
-        sub = st.subtasks[subtask_index]
+        target, _, _ = _find_subtask_by_path(st.subtasks, path)
+        if not target:
+            return structured_error("checkpoint", "Подзадача не найдена")
         attr_map = {
-            "criteria": sub.criteria_confirmed,
-            "tests": sub.tests_confirmed,
-            "blockers": sub.blockers_resolved,
+            "criteria": target.criteria_confirmed,
+            "tests": target.tests_confirmed,
+            "blockers": target.blockers_resolved,
         }
         if attr_map[checkpoint]:
             operations.append({"checkpoint": checkpoint, "state": "already"})
@@ -4885,7 +4902,7 @@ def cmd_checkpoint(args) -> int:
         note_value = base_note
         confirm_checkpoint = auto_mode
         if not auto_mode:
-            print(f"\n[Шаг] {label}: {sub.title}")
+            print(f"\n[Шаг] {label}: {target.title}")
             print(f"  Текущее состояние: TODO. Подтвердить {label.lower()}?")
             confirm_checkpoint = confirm(f"Подтвердить {label.lower()}?", default=True)
             if not confirm_checkpoint:
@@ -4895,7 +4912,7 @@ def cmd_checkpoint(args) -> int:
                 note_value = prompt("Комментарий/доказательство", default="")
         if not note_value:
             note_value = f"checkpoint:{checkpoint}"
-        ok, msg = manager.update_subtask_checkpoint(task_id, subtask_index, checkpoint, True, note_value, domain)
+        ok, msg = manager.update_subtask_checkpoint(task_id, subtask_index, checkpoint, True, note_value, domain, path=path)
         if not ok:
             return structured_error("checkpoint", msg or f"Не удалось подтвердить {label.lower()}")
         operations.append({"checkpoint": checkpoint, "state": "confirmed", "note": note_value})
@@ -4903,14 +4920,14 @@ def cmd_checkpoint(args) -> int:
     detail = manager.load_task(task_id, domain)
     completed = False
     if detail:
-        sub = detail.subtasks[subtask_index]
-        ready = sub.ready_for_completion()
+        target, _, _ = _find_subtask_by_path(detail.subtasks, path)
+        ready = target.ready_for_completion() if target else False
         if ready:
             mark_done = auto_mode
             if not auto_mode:
                 mark_done = confirm("Все чекпоинты отмечены. Закрыть подзадачу?", default=True)
             if mark_done:
-                ok, msg = manager.set_subtask(task_id, subtask_index, True, domain)
+                ok, msg = manager.set_subtask(task_id, subtask_index, True, domain, path=path)
                 if not ok:
                     return structured_error("checkpoint", msg or "Не удалось закрыть подзадачу")
                 operations.append({"checkpoint": "done", "state": "completed"})
