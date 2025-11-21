@@ -2337,8 +2337,11 @@ class TaskTrackerTUI:
 
     def _sync_indicator_fragments(self, filter_flash: bool = False) -> List[Tuple[str, str]]:
         sync = self.manager.sync_service if hasattr(self, "manager") else _get_sync_service()
-        cfg = getattr(sync, "config", None)
-        snapshot = self._project_config_snapshot()
+        try:
+            cfg = getattr(sync, "config", None)
+            snapshot = self._project_config_snapshot()
+        except Exception:
+            return []
         enabled = bool(sync and sync.enabled and cfg and snapshot["config_enabled"])
         now = time.time()
         if self._last_sync_enabled is None:
@@ -3693,7 +3696,33 @@ class TaskTrackerTUI:
         return options
 
     def _project_config_snapshot(self) -> Dict[str, Any]:
-        status = _projects_status_payload()
+        try:
+            status = _projects_status_payload()
+        except Exception as exc:
+            return {
+                "owner": "",
+                "repo": "",
+                "number": None,
+                "project_url": None,
+                "project_id": None,
+                "config_exists": False,
+                "config_enabled": False,
+                "runtime_enabled": False,
+                "token_saved": False,
+                "token_preview": "",
+                "token_env": "",
+                "token_active": False,
+                "target_label": "—",
+                "target_hint": f"Git Projects недоступен: {exc}",
+                "status_reason": str(exc),
+                "last_pull": None,
+                "last_push": None,
+                "workers": None,
+                "rate_remaining": None,
+                "rate_reset_human": None,
+                "rate_wait": None,
+                "origin_url": self._origin_url(),
+            }
         cfg_exists = bool(status["owner"] and (status["project_number"] or status.get("project_id")))
         return {
             "owner": status["owner"],
@@ -5049,7 +5078,35 @@ def cmd_projects_sync_cli(args) -> int:
 
 
 def _projects_status_payload() -> Dict[str, Any]:
-    sync_service = _get_sync_service()
+    try:
+        sync_service = _get_sync_service()
+    except Exception as exc:
+        return {
+            "owner": "",
+            "repo": "",
+            "project_number": None,
+            "project_id": None,
+            "project_url": None,
+            "workers": None,
+            "rate_remaining": None,
+            "rate_reset": None,
+            "rate_reset_human": None,
+            "rate_wait": None,
+            "target_label": "—",
+            "target_hint": "Git Projects недоступен: " + str(exc),
+            "auto_sync": False,
+            "runtime_enabled": False,
+            "runtime_reason": str(exc),
+            "detect_error": str(exc),
+            "status_reason": "Git Projects недоступен",
+            "last_pull": None,
+            "last_push": None,
+            "token_saved": False,
+            "token_preview": "",
+            "token_env": "",
+            "token_present": False,
+            "runtime_disabled_reason": str(exc),
+        }
     try:
         sync_service.ensure_metadata()
     except Exception:
