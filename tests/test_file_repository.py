@@ -81,3 +81,12 @@ def test_taskfileparser_roundtrip(tmp_path: Path):
     assert parsed.risks == task.risks
     assert parsed.next_steps == task.next_steps
     assert parsed.dependencies == task.dependencies
+
+
+def test_next_id_increments(tmp_path: Path):
+    repo = FileTaskRepository(tmp_path / ".tasks")
+    assert repo.next_id() == "TASK-001"
+    first = _sample_task()
+    first.id = repo.next_id()
+    repo.save(first)
+    assert repo.next_id() == "TASK-002"

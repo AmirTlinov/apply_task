@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import requests
 import webbrowser
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -425,9 +425,6 @@ class TaskManager:
             raise ValueError("Недопустимая папка")
         return candidate.as_posix()
 
-    def _all_task_files(self):
-        return self.tasks_dir.rglob("TASK-*.task")
-
     @staticmethod
     def load_config() -> Dict:
         cfg = Path(".apply_task_projects.yaml")
@@ -441,8 +438,16 @@ class TaskManager:
         return {}
 
     def _next_id(self) -> str:
-        ids = [int(f.stem.split("-")[1]) for f in self._all_task_files()]
-        return f"TASK-{(max(ids) + 1 if ids else 1):03d}"
+        try:
+            return self.repo.next_id()
+        except Exception:
+            ids = []
+            for f in self.tasks_dir.rglob("TASK-*.task"):
+                try:
+                    ids.append(int(f.stem.split("-")[1]))
+                except (IndexError, ValueError):
+                    continue
+            return f"TASK-{(max(ids) + 1 if ids else 1):03d}"
 
     def create_task(self, title: str, status: str = "FAIL", priority: str = "MEDIUM", parent: Optional[str] = None, domain: str = "", phase: str = "", component: str = "", folder: Optional[str] = None) -> TaskDetail:
         domain = self.sanitize_domain(folder or domain or derive_domain_explicit("", phase, component))
@@ -475,16 +480,6 @@ class TaskManager:
             if getattr(task, "_sync_error", None):
                 self._report_sync_error(task._sync_error)
                 task._sync_error = None
-
-    def _find_file_by_id(self, task_id: str, domain: str = "") -> Optional[Path]:
-        if domain:
-            candidate = (self.tasks_dir / self.sanitize_domain(domain) / f"{task_id}.task").resolve()
-            if candidate.exists():
-                return candidate
-        for f in self._all_task_files():
-            if f.stem == task_id:
-                return f
-        return None
 
     def load_task(self, task_id: str, domain: str = "") -> Optional[TaskDetail]:
         task = self.repo.load(task_id, domain)
@@ -527,18 +522,12 @@ class TaskManager:
         setattr(base_sync, "_full_sync_done", True)
         repo_requires_issue = bool(base_sync.config and base_sync.config.project_type == "repository" and base_sync.config.repo)
         tasks_to_sync: List[Tuple[TaskDetail, Path]] = []
-        for file in self._all_task_files():
-            task = TaskFileParser.parse(file)
-            if not task:
-                continue
+        for task in self.repo.list("", skip_sync=True):
             needs_item = not getattr(task, "project_item_id", None)
             needs_issue = repo_requires_issue and not getattr(task, "project_issue_number", None)
             if not needs_item and not needs_issue:
                 continue
-            if not task.domain:
-                rel = file.parent.relative_to(self.tasks_dir)
-                task.domain = "" if str(rel) == "." else rel.as_posix()
-            tasks_to_sync.append((task, file))
+            tasks_to_sync.append((task, Path(task.filepath)))
         if not tasks_to_sync:
             return 0
 
@@ -698,18 +687,15 @@ class TaskManager:
 
     def move_task(self, task_id: str, new_domain: str) -> bool:
         target_domain = self.sanitize_domain(new_domain)
-        file = self._find_file_by_id(task_id)
-        if not file:
-            return False
-        detail = TaskFileParser.parse(file)
+        detail = self.load_task(task_id)
         if not detail:
             return False
+        old_path = Path(detail.filepath)
         detail.domain = target_domain
-        # remove old file after saving new to avoid loss
         self.save_task(detail)
-        if file.exists():
+        if old_path.exists() and old_path != Path(detail.filepath):
             try:
-                file.unlink()
+                old_path.unlink()
             except Exception:
                 pass
         return True

@@ -60,3 +60,13 @@ class FileTaskRepository(TaskRepository):
             except OSError:
                 continue
         return sig if sig else int(time.time_ns())
+
+    def next_id(self) -> str:
+        ids = []
+        for f in self.tasks_dir.rglob("TASK-*.task"):
+            try:
+                ids.append(int(f.stem.split("-")[1]))
+            except (IndexError, ValueError):
+                continue
+        next_num = (max(ids) + 1) if ids else 1
+        return f"TASK-{next_num:03d}"

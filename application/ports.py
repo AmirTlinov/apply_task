@@ -14,3 +14,6 @@ class TaskRepository(Protocol):
 
     def compute_signature(self) -> int:
         ...
+
+    def next_id(self) -> str:
+        ...
