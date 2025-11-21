@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from core import TaskDetail
 from application.ports import TaskRepository
+from infrastructure.task_file_parser import TaskFileParser
 
 
 class FileTaskRepository(TaskRepository):
@@ -23,10 +24,8 @@ class FileTaskRepository(TaskRepository):
                 task.domain = ""
 
     def load(self, task_id: str, domain: str = "") -> Optional[TaskDetail]:
-        from tasks import TaskFileParser  # late import to avoid circular deps
         filepath = self._resolve_path(task_id, domain)
         if not filepath.exists():
-            # fallback: search across domains
             candidates = list(self.tasks_dir.rglob(f"{task_id}.task"))
             filepath = candidates[0] if candidates else None
         if not filepath or not Path(filepath).exists():
@@ -42,7 +41,6 @@ class FileTaskRepository(TaskRepository):
         path.write_text(task.to_file_content(), encoding="utf-8")
 
     def list(self, domain_path: str = "", skip_sync: bool = False) -> List[TaskDetail]:
-        from tasks import TaskFileParser  # late import to avoid circular deps
         root = self.tasks_dir / domain_path if domain_path else self.tasks_dir
         tasks: List[TaskDetail] = []
         for file in root.rglob("TASK-*.task"):

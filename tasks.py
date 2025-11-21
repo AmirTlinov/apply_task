@@ -30,6 +30,7 @@ from wcwidth import wcwidth
 from core import Status, SubTask, TaskDetail
 from application.ports import TaskRepository
 from infrastructure.file_repository import FileTaskRepository
+from infrastructure.task_file_parser import TaskFileParser
 
 import projects_sync
 from projects_sync import (
@@ -244,11 +245,11 @@ class Task:
 
 
 # ============================================================================
-# PERSISTENCE LAYER
+# PERSISTENCE LAYER (legacy parser kept for reference; active one lives in infrastructure.task_file_parser)
 # ============================================================================
 
 
-class TaskFileParser:
+class _LegacyTaskFileParser:
     SUBTASK_PATTERN = re.compile(r"^-\s*\[(x|X| )\]\s*(.+)$")
 
     @classmethod
