@@ -2955,11 +2955,7 @@ class TaskTrackerTUI:
         self._rebuild_detail_flat(self.detail_selected_path)
         items: List[Tuple[str, SubTask, int, bool, bool]] = list(self.detail_flat_subtasks)
         aux_sections = {
-            "next": detail.next_steps,
-            "dep": detail.dependencies,
-            "success": detail.success_criteria,
-            "problem": detail.problems,
-            "risk": detail.risks,
+            "blockers": detail.blockers,
         }
 
         total_items = len(items)
@@ -3129,11 +3125,7 @@ class TaskTrackerTUI:
 
         # Дополнительные секции: next, deps, success criteria, problems, risks
         section_titles = {
-            "next": "NEXT",
-            "dep": "DEPENDENCIES",
-            "success": "OKR / Success Criteria",
-            "problem": "Problems",
-            "risk": "Risks",
+            "blockers": "BLOCKERS",
         }
         for key, entries in aux_sections.items():
             if not entries:
