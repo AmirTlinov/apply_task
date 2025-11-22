@@ -86,6 +86,10 @@ LANG_PACK = {
         "COMPONENT": "Component",
         "PARENT": "Parent",
         "DESCRIPTION_MISSING": "No description",
+        "PRIORITY": "Priority",
+        "PROGRESS": "Progress",
+        "COMPLETED_SUFFIX": "done",
+        "TAGS": "Tags",
     },
     "ru": {
         "TITLE": "ЗАГОЛОВОК",
@@ -101,6 +105,10 @@ LANG_PACK = {
         "COMPONENT": "Компонент",
         "PARENT": "Родитель",
         "DESCRIPTION_MISSING": "Описание отсутствует",
+        "PRIORITY": "Приоритет",
+        "PROGRESS": "Прогресс",
+        "COMPLETED_SUFFIX": "завершено",
+        "TAGS": "Теги",
     },
     "uk": {
         "TITLE": "ЗАГОЛОВОК",
@@ -3015,8 +3023,8 @@ class TaskTrackerTUI:
         }
         status_style, status_label = status_map.get(detail.status, ('class:icon.fail', detail.status))
         result.append((status_style, status_label.ljust(10)))
-        result.append(('class:text.dim', f'| Приоритет: {detail.priority:<7}'))
-        result.append(('class:text.dim', f'| Прогресс: {detail.calculate_progress():>3}%'))
+        result.append(('class:text.dim', f'| {self._t("PRIORITY")}: {detail.priority:<7}'))
+        result.append(('class:text.dim', f'| {self._t("PROGRESS")}: {detail.calculate_progress():>3}%'))
         padding_needed = content_width - 2 - (len(detail.id) + 3 + len(status_label) + 23)
         if padding_needed > 0:
             result.append(('class:text.dim', ' ' * padding_needed))
@@ -3074,28 +3082,28 @@ class TaskTrackerTUI:
             if detail.domain or detail.phase or detail.component:
                 if detail.domain:
                     result.append(('class:border', '| '))
-                    result.append(('class:text.dim', f'Папка: {detail.domain}'[:content_width-2].ljust(content_width - 2)))
+                    result.append(('class:text.dim', f'{self._t("DOMAIN")}: {detail.domain}'[:content_width-2].ljust(content_width - 2)))
                     result.append(('class:border', ' |\n'))
                 if detail.phase:
                     result.append(('class:border', '| '))
-                    result.append(('class:text.dim', f'Фаза: {detail.phase}'[:content_width-2].ljust(content_width - 2)))
+                    result.append(('class:text.dim', f'{self._t("PHASE")}: {detail.phase}'[:content_width-2].ljust(content_width - 2)))
                     result.append(('class:border', ' |\n'))
                 if detail.component:
                     result.append(('class:border', '| '))
-                    result.append(('class:text.dim', f'Компонент: {detail.component}'[:content_width-2].ljust(content_width - 2)))
+                    result.append(('class:text.dim', f'{self._t("COMPONENT")}: {detail.component}'[:content_width-2].ljust(content_width - 2)))
                     result.append(('class:border', ' |\n'))
                 result.append(('class:border', '+' + '-'*content_width + '+\n'))
 
             if detail.tags:
                 result.append(('class:border', '| '))
-                tags_text = f'Теги: {", ".join(detail.tags)}'[:content_width-2]
+                tags_text = f'{self._t("TAGS")}: {", ".join(detail.tags)}'[:content_width-2]
                 result.append(('class:text.dim', tags_text.ljust(content_width - 2)))
                 result.append(('class:border', ' |\n'))
                 result.append(('class:border', '+' + '-'*content_width + '+\n'))
 
             if detail.parent:
                 result.append(('class:border', '| '))
-                result.append(('class:text.dim', f'Родитель: {detail.parent}'[:content_width-2].ljust(content_width - 2)))
+                result.append(('class:text.dim', f'{self._t("PARENT")}: {detail.parent}'[:content_width-2].ljust(content_width - 2)))
                 result.append(('class:border', ' |\n'))
                 result.append(('class:border', '+' + '-'*content_width + '+\n'))
 
@@ -3185,7 +3193,7 @@ class TaskTrackerTUI:
 
         self.subtask_row_map = []
         result.append(('class:border', '| '))
-        header = f'{self._t("SUBTASKS")} ({completed}/{len(items)} завершено)'
+        header = f'{self._t("SUBTASKS")} ({completed}/{len(items)} {self._t("COMPLETED_SUFFIX")})'
         result.append(('class:header', header[: content_width - 2].ljust(content_width - 2)))
         result.append(('class:border', ' |\n'))
         line_counter += 1
@@ -3839,12 +3847,12 @@ class TaskTrackerTUI:
                 rows.append(row[:inner_width])
 
         rows: List[str] = []
-        add_block(rows, " Домен: ", path_text, max_lines=2)
-        add_block(rows, " Время: ", f"{start_time} → {finish_time}", max_lines=1)
-        add_block(rows, " Длительность: ", duration_value, max_lines=1)
-        add_block(rows, " Описание: ", desc, max_lines=2)
+        add_block(rows, f" {self._t('DOMAIN')}: ", path_text, max_lines=2)
+        add_block(rows, " Time: ", f"{start_time} → {finish_time}", max_lines=1)
+        add_block(rows, " Duration: ", duration_value, max_lines=1)
+        add_block(rows, f" {self._t('DESCRIPTION')}: ", desc, max_lines=2)
         legend_text = "◉=Done/In Progress | ◎=Backlog | %=progress | Σ=subtasks | ?=help" + scroll_info
-        add_block(rows, " Легенда: ", legend_text, max_lines=1)
+        add_block(rows, " Legend: ", legend_text, max_lines=1)
         while len(rows) < 7:
             rows.append(" " * inner_width)
 
