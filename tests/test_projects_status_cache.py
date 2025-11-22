@@ -64,3 +64,25 @@ def test_projects_status_payload_force_refresh(monkeypatch):
     cache.projects_status_payload(lambda: sync, force_refresh=True)
 
     assert sync.ensure_calls == 2
+
+
+def test_projects_status_payload_error_and_token(monkeypatch):
+    cache.invalidate_cache()
+    monkeypatch.setattr(cache, "get_user_token", lambda: "")
+
+    payload = cache.projects_status_payload(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert payload["status_reason"] == "Git Projects недоступен"
+    assert payload["token_preview"] == ""
+
+    class SyncWithToken(DummySync):
+        def __init__(self):
+            super().__init__()
+            self.token = "tok"
+            self.token_present = None
+            self.config.enabled = False
+
+    sync = SyncWithToken()
+    cache.invalidate_cache()
+    payload2 = cache.projects_status_payload(lambda: sync)
+    assert payload2["token_present"] is True
+    assert payload2["status_reason"] == "auto-sync выключена"
