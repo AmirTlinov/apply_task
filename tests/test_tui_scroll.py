@@ -99,9 +99,9 @@ def test_detail_renders_nested_subtasks_with_paths(tmp_path):
 
     rendered = "".join(text for _, text in tui.get_detail_text())
 
-    assert "ПОДЗАДАЧИ (0/2 завершено)" in rendered
-    assert "| >▾ 0 " in rendered  # родитель с индикатором раскрытия
-    assert "|      0.0 " in rendered  # вложенная подзадача с отступом
+    assert "SUBTASKS (0/2" in rendered
+    assert ">▾ 0 " in rendered  # parent with expand indicator
+    assert "0.0 " in rendered  # nested subtask visible
 
 
 def test_collapse_expand_toggles_visibility(tmp_path):
@@ -166,7 +166,7 @@ def test_selected_subtask_details_rendered(tmp_path):
     tui.detail_selected_index = 0
     rendered = "".join(text for _, text in tui.get_detail_text())
 
-    assert "ДЕТАЛИ ПОДЗАДАЧИ" in rendered
+    assert "SUBTASK DETAILS" in rendered
     assert "crit A" in rendered
     assert "test A" in rendered
     assert "block A" in rendered
@@ -187,8 +187,8 @@ def test_compact_summary_shows_blockers_when_room(tmp_path):
     tui.current_task_detail = detail
     rendered = "".join(text for _, text in tui.get_detail_text())
 
-    assert "Описание:" in rendered
-    assert "Блокеры:" in rendered
+    assert "Description:" in rendered
+    assert "Blockers:" in rendered
     assert "dep a" in rendered
 
 

@@ -1327,7 +1327,7 @@ class TaskTrackerTUI:
         self.spinner_active = False
         self.spinner_message = ""
         self.spinner_start = 0.0
-        self.language: str = "ru"
+        self.language: str = "en"
         self.pat_validation_result = ""
         self._last_sync_enabled: Optional[bool] = None
         self._sync_flash_until: float = 0.0
