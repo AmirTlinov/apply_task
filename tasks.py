@@ -229,6 +229,85 @@ LANG_PACK = {
         "ERR_TASK_NEEDS_SUBTASKS": "Task must be decomposed into subtasks",
         "ERR_SUBTASKS_MIN": "Not enough subtasks ({count}). Minimum 3 for flagship quality",
         "ERR_SUBTASK_PREFIX": "Subtask {idx}: {issue}",
+        "SPINNER_REFRESH_TASKS": "Refreshing tasks",
+        "STATUS_TASKS_COUNT": "{count} tasks",
+        "STATUS_LOADING": "Loading",
+        "STATUS_NO_TASKS": "No tasks",
+        "STATUS_NO_DATA": "No data",
+        "STATUS_CONTEXT": "Context: {ctx}",
+        "STATUS_TASK_NOT_SELECTED": "Task not selected",
+        "DESCRIPTION_HEADER": "DESCRIPTION:",
+        "MARKS_SUFFIX": " — checkpoints:",
+        "OFFSET_LABEL": " | Offset: ",
+        "NAV_STATUS_HINT": "q — exit | r — refresh | Enter — details | d — complete | e — edit | g — Git Projects",
+        "NAV_CHECKPOINT_HINT": "  Checkpoints: [✓ ✓ ·] = criteria / tests / blockers | ? — hide hint",
+        "NAV_ARROWS_HINT": "← collapse/parent · → expand/first child · Enter: card · d: done",
+        "NAV_EDIT_HINT": " Enter: save | Esc: cancel",
+        "EDIT_TASK_TITLE": "Edit task title",
+        "EDIT_TASK_DESCRIPTION": "Edit task description",
+        "EDIT_SUBTASK": "Edit subtask",
+        "EDIT_CRITERION": "Edit criterion",
+        "EDIT_TEST": "Edit test",
+        "EDIT_BLOCKER": "Edit blocker",
+        "EDIT_PROJECT_NUMBER": "Project number",
+        "EDIT_GENERIC": "Edit",
+        "BTN_VALIDATE_PAT": "[ Validate PAT (F5) ]",
+        "TASK_LIST_EMPTY": "No tasks",
+        "TABLE_HEADER_TASK": "Task",
+        "TABLE_HEADER_PROGRESS": "%",
+        "TABLE_HEADER_SUBTASKS": "Σ",
+        "SIDE_EMPTY_TASKS": "No tasks",
+        "SIDE_NO_DATA": "No data",
+        "STATUS_TASK_NOT_SELECTED": "Task not selected",
+        "DUR_DAYS_SUFFIX": "d",
+        "DUR_HOURS_SUFFIX": "h",
+        "DUR_MINUTES_SUFFIX": "m",
+        "DUR_LT_HOUR": "<1h",
+        "SETTINGS_UNAVAILABLE": "Settings unavailable",
+        "SETTINGS_TITLE": "GITHUB PROJECTS SETTINGS",
+        "ERR_PARENT_REQUIRED": "Specify parent: --parent TASK-XXX",
+        "GUIDED_ONLY_INTERACTIVE": "[X] Wizard available only in interactive terminal",
+        "GUIDED_USE_PARAMS": "  Use: apply_task create with parameters",
+        "GUIDED_TITLE": "[>>] WIZARD: Create a flagship-grade task",
+        "GUIDED_STEP1": "[DESC] Step 1/5: Basics",
+        "GUIDED_TASK_TITLE": "Task title",
+        "GUIDED_PARENT_ID": "Parent task ID (e.g., TASK-001)",
+        "GUIDED_DESCRIPTION": "Description (not TBD)",
+        "GUIDED_DESCRIPTION_TBD": "  [!] Description cannot be 'TBD'",
+        "GUIDED_STEP2": "[TAG]  Step 2/5: Context and metadata",
+        "GUIDED_CONTEXT": "Additional context",
+        "GUIDED_TAGS": "Tags (comma-separated)",
+        "GUIDED_STEP3": "[WARN]  Step 3/5: Risks",
+        "GUIDED_RISKS": "Project risks",
+        "GUIDED_STEP4": "[SUB] Step 4/5: Success criteria and tests",
+        "GUIDED_TESTS": "Success criteria / Tests",
+        "GUIDED_STEP5": "[TASK] Step 5/5: Subtasks (min 3)",
+        "GUIDED_ADD_MORE": "\nAdd another subtask?",
+        "GUIDED_VALIDATION": "\n🔍 Flagship validation...",
+        "GUIDED_WARN_ISSUES": "[WARN]  Issues detected:",
+        "GUIDED_CONTINUE": "\nContinue despite issues?",
+        "GUIDED_CANCELLED": "[X] Creation cancelled",
+        "GUIDED_SAVING": "\n[SAVE] Creating task...",
+        "GUIDED_SUCCESS": "[SUB] SUCCESS: Task {task_id} created",
+        "GUIDED_PARENT": "[DEP] Parent: {parent}",
+        "GUIDED_SUBTASK_COUNT": "[STAT] Subtasks: {count}",
+        "GUIDED_CRITERIA_COUNT": "[SUB] Criteria: {count}",
+        "GUIDED_RISKS_COUNT": "[WARN]  Risks: {count}",
+        "ERR_STATUS_REQUIRED": "Provide status: OK | WARN | FAIL",
+        "ERR_NO_TASK_AND_LAST": "No task ID and no last task",
+        "MSG_STATUS_UPDATED": "Status {task_id} updated",
+        "ERR_STATUS_NOT_UPDATED": "Status not updated",
+        "ERR_SUBTASK_TITLE_MIN": "Subtask must be at least 20 characters with details",
+        "ERR_SUBTASK_INDEX": "Invalid subtask index",
+        "ERR_TASK_UNAVAILABLE": "Task unavailable",
+        "ERR_SUBTASK_NOT_FOUND": "Subtask not found",
+        "ERR_TASK_ID_OR_GLOB": "Provide task_id or --glob",
+        "ERR_FILTER_REQUIRED": "Provide at least one filter: --tag/--status/--phase or --glob",
+        "ERR_TOKEN_OR_UNSET": "Provide --token or --unset",
+        "REQ_MIN_SUBTASKS": "At least 3 subtasks",
+        "REQ_MIN_TITLE": "Each subtask >=20 chars",
+        "REQ_EXPLICIT_CHECKPOINTS": "Explicit success criteria/tests/blockers",
+        "REQ_ATOMIC": "Atomic steps without 'and then'",
     },
     "ru": {
         "TITLE": "ЗАГОЛОВОК",
@@ -388,6 +467,85 @@ LANG_PACK = {
         "ERR_TASK_NEEDS_SUBTASKS": "Задача должна быть декомпозирована на подзадачи",
         "ERR_SUBTASKS_MIN": "Недостаточно подзадач ({count}). Минимум 3 для flagship-качества",
         "ERR_SUBTASK_PREFIX": "Подзадача {idx}: {issue}",
+        "SPINNER_REFRESH_TASKS": "Обновление задач",
+        "STATUS_TASKS_COUNT": "{count} задач",
+        "STATUS_LOADING": "Загрузка",
+        "STATUS_NO_TASKS": "Нет задач",
+        "STATUS_NO_DATA": "Нет данных",
+        "STATUS_CONTEXT": "Контекст: {ctx}",
+        "STATUS_TASK_NOT_SELECTED": "Задача не выбрана",
+        "DESCRIPTION_HEADER": "ОПИСАНИЕ:",
+        "MARKS_SUFFIX": " — отметки:",
+        "OFFSET_LABEL": " | Смещение: ",
+        "NAV_STATUS_HINT": "q — выход | r — обновить | Enter — детали | d — завершить | e — редактировать | g — Git Projects",
+        "NAV_CHECKPOINT_HINT": "  Чекпоинты: [✓ ✓ ·] = критерии / тесты / блокеры | ? — скрыть подсказку",
+        "NAV_ARROWS_HINT": "← свернуть/к родителю · → раскрыть/к первому ребёнку · Enter: карточка · d: done",
+        "NAV_EDIT_HINT": " Enter: сохранить | Esc: отменить",
+        "EDIT_TASK_TITLE": "Редактирование названия задачи",
+        "EDIT_TASK_DESCRIPTION": "Редактирование описания задачи",
+        "EDIT_SUBTASK": "Редактирование подзадачи",
+        "EDIT_CRITERION": "Редактирование критерия",
+        "EDIT_TEST": "Редактирование теста",
+        "EDIT_BLOCKER": "Редактирование блокера",
+        "EDIT_PROJECT_NUMBER": "Номер проекта",
+        "EDIT_GENERIC": "Редактирование",
+        "BTN_VALIDATE_PAT": "[ Проверить PAT (F5) ]",
+        "TASK_LIST_EMPTY": "Нет задач",
+        "TABLE_HEADER_TASK": "Задача",
+        "TABLE_HEADER_PROGRESS": "%",
+        "TABLE_HEADER_SUBTASKS": "Σ",
+        "SIDE_EMPTY_TASKS": "Нет задач",
+        "SIDE_NO_DATA": "Нет данных",
+        "STATUS_TASK_NOT_SELECTED": "Задача не выбрана",
+        "DUR_DAYS_SUFFIX": "д",
+        "DUR_HOURS_SUFFIX": "ч",
+        "DUR_MINUTES_SUFFIX": "м",
+        "DUR_LT_HOUR": "<1ч",
+        "SETTINGS_UNAVAILABLE": "Настройки недоступны",
+        "SETTINGS_TITLE": "НАСТРОЙКИ GITHUB PROJECTS",
+        "ERR_PARENT_REQUIRED": "Укажи parent: --parent TASK-XXX",
+        "GUIDED_ONLY_INTERACTIVE": "[X] Мастер доступен только в интерактивном терминале",
+        "GUIDED_USE_PARAMS": "  Используй: apply_task create с параметрами",
+        "GUIDED_TITLE": "[>>] МАСТЕР: Создание задачи flagship-качества",
+        "GUIDED_STEP1": "[DESC] Шаг 1/5: Базовая информация",
+        "GUIDED_TASK_TITLE": "Название задачи",
+        "GUIDED_PARENT_ID": "ID родительской задачи (например: TASK-001)",
+        "GUIDED_DESCRIPTION": "Описание (не TBD)",
+        "GUIDED_DESCRIPTION_TBD": "  [!] Описание не может быть 'TBD'",
+        "GUIDED_STEP2": "[TAG]  Шаг 2/5: Контекст и метаданные",
+        "GUIDED_CONTEXT": "Дополнительный контекст",
+        "GUIDED_TAGS": "Теги (через запятую)",
+        "GUIDED_STEP3": "[WARN]  Шаг 3/5: Риски",
+        "GUIDED_RISKS": "Риски проекта",
+        "GUIDED_STEP4": "[SUB] Шаг 4/5: Критерии успеха и тесты",
+        "GUIDED_TESTS": "Критерии успеха / Тесты",
+        "GUIDED_STEP5": "[TASK] Шаг 5/5: Подзадачи (минимум 3)",
+        "GUIDED_ADD_MORE": "\nДобавить ещё подзадачу?",
+        "GUIDED_VALIDATION": "\n🔍 Валидация flagship-качества...",
+        "GUIDED_WARN_ISSUES": "[WARN]  Обнаружены проблемы:",
+        "GUIDED_CONTINUE": "\nПродолжить несмотря на проблемы?",
+        "GUIDED_CANCELLED": "[X] Создание отменено",
+        "GUIDED_SAVING": "\n[SAVE] Создание задачи...",
+        "GUIDED_SUCCESS": "[SUB] УСПЕШНО: Создана задача {task_id}",
+        "GUIDED_PARENT": "[DEP] Родитель: {parent}",
+        "GUIDED_SUBTASK_COUNT": "[STAT] Подзадач: {count}",
+        "GUIDED_CRITERIA_COUNT": "[SUB] Критериев: {count}",
+        "GUIDED_RISKS_COUNT": "[WARN]  Рисков: {count}",
+        "ERR_STATUS_REQUIRED": "Укажи статус: OK | WARN | FAIL",
+        "ERR_NO_TASK_AND_LAST": "Не указан ID задачи и нет последней",
+        "MSG_STATUS_UPDATED": "Статус {task_id} обновлён",
+        "ERR_STATUS_NOT_UPDATED": "Статус не обновлён",
+        "ERR_SUBTASK_TITLE_MIN": "Подзадача должна содержать как минимум 20 символов с деталями",
+        "ERR_SUBTASK_INDEX": "Неверный индекс подзадачи",
+        "ERR_TASK_UNAVAILABLE": "Задача недоступна",
+        "ERR_SUBTASK_NOT_FOUND": "Подзадача не найдена",
+        "ERR_TASK_ID_OR_GLOB": "Укажи task_id или --glob",
+        "ERR_FILTER_REQUIRED": "Укажи хотя бы один фильтр: --tag/--status/--phase или --glob",
+        "ERR_TOKEN_OR_UNSET": "Укажи --token или --unset",
+        "REQ_MIN_SUBTASKS": "Минимум 3 подзадачи",
+        "REQ_MIN_TITLE": "Каждая подзадача >=20 символов",
+        "REQ_EXPLICIT_CHECKPOINTS": "Explicit success criteria/tests/blockers",
+        "REQ_ATOMIC": "Атомарные действия без 'и затем'",
     },
     "uk": {
         "TITLE": "ЗАГОЛОВОК",
@@ -2957,7 +3115,7 @@ class TaskTrackerTUI:
                         break
 
     def load_tasks(self, preserve_selection: bool = False, selected_task_file: Optional[str] = None, skip_sync: bool = False):
-        with self._spinner("Обновление задач"):
+        with self._spinner(self._t("SPINNER_REFRESH_TASKS")):
             domain_path = derive_domain_explicit(self.domain_filter, self.phase_filter, self.component_filter)
             details = self.manager.list_tasks(domain_path, skip_sync=skip_sync)
         # показываем плашку при достижении rate-limit
@@ -3055,7 +3213,7 @@ class TaskTrackerTUI:
             parts.append(("class:header.bigicon", "[BACK] ", back_handler))
 
         parts.extend([
-            ("class:text.dim", f"{total} задач | "),
+            ("class:text.dim", f"{self._t('STATUS_TASKS_COUNT', count=total)} | "),
             ("class:icon.check", str(ok)),
             ("class:text.dim", "/"),
             ("class:icon.warn", str(warn)),
@@ -3073,7 +3231,7 @@ class TaskTrackerTUI:
         if spinner_frame:
             parts.extend([
                 ("class:text.dim", " | "),
-                ("class:header", f"{spinner_frame} {self.spinner_message or 'Загрузка'}"),
+                ("class:header", f"{spinner_frame} {self.spinner_message or self._t('STATUS_LOADING')}"),
             ])
         if self.status_message and time.time() < self.status_message_expires:
             parts.extend([
@@ -3212,13 +3370,13 @@ class TaskTrackerTUI:
         hours, minutes = divmod(rem_minutes, 60)
         parts: List[str] = []
         if days:
-            parts.append(f"{days}д")
+            parts.append(f"{days}{self._t('DUR_DAYS_SUFFIX')}")
         if hours:
-            parts.append(f"{hours}ч")
+            parts.append(f"{hours}{self._t('DUR_HOURS_SUFFIX')}")
         if minutes:
-            parts.append(f"{minutes}м")
+            parts.append(f"{minutes}{self._t('DUR_MINUTES_SUFFIX')}")
         if not parts:
-            parts.append("<1ч")
+            parts.append(self._t("DUR_LT_HOUR"))
         return " ".join(parts)
 
     def _get_status_info(self, task: Task) -> Tuple[str, str, str]:
@@ -3239,7 +3397,7 @@ class TaskTrackerTUI:
             self.task_row_map = []
             return FormattedText([
                 ('class:border', '+' + '-' * empty_width + '+\n'),
-                ('class:text.dim', '| ' + 'Нет задач'.ljust(empty_width - 2) + ' |\n'),
+                ('class:text.dim', '| ' + self._t("TASK_LIST_EMPTY").ljust(empty_width - 2) + ' |\n'),
                 ('class:border', '+' + '-' * empty_width + '+'),
             ])
 
@@ -3291,9 +3449,9 @@ class TaskTrackerTUI:
 
         column_labels = {
             'stat': ('◉', widths.get('stat', 3)),
-            'title': ('Задача', widths.get('title', 20)),
-            'progress': ('%', widths.get('progress', 4)),
-            'subtasks': ('Σ', widths.get('subtasks', 3)),
+            'title': (self._t("TABLE_HEADER_TASK"), widths.get('title', 20)),
+            'progress': (self._t("TABLE_HEADER_PROGRESS"), widths.get('progress', 4)),
+            'subtasks': (self._t("TABLE_HEADER_SUBTASKS"), widths.get('subtasks', 3)),
         }
 
         header_align = {
@@ -3377,7 +3535,7 @@ class TaskTrackerTUI:
         if not self.filtered_tasks:
             return FormattedText([
                 ('class:border', '+------------------------------+\n'),
-                ('class:text.dim', '| Нет задач                   |\n'),
+                ('class:text.dim', '| ' + self._t("SIDE_EMPTY_TASKS").ljust(26) + ' |\n'),
                 ('class:border', '+------------------------------+'),
             ])
         idx = min(self.selected_index, len(self.filtered_tasks) - 1)
@@ -3391,7 +3549,7 @@ class TaskTrackerTUI:
         if not detail:
             return FormattedText([
                 ('class:border', '+------------------------------+\n'),
-                ('class:text.dim', '| Нет данных                   |\n'),
+                ('class:text.dim', '| ' + self._t("SIDE_NO_DATA").ljust(26) + ' |\n'),
                 ('class:border', '+------------------------------+'),
             ])
 
@@ -3424,7 +3582,7 @@ class TaskTrackerTUI:
         ctx = detail.domain or detail.phase or detail.component
         if ctx:
             result.append(('class:border', '| '))
-            result.append(('class:text.dim', f'Контекст: {ctx[:32]}'.ljust(40)))
+            result.append(('class:text.dim', self._t("STATUS_CONTEXT", ctx=ctx[:32]).ljust(40)))
             result.append(('class:border', ' |\n'))
 
         # Progress with simple ASCII bar
@@ -3455,7 +3613,7 @@ class TaskTrackerTUI:
     # -------- detail view (full card in left pane) --------
     def get_detail_text(self) -> FormattedText:
         if not self.current_task_detail:
-            return FormattedText([("class:text.dim", "Задача не выбрана")])
+            return FormattedText([("class:text.dim", self._t("STATUS_TASK_NOT_SELECTED"))])
 
         detail = self.current_task_detail
         self.subtask_row_map = []
@@ -3474,9 +3632,9 @@ class TaskTrackerTUI:
 
         # Status with color
         status_map = {
-            'OK': ('class:icon.check', 'DONE'),
-            'WARN': ('class:icon.warn', 'IN PROGRESS'),
-            'FAIL': ('class:icon.fail', 'BACKLOG'),
+            'OK': ('class:icon.check', self._t("STATUS_DONE")),
+            'WARN': ('class:icon.warn', self._t("STATUS_IN_PROGRESS")),
+            'FAIL': ('class:icon.fail', self._t("STATUS_BACKLOG")),
         }
         status_style, status_label = status_map.get(detail.status, ('class:icon.fail', detail.status))
         result.append((status_style, status_label.ljust(10)))
@@ -3567,7 +3725,7 @@ class TaskTrackerTUI:
             # Description with horizontal scroll
             if detail.description:
                 result.append(('class:border', '| '))
-                result.append(('class:header', 'ОПИСАНИЕ:'.ljust(content_width - 2)))
+                result.append(('class:header', self._t("DESCRIPTION_HEADER").ljust(content_width - 2)))
                 result.append(('class:border', ' |\n'))
                 desc_lines = detail.description.split('\n')
                 for dline in desc_lines:
@@ -3927,7 +4085,7 @@ class TaskTrackerTUI:
                 return
             lines.append(('class:border', '+' + '-'*content_width + '+\n'))
             lines.append(('class:border', '| '))
-            lines.append(('class:label', self._pad_display(f"{label} — отметки:", content_width - 2)))
+            lines.append(('class:label', self._pad_display(f"{label}{self._t('MARKS_SUFFIX')}", content_width - 2)))
             lines.append(('class:border', ' |\n'))
             for entry in entries:
                 gid = next_group()
@@ -4236,21 +4394,20 @@ class TaskTrackerTUI:
                 self.start_editing('task_title', task_detail.title)
 
     def get_footer_text(self) -> FormattedText:
-        scroll_info = f" | Смещение: {self.horizontal_offset}" if self.horizontal_offset > 0 else ""
+        scroll_info = f"{self._t('OFFSET_LABEL')}{self.horizontal_offset}" if self.horizontal_offset > 0 else ""
         if getattr(self, 'help_visible', False):
             return FormattedText([
-                ("class:text.dimmer", " q — выход | r — обновить | Enter — детали | d — завершить | e — редактировать | g — Git Projects"),
+                ("class:text.dimmer", self._t("NAV_STATUS_HINT")),
                 ("", "\n"),
-                ("class:text.dim", "  Чекпоинты: [✓ ✓ ·] = критерии / тесты / блокеры | ? — скрыть подсказку"),
+                ("class:text.dim", self._t("NAV_CHECKPOINT_HINT")),
             ])
         if getattr(self, "single_subtask_view", None):
             return FormattedText([])
         if self.detail_mode and self.current_task_detail:
-            hint = "← свернуть/к родителю · → раскрыть/к первому ребёнку · Enter: карточка · d: done"
-            return FormattedText([("class:text.dim", hint)])
+            return FormattedText([("class:text.dim", self._t("NAV_ARROWS_HINT"))])
         if self.editing_mode:
             return FormattedText([
-                ("class:text.dimmer", " Enter: сохранить | Esc: отменить"),
+                ("class:text.dimmer", self._t("NAV_EDIT_HINT")),
             ])
         desc = self._current_description_snippet() or self._t("DESCRIPTION_MISSING")
         detail = self._current_task_detail_obj()
@@ -4356,16 +4513,16 @@ class TaskTrackerTUI:
 
     def _build_edit_container(self):
         labels = {
-            'task_title': 'Редактирование названия задачи',
-            'task_description': 'Редактирование описания задачи',
-            'subtask_title': 'Редактирование подзадачи',
-            'criterion': 'Редактирование критерия',
-            'test': 'Редактирование теста',
-            'blocker': 'Редактирование блокера',
+            'task_title': self._t("EDIT_TASK_TITLE"),
+            'task_description': self._t("EDIT_TASK_DESCRIPTION"),
+            'subtask_title': self._t("EDIT_SUBTASK"),
+            'criterion': self._t("EDIT_CRITERION"),
+            'test': self._t("EDIT_TEST"),
+            'blocker': self._t("EDIT_BLOCKER"),
             'token': 'GitHub PAT',
-            'project_number': 'Номер проекта',
+            'project_number': self._t("EDIT_PROJECT_NUMBER"),
         }
-        label = labels.get(self.edit_context, 'Редактирование')
+        label = labels.get(self.edit_context, self._t("EDIT_GENERIC"))
         width = max(40, self.get_terminal_width() - 4)
         header = Window(
             content=FormattedTextControl([('class:header', f" {label} ".ljust(width))]),
@@ -4376,7 +4533,7 @@ class TaskTrackerTUI:
         children = [header, Window(height=1, char='─'), self.edit_field]
 
         if self.edit_context == 'token':
-            button_text = '[ Проверить PAT (F5) ]'
+            button_text = self._t("BTN_VALIDATE_PAT")
 
             def fragments():
                 return [('class:header', button_text, lambda mouse_event: self._validate_edit_buffer_pat() if (
@@ -4392,7 +4549,7 @@ class TaskTrackerTUI:
     def get_settings_panel(self) -> FormattedText:
         options = self._settings_options()
         if not options:
-            return FormattedText([("class:text.dim", "Настройки недоступны")])
+            return FormattedText([("class:text.dim", self._t("SETTINGS_UNAVAILABLE"))])
         width = max(70, min(110, self.get_terminal_width() - 4))
         inner_width = max(30, width - 2)
         max_label = max(len(opt["label"]) for opt in options)
@@ -4415,7 +4572,7 @@ class TaskTrackerTUI:
         lines: List[Tuple[str, str]] = []
         lines.append(('class:border', '+' + '='*width + '+\n'))
         lines.append(('class:border', '| '))
-        title = 'НАСТРОЙКИ GITHUB PROJECTS'
+        title = self._t("SETTINGS_TITLE")
         lines.append(('class:header', title.center(width - 2)))
         lines.append(('class:border', ' |\n'))
         lines.append(('class:border', '+' + '-'*width + '+\n'))
@@ -4913,10 +5070,10 @@ def cmd_create(args) -> int:
         payload = {
             "issues": flagship_issues,
             "requirements": [
-                "Минимум 3 подзадачи",
-                "Каждая подзадача >=20 символов",
-                "Explicit success criteria/tests/blockers",
-                "Атомарные действия без 'и затем'",
+                translate("REQ_MIN_SUBTASKS"),
+                translate("REQ_MIN_TITLE"),
+                translate("REQ_EXPLICIT_CHECKPOINTS"),
+                translate("REQ_ATOMIC"),
             ],
         }
         return fail(translate("ERR_FLAGSHIP_SUBTASKS"), payload=payload)
@@ -4938,7 +5095,7 @@ def cmd_create(args) -> int:
 
 def cmd_smart_create(args) -> int:
     if not args.parent:
-        return structured_error("task", "Укажи parent: --parent TASK-XXX")
+        return structured_error("task", translate("ERR_PARENT_REQUIRED"))
     manager = TaskManager()
     title, auto_tags, auto_deps = parse_smart_title(args.title)
     args.parent = normalize_task_id(args.parent)
@@ -4998,10 +5155,10 @@ def cmd_smart_create(args) -> int:
         payload = {
             "issues": flagship_issues,
             "requirements": [
-                "Минимум 3 подзадачи",
-                "Каждая подзадача >=20 символов",
-                "Explicit success criteria/tests/blockers",
-                "Атомарные действия без 'и затем'",
+                translate("REQ_MIN_SUBTASKS"),
+                translate("REQ_MIN_TITLE"),
+                translate("REQ_EXPLICIT_CHECKPOINTS"),
+                translate("REQ_ATOMIC"),
             ],
         }
         return fail(translate("ERR_FLAGSHIP_SUBTASKS"), payload=payload)
@@ -5024,63 +5181,63 @@ def cmd_smart_create(args) -> int:
 def cmd_create_guided(args) -> int:
     """Полуинтерактивное создание задачи (шаг-ответ-шаг)"""
     if not is_interactive():
-        print("[X] Мастер доступен только в интерактивном терминале")
-        print("  Используй: apply_task create с параметрами")
+        print(translate("GUIDED_ONLY_INTERACTIVE"))
+        print(translate("GUIDED_USE_PARAMS"))
         return 1
 
     print("=" * 60)
-    print("[>>] МАСТЕР: Создание задачи flagship-качества")
+    print(translate("GUIDED_TITLE"))
     print("=" * 60)
 
     manager = TaskManager()
 
     # Шаг 1: Базовая информация
-    print("\n[DESC] Шаг 1/5: Базовая информация")
-    title = prompt_required("Название задачи")
-    parent = prompt_required("ID родительской задачи (например: TASK-001)")
+    print(f"\n{translate('GUIDED_STEP1')}")
+    title = prompt_required(translate("GUIDED_TASK_TITLE"))
+    parent = prompt_required(translate("GUIDED_PARENT_ID"))
     parent = normalize_task_id(parent)
-    description = prompt_required("Описание (не TBD)")
+    description = prompt_required(translate("GUIDED_DESCRIPTION"))
     while description.upper() == "TBD":
-        print("  [!] Описание не может быть 'TBD'")
-        description = prompt_required("Описание")
+        print(translate("GUIDED_DESCRIPTION_TBD"))
+        description = prompt_required(translate("GUIDED_DESCRIPTION"))
 
     # Шаг 2: Контекст и метаданные
-    print("\n[TAG]  Шаг 2/5: Контекст и метаданные")
-    context = prompt("Дополнительный контекст", default="")
-    tags_str = prompt("Теги (через запятую)", default="")
+    print(f"\n{translate('GUIDED_STEP2')}")
+    context = prompt(translate("GUIDED_CONTEXT"), default="")
+    tags_str = prompt(translate("GUIDED_TAGS"), default="")
     tags = [t.strip() for t in tags_str.split(",") if t.strip()]
 
     # Шаг 3: Риски
-    print("\n[WARN]  Шаг 3/5: Риски")
-    risks = prompt_list("Риски проекта", min_items=1)
+    print(f"\n{translate('GUIDED_STEP3')}")
+    risks = prompt_list(translate("GUIDED_RISKS"), min_items=1)
 
     # Шаг 4: Критерии успеха / Тесты
-    print("\n[SUB] Шаг 4/5: Критерии успеха и тесты")
-    tests = prompt_list("Критерии успеха / Тесты", min_items=1)
+    print(f"\n{translate('GUIDED_STEP4')}")
+    tests = prompt_list(translate("GUIDED_TESTS"), min_items=1)
 
     # Шаг 5: Подзадачи
-    print("\n[TASK] Шаг 5/5: Подзадачи (минимум 3)")
+    print(f"\n{translate('GUIDED_STEP5')}")
     subtasks = []
     for i in range(3):
         subtasks.append(prompt_subtask_interactive(i + 1))
 
-    while confirm("\nДобавить ещё подзадачу?", default=False):
+    while confirm(translate("GUIDED_ADD_MORE"), default=False):
         subtasks.append(prompt_subtask_interactive(len(subtasks) + 1))
 
     # Валидация
-    print("\n🔍 Валидация flagship-качества...")
+    print(translate("GUIDED_VALIDATION"))
     flagship_ok, flagship_issues = validate_flagship_subtasks(subtasks)
     if not flagship_ok:
-        print("[WARN]  Обнаружены проблемы:")
+        print(translate("GUIDED_WARN_ISSUES"))
         for idx, issue in enumerate(flagship_issues, 1):
             print(f"  {idx}. {issue}")
 
-        if not confirm("\nПродолжить несмотря на проблемы?", default=False):
-            print("[X] Создание отменено")
+        if not confirm(translate("GUIDED_CONTINUE"), default=False):
+            print(translate("GUIDED_CANCELLED"))
             return 1
 
     # Создание задачи
-    print("\n[SAVE] Создание задачи...")
+    print(translate("GUIDED_SAVING"))
     domain = derive_domain_explicit(
         getattr(args, 'domain', None),
         getattr(args, 'phase', None),
@@ -5109,13 +5266,13 @@ def cmd_create_guided(args) -> int:
     save_last_task(task.id, task.domain)
 
     print("\n" + "=" * 60)
-    print(f"[SUB] УСПЕШНО: Создана задача {task.id}")
+    print(translate("GUIDED_SUCCESS", task_id=task.id))
     print("=" * 60)
     print(f"[TASK] {task.title}")
-    print(f"[DEP] Родитель: {task.parent}")
-    print(f"[STAT] Подзадач: {len(task.subtasks)}")
-    print(f"[SUB] Критериев: {len(task.success_criteria)}")
-    print(f"[WARN]  Рисков: {len(task.risks)}")
+    print(translate("GUIDED_PARENT", parent=task.parent))
+    print(translate("GUIDED_SUBTASK_COUNT", count=len(task.subtasks)))
+    print(translate("GUIDED_CRITERIA_COUNT", count=len(task.success_criteria)))
+    print(translate("GUIDED_RISKS_COUNT", count=len(task.risks)))
     print("=" * 60)
 
     return 0
@@ -5133,12 +5290,12 @@ def cmd_update(args) -> int:
             task_id = normalize_task_id(candidate)
 
     if status is None:
-        return structured_error("update", "Укажи статус: OK | WARN | FAIL")
+        return structured_error("update", translate("ERR_STATUS_REQUIRED"))
 
     if task_id is None:
         task_id = last_id
         if not task_id:
-            return structured_error("update", "Не указан ID задачи и нет последней")
+            return structured_error("update", translate("ERR_NO_TASK_AND_LAST"))
 
     manager = TaskManager()
     domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None)) or last_domain or ""
@@ -5150,18 +5307,18 @@ def cmd_update(args) -> int:
         return structured_response(
             "update",
             status=status,
-            message=f"Статус {task_id} обновлён",
+            message=translate("MSG_STATUS_UPDATED", task_id=task_id),
             payload=payload,
             summary=f"{task_id} → {status}",
         )
 
     payload = {"task_id": task_id, "domain": domain}
     if error and error.get("code") == "not_found":
-        return structured_error("update", error.get("message", "Задача не найдена"), payload=payload)
+        return structured_error("update", error.get("message", translate("ERR_TASK_NOT_FOUND", task_id=task_id)), payload=payload)
     return structured_response(
         "update",
         status="ERROR",
-        message=(error or {}).get("message", "Статус не обновлён"),
+        message=(error or {}).get("message", translate("ERR_STATUS_NOT_UPDATED")),
         payload=payload,
         exit_code=1,
     )
@@ -5269,7 +5426,7 @@ def cmd_add_subtask(args) -> int:
     tests = _parse_semicolon_list(args.tests)
     blockers = _parse_semicolon_list(args.blockers)
     if not args.subtask or len(args.subtask.strip()) < 20:
-        return structured_error("add-subtask", "Подзадача должна содержать как минимум 20 символов с деталями")
+        return structured_error("add-subtask", translate("ERR_SUBTASK_TITLE_MIN"))
     ok, err = manager.add_subtask(task_id, args.subtask.strip(), domain, criteria, tests, blockers)
     if ok:
         payload = {"task_id": task_id, "subtask": args.subtask.strip()}
@@ -5351,7 +5508,7 @@ def cmd_subtask(args) -> int:
         tests = _parse_semicolon_list(args.tests)
         blockers = _parse_semicolon_list(args.blockers)
         if not args.add or len(args.add.strip()) < 20:
-            return structured_error("subtask", "Подзадача должна содержать как минимум 20 символов с деталями")
+            return structured_error("subtask", translate("ERR_SUBTASK_TITLE_MIN"))
         ok, err = manager.add_subtask(task_id, args.add.strip(), domain, criteria, tests, blockers, parent_path=args.path)
         if ok:
             payload = _snapshot(path=args.path)
@@ -5360,17 +5517,17 @@ def cmd_subtask(args) -> int:
             return structured_response(
                 "subtask",
                 status="OK",
-                message=f"Подзадача добавлена в {task_id}",
+                message=f"Subtask added to {task_id}",
                 payload=payload,
                 summary=f"{task_id} +subtask",
             )
         if err == "missing_fields":
             return structured_error(
                 "subtask",
-                "Добавь критерии/тесты/блокеры: --criteria \"...\" --tests \"...\" --blockers \"...\" (через ';')",
+                "Add criteria/tests/blockers: --criteria \"...\" --tests \"...\" --blockers \"...\" (semicolon-separated)",
                 payload={"task_id": task_id},
             )
-        return structured_error("subtask", f"Задача {task_id} не найдена", payload={"task_id": task_id})
+        return structured_error("subtask", translate("ERR_TASK_NOT_FOUND", task_id=task_id), payload={"task_id": task_id})
 
     if action == "done":
         ok, msg = manager.set_subtask(task_id, args.done, True, domain, path=args.path)
@@ -5387,7 +5544,7 @@ def cmd_subtask(args) -> int:
         if msg == "not_found":
             return structured_error("subtask", f"Задача {task_id} не найдена", payload={"task_id": task_id})
         if msg == "index":
-            return structured_error("subtask", "Неверный индекс подзадачи", payload={"task_id": task_id})
+            return structured_error("subtask", translate("ERR_SUBTASK_INDEX"), payload={"task_id": task_id})
         return structured_error("subtask", msg or "Операция не выполнена", payload={"task_id": task_id})
 
     if action == "undo":
@@ -5405,7 +5562,7 @@ def cmd_subtask(args) -> int:
         if msg == "not_found":
             return structured_error("subtask", f"Задача {task_id} не найдена", payload={"task_id": task_id})
         if msg == "index":
-            return structured_error("subtask", "Неверный индекс подзадачи", payload={"task_id": task_id})
+            return structured_error("subtask", translate("ERR_SUBTASK_INDEX"), payload={"task_id": task_id})
         return structured_error("subtask", msg or "Операция не выполнена", payload={"task_id": task_id})
 
     note = (args.note or "").strip()
@@ -5453,7 +5610,7 @@ def cmd_subtask(args) -> int:
     if msg == "not_found":
         return structured_error("subtask", f"Задача {task_id} не найдена", payload={"task_id": task_id})
     if msg == "index":
-        return structured_error("subtask", "Неверный индекс подзадачи", payload={"task_id": task_id})
+        return structured_error("subtask", translate("ERR_SUBTASK_INDEX"), payload={"task_id": task_id})
     return structured_error("subtask", msg or "Операция не выполнена", payload={"task_id": task_id})
 
 
@@ -5481,7 +5638,7 @@ def cmd_ok(args) -> int:
             if msg == "not_found":
                 return structured_error("ok", f"Задача {task_id} не найдена", payload=payload)
             if msg == "index":
-                return structured_error("ok", "Неверный индекс подзадачи", payload=payload)
+                return structured_error("ok", translate("ERR_SUBTASK_INDEX"), payload=payload)
             return structured_error("ok", msg or "Не удалось подтвердить чекпоинт", payload=payload)
     ok, msg = manager.set_subtask(task_id, index, True, domain)
     if not ok:
@@ -5539,7 +5696,7 @@ def cmd_note(args) -> int:
     if msg == "not_found":
         return structured_error("note", f"Задача {task_id} не найдена", payload=payload)
     if msg == "index":
-        return structured_error("note", "Неверный индекс подзадачи", payload=payload)
+        return structured_error("note", translate("ERR_SUBTASK_INDEX"), payload=payload)
     return structured_error("note", msg or "Операция не выполнена", payload=payload)
 
 
@@ -5711,19 +5868,19 @@ def cmd_checkpoint(args) -> int:
         return structured_error("checkpoint", str(exc))
 
     checkpoint_labels = [
-        ("criteria", "Критерии"),
-        ("tests", "Тесты"),
-        ("blockers", "Блокеры"),
+        ("criteria", translate("CHECKPOINT_CRITERIA")),
+        ("tests", translate("CHECKPOINT_TESTS")),
+        ("blockers", translate("CHECKPOINT_BLOCKERS")),
     ]
     operations: List[Dict[str, Any]] = []
 
     for checkpoint, label in checkpoint_labels:
         st = manager.load_task(task_id, domain)
         if not st:
-            return structured_error("checkpoint", "Задача недоступна")
+            return structured_error("checkpoint", translate("ERR_TASK_UNAVAILABLE"))
         target, _, _ = _find_subtask_by_path(st.subtasks, path)
         if not target:
-            return structured_error("checkpoint", "Подзадача не найдена")
+            return structured_error("checkpoint", translate("ERR_SUBTASK_NOT_FOUND"))
         attr_map = {
             "criteria": target.criteria_confirmed,
             "tests": target.tests_confirmed,
@@ -5797,7 +5954,7 @@ def cmd_move(args) -> int:
             summary=f"{count} задач → {args.to}",
         )
     if not args.task_id:
-        return structured_error("move", "Укажи task_id или --glob")
+        return structured_error("move", translate("ERR_TASK_ID_OR_GLOB"))
     task_id = normalize_task_id(args.task_id)
     if manager.move_task(task_id, args.to):
         save_last_task(task_id, args.to)
@@ -5814,7 +5971,7 @@ def cmd_move(args) -> int:
 
 def cmd_clean(args) -> int:
     if not any([args.tag, args.status, args.phase, args.glob]):
-        return structured_error("clean", "Укажи хотя бы один фильтр: --tag/--status/--phase или --glob")
+        return structured_error("clean", translate("ERR_FILTER_REQUIRED"))
     manager = TaskManager()
     if args.glob:
         is_dry = args.dry_run
@@ -5884,7 +6041,7 @@ def cmd_projects_auth(args) -> int:
             payload={"token": None},
         )
     if not args.token:
-        return structured_error("projects-auth", "Укажи --token или --unset")
+        return structured_error("projects-auth", translate("ERR_TOKEN_OR_UNSET"))
     set_user_token(args.token)
     _invalidate_projects_status_cache()
     return structured_response(
