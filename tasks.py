@@ -1896,7 +1896,7 @@ class TaskTrackerTUI:
 
     def _visible_row_limit(self) -> int:
         total = self.get_terminal_height()
-        usable = total - (self.footer_height + 4)  # статус + отступы
+        usable = total - (self.footer_height + 4)  # status + padding
         return max(5, usable)
 
     def _ensure_selection_visible(self):
