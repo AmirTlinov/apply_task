@@ -46,7 +46,7 @@ from projects_sync import (
     update_project_workers,
     detect_repo_slug,
 )
-from config import get_user_token, set_user_token
+from config import get_user_token, set_user_token, get_user_lang, set_user_lang
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M"
 GITHUB_GRAPHQL = "https://api.github.com/graphql"
@@ -1529,7 +1529,8 @@ class TaskTrackerTUI:
         self.spinner_active = False
         self.spinner_message = ""
         self.spinner_start = 0.0
-        self.language: str = "en"
+        saved_lang = get_user_lang() or "en"
+        self.language: str = saved_lang if saved_lang in LANG_PACK else "en"
         self.pat_validation_result = ""
         self._last_sync_enabled: Optional[bool] = None
         self._sync_flash_until: float = 0.0
@@ -1945,6 +1946,7 @@ class TaskTrackerTUI:
             idx = 0
         next_lang = order[(idx + 1) % len(order)]
         self.language = next_lang
+        set_user_lang(next_lang)
         self.set_status_message(f"Language set to {next_lang}")
         self.force_render()
 
@@ -3915,7 +3917,7 @@ class TaskTrackerTUI:
             return
         text = self._clipboard_text()
         if not text:
-            self.set_status_message("Клипборд пуст или недоступен", ttl=3)
+            self.set_status_message(self._t("CLIPBOARD_EMPTY"), ttl=3)
             return
         buf = self.edit_buffer
         cursor = buf.cursor_position
@@ -4322,7 +4324,7 @@ class TaskTrackerTUI:
         options.append({
             "label": "Language / Язык",
             "value": self.language,
-            "hint": "Enter — cycle language (en, ru, uk, es, fr, zh, hi, ar)",
+            "hint": self._t("LANGUAGE_HINT"),
             "action": "cycle_lang",
         })
         return options
@@ -4425,7 +4427,7 @@ class TaskTrackerTUI:
         idx = self.settings_selected_index
         option = options[idx]
         if option.get("disabled"):
-            self.set_status_message(option.get("disabled_msg") or "Опция недоступна")
+            self.set_status_message(option.get("disabled_msg") or self._t("OPTION_DISABLED"))
             return
         action = option.get("action")
         if not action:

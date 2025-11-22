@@ -37,3 +37,17 @@ def set_user_token(value: str) -> None:
     else:
         data.pop("token", None)
     _save_config(data)
+
+
+def get_user_lang() -> str:
+    return _load_config().get("lang", "").strip()
+
+
+def set_user_lang(value: str) -> None:
+    data = _load_config()
+    value = (value or "").strip()
+    if value:
+        data["lang"] = value
+    else:
+        data.pop("lang", None)
+    _save_config(data)
