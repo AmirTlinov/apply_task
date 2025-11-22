@@ -294,7 +294,7 @@ class ApplyTaskResolveTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         body = _json_body(result)
         self.assertEqual(body["status"], "ERROR")
-        self.assertIn("Нет --tests", body["message"])
+        self.assertIn("tests", body["message"])
 
     def test_suggest_command_available(self):
         result = self._run_apply(["suggest"])
@@ -323,7 +323,7 @@ class ApplyTaskResolveTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         body = _json_body(result)
         self.assertEqual(body["status"], "ERROR")
-        self.assertIn("Подзадачи", body["message"])
+        self.assertIn("flagship", body["message"])
 
     def test_create_with_json_subtasks(self):
         subtasks = self._flagship_subtasks_payload()

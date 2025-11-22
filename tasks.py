@@ -183,6 +183,52 @@ LANG_PACK = {
         "SETTINGS_VALIDATE_PAT_LABEL": "Validate PAT",
         "SETTINGS_VALIDATE_PAT_HINT": "Enter — validate token via GitHub GraphQL",
         "SETTINGS_VALIDATE_PAT_DISABLED": "Save PAT first",
+        "LABEL_SUBTASKS_JSON": "JSON array of subtasks",
+        "ERR_INVALID_FOLDER": "Invalid folder path",
+        "ERR_NO_LAST_TASK": "No last task: run apply_task show/list/next to set context",
+        "ERR_JSON_ARRAY_REQUIRED": "JSON must be an array of objects",
+        "ERR_JSON_ELEMENT_OBJECT": "Element {idx} must be an object",
+        "ERR_JSON_ELEMENT_TITLE": "Element {idx} is missing 'title'",
+        "ERR_JSON_ELEMENT_CRITERIA": "Element {idx}: provide at least one success criterion",
+        "ERR_JSON_ELEMENT_TESTS": "Element {idx}: provide tests to verify",
+        "ERR_JSON_ELEMENT_BLOCKERS": "Element {idx}: provide blockers/dependencies",
+        "ERR_JSON_INVALID": "Invalid JSON: {error}",
+        "ERR_JSON_FORMAT_HINT": "Use JSON array. Example: '[{\"title\":\"Design cache rollout >=20 chars\",\"criteria\":[\"hit ratio >80%\"],\"tests\":[\"pytest -k cache\"],\"blockers\":[\"redis downtime\"]}]'\\nReason: {error}",
+        "PROMPT_ABORTED": "[X] Aborted",
+        "PROMPT_REQUIRED": "[!] Required field",
+        "PROMPT_EMPTY_TO_FINISH": "(empty line to finish):",
+        "PROMPT_MIN_ITEMS": "[!] Minimum {count} items",
+        "PROMPT_SUBTASK_HEADER": "[C] Subtask {index}:",
+        "PROMPT_SUBTASK_TITLE_REQ": "  Title (min 20 chars)",
+        "PROMPT_SUBTASK_TITLE_SHORT": "  [!] Too short ({length}/20). Add details",
+        "PROMPT_SUBTASK_TITLE": "  Title",
+        "PROMPT_SUBTASK_CRITERIA": "  Success criteria",
+        "PROMPT_SUBTASK_TESTS": "  Tests",
+        "PROMPT_SUBTASK_BLOCKERS": "  Blockers/dependencies (required, min 1)",
+        "MSG_LIST_BUILT": "Task list built",
+        "SUMMARY_TASKS": "{count} tasks",
+        "ERR_SHOW_NO_TASK": "No task to show",
+        "MSG_TASK_DETAILS": "Task details",
+        "ERR_DESCRIPTION_REQUIRED": "Description is required and cannot be empty/TBD",
+        "ERR_TESTS_REQUIRED": "Provide tests/success criteria via --tests",
+        "ERR_RISKS_REQUIRED": "Add risks via --risks (e.g., 'dep outage;perf regression')",
+        "ERR_FLAGSHIP_SUBTASKS": "Subtasks do not meet flagship quality",
+        "MSG_VALIDATION_PASSED": "Validation passed",
+        "MSG_TASK_CREATED": "Task {task_id} created",
+        "ERR_TASKS_DIR_MISSING": ".tasks directory is missing",
+        "ERR_FILE_PARSE": "{filename} failed to parse",
+        "ERR_FILE_NO_DESC": "{filename} missing description",
+        "ERR_FILE_NO_TESTS": "{filename} missing tests/success criteria",
+        "MSG_ISSUES_FOUND": "Found {count} issue(s)",
+        "MSG_ALL_TASKS_DONE": "All tasks completed{hint}",
+        "MSG_NO_TASKS": "No tasks",
+        "MSG_RECOMMENDATIONS_READY": "Recommendations prepared{hint}",
+        "SUMMARY_RECOMMENDATIONS": "{count} recommendations",
+        "MSG_QUICK_DONE": "All tasks done{hint}",
+        "SUMMARY_QUICK": "Top-{count} tasks",
+        "ERR_TASK_NEEDS_SUBTASKS": "Task must be decomposed into subtasks",
+        "ERR_SUBTASKS_MIN": "Not enough subtasks ({count}). Minimum 3 for flagship quality",
+        "ERR_SUBTASK_PREFIX": "Subtask {idx}: {issue}",
     },
     "ru": {
         "TITLE": "ЗАГОЛОВОК",
@@ -296,6 +342,52 @@ LANG_PACK = {
         "SETTINGS_VALIDATE_PAT_LABEL": "Проверить PAT",
         "SETTINGS_VALIDATE_PAT_HINT": "Enter — проверить токен через GitHub GraphQL",
         "SETTINGS_VALIDATE_PAT_DISABLED": "Сначала сохрани PAT",
+        "LABEL_SUBTASKS_JSON": "JSON массив подзадач",
+        "ERR_INVALID_FOLDER": "Недопустимая папка",
+        "ERR_NO_LAST_TASK": "Нет последней задачи: вызови apply_task show/list/next для привязки контекста",
+        "ERR_JSON_ARRAY_REQUIRED": "JSON должен быть массивом объектов",
+        "ERR_JSON_ELEMENT_OBJECT": "Элемент {idx} должен быть объектом",
+        "ERR_JSON_ELEMENT_TITLE": "Элемент {idx}: отсутствует 'title'",
+        "ERR_JSON_ELEMENT_CRITERIA": "Элемент {idx}: укажи хотя бы один критерий выполнения",
+        "ERR_JSON_ELEMENT_TESTS": "Элемент {idx}: укажи тесты для проверки",
+        "ERR_JSON_ELEMENT_BLOCKERS": "Элемент {idx}: укажи блокеры/зависимости",
+        "ERR_JSON_INVALID": "Невалидный JSON: {error}",
+        "ERR_JSON_FORMAT_HINT": "Используй JSON массив. Пример: '[{\"title\":\"Design cache rollout >=20 chars\",\"criteria\":[\"hit ratio >80%\"],\"tests\":[\"pytest -k cache\"],\"blockers\":[\"redis downtime\"]}]'\\nПричина: {error}",
+        "PROMPT_ABORTED": "[X] Прервано",
+        "PROMPT_REQUIRED": "[!] Обязательное поле",
+        "PROMPT_EMPTY_TO_FINISH": "(пустая строка для завершения):",
+        "PROMPT_MIN_ITEMS": "[!] Минимум {count} элементов",
+        "PROMPT_SUBTASK_HEADER": "[C] Подзадача {index}:",
+        "PROMPT_SUBTASK_TITLE_REQ": "  Название (минимум 20 символов)",
+        "PROMPT_SUBTASK_TITLE_SHORT": "  [!] Слишком короткое ({length}/20). Добавь детали",
+        "PROMPT_SUBTASK_TITLE": "  Название",
+        "PROMPT_SUBTASK_CRITERIA": "  Критерии выполнения",
+        "PROMPT_SUBTASK_TESTS": "  Тесты для проверки",
+        "PROMPT_SUBTASK_BLOCKERS": "  Блокеры/зависимости (обязательны, минимум 1)",
+        "MSG_LIST_BUILT": "Список задач сформирован",
+        "SUMMARY_TASKS": "{count} задач",
+        "ERR_SHOW_NO_TASK": "Нет задачи для показа",
+        "MSG_TASK_DETAILS": "Детали задачи",
+        "ERR_DESCRIPTION_REQUIRED": "Описание обязательно и не может быть пустым/TBD",
+        "ERR_TESTS_REQUIRED": "Укажи тесты/критерии успеха через --tests",
+        "ERR_RISKS_REQUIRED": "Добавь риски через --risks (например: 'dep outage;perf regression')",
+        "ERR_FLAGSHIP_SUBTASKS": "Подзадачи не соответствуют flagship-качеству",
+        "MSG_VALIDATION_PASSED": "Валидация пройдена",
+        "MSG_TASK_CREATED": "Задача {task_id} создана",
+        "ERR_TASKS_DIR_MISSING": ".tasks каталог отсутствует",
+        "ERR_FILE_PARSE": "{filename} не парсится",
+        "ERR_FILE_NO_DESC": "{filename} без description",
+        "ERR_FILE_NO_TESTS": "{filename} без tests/success_criteria",
+        "MSG_ISSUES_FOUND": "Найдено {count} проблем(ы)",
+        "MSG_ALL_TASKS_DONE": "Все задачи завершены{hint}",
+        "MSG_NO_TASKS": "Нет задач",
+        "MSG_RECOMMENDATIONS_READY": "Рекомендации сформированы{hint}",
+        "SUMMARY_RECOMMENDATIONS": "{count} рекомендаций",
+        "MSG_QUICK_DONE": "Все задачи выполнены{hint}",
+        "SUMMARY_QUICK": "Top-{count} задач",
+        "ERR_TASK_NEEDS_SUBTASKS": "Задача должна быть декомпозирована на подзадачи",
+        "ERR_SUBTASKS_MIN": "Недостаточно подзадач ({count}). Минимум 3 для flagship-качества",
+        "ERR_SUBTASK_PREFIX": "Подзадача {idx}: {issue}",
     },
     "uk": {
         "TITLE": "ЗАГОЛОВОК",
@@ -623,7 +715,7 @@ def _load_input_source(raw: str, label: str) -> str:
 
 
 def _load_subtasks_source(raw: str) -> str:
-    return _load_input_source(raw, "JSON массивом подзадач")
+    return _load_input_source(raw, translate("LABEL_SUBTASKS_JSON"))
 
 
 def _flatten_subtasks(subtasks: List[SubTask], prefix: str = "") -> List[Tuple[str, SubTask]]:
@@ -809,7 +901,7 @@ class TaskManager:
             return ""
         candidate = Path(domain.strip("/"))
         if candidate.is_absolute() or ".." in candidate.parts:
-            raise ValueError("Недопустимая папка")
+            raise ValueError(translate("ERR_INVALID_FOLDER"))
         return candidate.as_posix()
 
     @staticmethod
@@ -1151,7 +1243,7 @@ def resolve_task_reference(
     if use_last:
         last_id, last_domain = get_last_task()
         if not last_id:
-            raise ValueError("Нет последней задачи: вызови apply_task show/list/next для привязки контекста")
+            raise ValueError(translate("ERR_NO_LAST_TASK"))
         resolved_domain = derive_domain_explicit(domain, phase, component) or (last_domain or "")
         return normalize_task_id(last_id), resolved_domain or ""
     resolved_domain = derive_domain_explicit(domain, phase, component)
@@ -1301,16 +1393,16 @@ def validate_flagship_subtasks(subtasks: List[SubTask]) -> Tuple[bool, List[str]
     """
     flat = _flatten_subtasks(subtasks)
     if not flat:
-        return False, ["Задача должна быть декомпозирована на подзадачи"]
+        return False, [translate("ERR_TASK_NEEDS_SUBTASKS")]
 
     if len(flat) < 3:
-        return False, [f"Недостаточно подзадач ({len(flat)}). Минимум 3 для flagship-качества"]
+        return False, [translate("ERR_SUBTASKS_MIN", count=len(flat))]
 
     all_issues = []
     for idx, (_, st) in enumerate(flat, 1):
         valid, issues = st.is_valid_flagship()
         if not valid:
-            all_issues.extend([f"Подзадача {idx}: {issue}" for issue in issues])
+            all_issues.extend([translate("ERR_SUBTASK_PREFIX", idx=idx, issue=issue) for issue in issues])
 
     return len(all_issues) == 0, all_issues
 
@@ -1338,16 +1430,16 @@ def parse_subtasks_json(raw: str) -> List[SubTask]:
     try:
         data = json.loads(raw)
         if not isinstance(data, list):
-            raise SubtaskParseError("JSON должен быть массивом объектов")
+            raise SubtaskParseError(translate("ERR_JSON_ARRAY_REQUIRED"))
 
         subtasks = []
         for idx, item in enumerate(data, 1):
             if not isinstance(item, dict):
-                raise SubtaskParseError(f"Элемент {idx} должен быть объектом")
+                raise SubtaskParseError(translate("ERR_JSON_ELEMENT_OBJECT", idx=idx))
 
             title = item.get("title", "")
             if not title:
-                raise SubtaskParseError(f"Элемент {idx}: отсутствует 'title'")
+                raise SubtaskParseError(translate("ERR_JSON_ELEMENT_TITLE", idx=idx))
 
             criteria = item.get("criteria", item.get("success_criteria", []))
             tests = item.get("tests", [])
@@ -1361,11 +1453,11 @@ def parse_subtasks_json(raw: str) -> List[SubTask]:
                 blockers = [str(blockers)]
 
             if not criteria:
-                raise SubtaskParseError(f"Элемент {idx}: укажи хотя бы один критерий выполнения")
+                raise SubtaskParseError(translate("ERR_JSON_ELEMENT_CRITERIA", idx=idx))
             if not tests:
-                raise SubtaskParseError(f"Элемент {idx}: укажи тесты для проверки")
+                raise SubtaskParseError(translate("ERR_JSON_ELEMENT_TESTS", idx=idx))
             if not blockers:
-                raise SubtaskParseError(f"Элемент {idx}: укажи блокеры/зависимости")
+                raise SubtaskParseError(translate("ERR_JSON_ELEMENT_BLOCKERS", idx=idx))
 
             criteria_notes = item.get("criteria_notes", [])
             tests_notes = item.get("tests_notes", [])
@@ -1394,7 +1486,7 @@ def parse_subtasks_json(raw: str) -> List[SubTask]:
 
         return subtasks
     except json.JSONDecodeError as e:
-        raise SubtaskParseError(f"Невалидный JSON: {e}")
+        raise SubtaskParseError(translate("ERR_JSON_INVALID", error=e))
 
 
 def parse_subtasks_flexible(raw: str) -> List[SubTask]:
@@ -1407,11 +1499,7 @@ def parse_subtasks_flexible(raw: str) -> List[SubTask]:
     try:
         return parse_subtasks_json(raw)
     except SubtaskParseError as e:
-        raise SubtaskParseError(
-            "Используй JSON массив. Пример: '[{\"title\":\"Design cache rollout >=20 chars\","
-            "\"criteria\":[\"hit ratio >80%\"],\"tests\":[\"pytest -k cache\"],\"blockers\":[\"redis downtime\"]}]'\n"
-            f"Причина: {e}"
-        )
+        raise SubtaskParseError(translate("ERR_JSON_FORMAT_HINT", error=e))
 
 
 # ============================================================================
@@ -1432,7 +1520,7 @@ def prompt(question: str, default: str = "") -> str:
         response = input(f"{question}: ").strip()
         return response if response else default
     except (EOFError, KeyboardInterrupt):
-        print("\n[X] Прервано")
+        print(f"\n{translate('PROMPT_ABORTED')}")
         sys.exit(1)
 
 
@@ -1442,12 +1530,12 @@ def prompt_required(question: str) -> str:
         response = prompt(question)
         if response:
             return response
-        print("  [!] Обязательное поле")
+        print(f"  {translate('PROMPT_REQUIRED')}")
 
 
 def prompt_list(question: str, min_items: int = 0) -> List[str]:
     """Запрос списка строк (по одной на строку, пустая строка = конец)"""
-    print(f"{question} (пустая строка для завершения):")
+    print(f"{question} {translate('PROMPT_EMPTY_TO_FINISH')}")
     items = []
     while True:
         try:
@@ -1455,11 +1543,11 @@ def prompt_list(question: str, min_items: int = 0) -> List[str]:
             if not line:
                 if len(items) >= min_items:
                     break
-                print(f"  [!] Минимум {min_items} элементов")
+                print(f"  {translate('PROMPT_MIN_ITEMS', count=min_items)}")
                 continue
             items.append(line)
         except (EOFError, KeyboardInterrupt):
-            print("\n[X] Прервано")
+            print(f"\n{translate('PROMPT_ABORTED')}")
             sys.exit(1)
     return items
 
@@ -1473,21 +1561,21 @@ def confirm(question: str, default: bool = True) -> bool:
             return default
         return response in ('y', 'yes', 'д', 'да')
     except (EOFError, KeyboardInterrupt):
-        print("\n[X] Прервано")
+        print(f"\n{translate('PROMPT_ABORTED')}")
         sys.exit(1)
 
 
 def prompt_subtask_interactive(index: int) -> SubTask:
     """Интерактивное создание подзадачи"""
-    print(f"\n[C] Подзадача {index}:")
-    title = prompt_required("  Название (минимум 20 символов)")
+    print(f"\n{translate('PROMPT_SUBTASK_HEADER', index=index)}")
+    title = prompt_required(translate("PROMPT_SUBTASK_TITLE_REQ"))
     while len(title) < 20:
-        print(f"  [!] Слишком короткое ({len(title)}/20). Добавь детали")
-        title = prompt_required("  Название")
+        print(translate("PROMPT_SUBTASK_TITLE_SHORT", length=len(title)))
+        title = prompt_required(translate("PROMPT_SUBTASK_TITLE"))
 
-    criteria = prompt_list("  Критерии выполнения", min_items=1)
-    tests = prompt_list("  Тесты для проверки", min_items=1)
-    blockers = prompt_list("  Блокеры/зависимости (обязательны, минимум 1)", min_items=1)
+    criteria = prompt_list(translate("PROMPT_SUBTASK_CRITERIA"), min_items=1)
+    tests = prompt_list(translate("PROMPT_SUBTASK_TESTS"), min_items=1)
+    blockers = prompt_list(translate("PROMPT_SUBTASK_BLOCKERS"), min_items=1)
 
     return SubTask(False, title, criteria, tests, blockers)
 
@@ -4731,9 +4819,9 @@ def cmd_list(args) -> int:
     return structured_response(
         "list",
         status="OK",
-        message="Список задач сформирован",
+        message=translate("MSG_LIST_BUILT"),
         payload=payload,
-        summary=f"{len(tasks)} задач",
+        summary=translate("SUMMARY_TASKS", count=len(tasks)),
     )
 
 
@@ -4741,12 +4829,12 @@ def cmd_show(args) -> int:
     last_id, last_domain = get_last_task()
     task_id = normalize_task_id(args.task_id) if args.task_id else last_id
     if not task_id:
-        return structured_error("show", "Нет задачи для показа")
+        return structured_error("show", translate("ERR_SHOW_NO_TASK"))
     manager = TaskManager()
     domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None)) or last_domain or ""
     task = manager.load_task(task_id, domain)
     if not task:
-        return structured_error("show", f"Задача {task_id} не найдена")
+        return structured_error("show", translate("ERR_TASK_NOT_FOUND", task_id=task_id))
     save_last_task(task.id, task.domain)
     payload = {"task": task_to_dict(task, include_subtasks=True)}
     if task.subtasks:
@@ -4754,7 +4842,7 @@ def cmd_show(args) -> int:
     return structured_response(
         "show",
         status=task.status,
-        message="Детали задачи",
+        message=translate("MSG_TASK_DETAILS"),
         payload=payload,
         summary=f"{task.id}: {task.title}",
     )
@@ -4770,10 +4858,11 @@ def cmd_create(args) -> int:
             return validation_response("create", False, message, payload)
         return structured_error("create", message, payload=payload)
 
-    def success_preview(task: TaskDetail, message: str = "Валидация пройдена") -> int:
+    def success_preview(task: TaskDetail, message: str = "") -> int:
         task_snapshot = task_to_dict(task, include_subtasks=True)
         payload = {"task": task_snapshot}
-        return validation_response("create", True, message, payload)
+        msg = message or translate("MSG_VALIDATION_PASSED")
+        return validation_response("create", True, msg, payload)
 
     task = manager.create_task(
         args.title,
@@ -4785,7 +4874,7 @@ def cmd_create(args) -> int:
         component=args.component or "",
     )
     if not args.description or not args.description.strip() or args.description.strip().upper() == "TBD":
-        return fail("Описание обязательно и не может быть пустым/TBD")
+        return fail(translate("ERR_DESCRIPTION_REQUIRED"))
     task.description = args.description.strip()
     task.context = args.context or ""
     if args.tags:
@@ -4795,7 +4884,7 @@ def cmd_create(args) -> int:
             subtasks_payload = _load_subtasks_source(args.subtasks)
             task.subtasks = parse_subtasks_flexible(subtasks_payload)
         except SubtaskParseError as e:
-            return fail(f"Ошибка парсинга подзадач: {e}")
+            return fail(str(e))
     if args.dependencies:
         for dep in args.dependencies.split(","):
             dep = dep.strip()
@@ -4810,13 +4899,13 @@ def cmd_create(args) -> int:
             if t.strip():
                 task.success_criteria.append(t.strip())
     if not task.success_criteria:
-        return fail("Укажи тесты/критерии успеха через --tests")
+        return fail(translate("ERR_TESTS_REQUIRED"))
     if args.risks:
         for r in args.risks.split(";"):
             if r.strip():
                 task.risks.append(r.strip())
     if not task.risks:
-        return fail("Добавь риски через --risks (например: 'dep outage;perf regression')")
+        return fail(translate("ERR_RISKS_REQUIRED"))
 
     # Flagship-валидация подзадач
     flagship_ok, flagship_issues = validate_flagship_subtasks(task.subtasks)
@@ -4830,7 +4919,7 @@ def cmd_create(args) -> int:
                 "Атомарные действия без 'и затем'",
             ],
         }
-        return fail("Подзадачи не соответствуют flagship-качеству", payload=payload)
+        return fail(translate("ERR_FLAGSHIP_SUBTASKS"), payload=payload)
 
     task.update_status_from_progress()
     if getattr(args, "validate_only", False):
@@ -4841,7 +4930,7 @@ def cmd_create(args) -> int:
     return structured_response(
         "create",
         status="OK",
-        message=f"Задача {task.id} создана",
+        message=translate("MSG_TASK_CREATED", task_id=task.id),
         payload=payload,
         summary=f"{task.id}: {task.title}",
     )
@@ -4859,9 +4948,10 @@ def cmd_smart_create(args) -> int:
             return validation_response("task", False, message, payload)
         return structured_error("task", message, payload=payload)
 
-    def success_preview(task: TaskDetail, message: str = "Валидация пройдена") -> int:
+    def success_preview(task: TaskDetail, message: str = "") -> int:
         payload = {"task": task_to_dict(task, include_subtasks=True)}
-        return validation_response("task", True, message, payload)
+        msg = message or translate("MSG_VALIDATION_PASSED")
+        return validation_response("task", True, msg, payload)
 
     domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
     task = manager.create_task(
@@ -4874,7 +4964,7 @@ def cmd_smart_create(args) -> int:
         component=args.component or "",
     )
     if not args.description or not args.description.strip() or args.description.strip().upper() == "TBD":
-        return fail("Описание обязательно и не может быть пустым/TBD")
+        return fail(translate("ERR_DESCRIPTION_REQUIRED"))
     task.description = args.description.strip()
     task.context = args.context or ""
     task.tags = [t.strip() for t in args.tags.split(",")] if args.tags else auto_tags
@@ -4889,18 +4979,18 @@ def cmd_smart_create(args) -> int:
     elif template_tests:
         task.success_criteria = [template_tests]
     if not task.success_criteria:
-        return fail("Укажи тесты/критерии успеха через --tests")
+        return fail(translate("ERR_TESTS_REQUIRED"))
     if args.risks:
         task.risks = [r.strip() for r in args.risks.split(";") if r.strip()]
     if not task.risks:
-        return fail("Добавь риски через --risks (например: 'dep outage;perf regression')")
+        return fail(translate("ERR_RISKS_REQUIRED"))
 
     if args.subtasks:
         try:
             subtasks_payload = _load_subtasks_source(args.subtasks)
             task.subtasks = parse_subtasks_flexible(subtasks_payload)
         except SubtaskParseError as e:
-            return fail(f"Ошибка парсинга подзадач: {e}")
+            return fail(str(e))
 
     # Flagship-валидация подзадач
     flagship_ok, flagship_issues = validate_flagship_subtasks(task.subtasks)
@@ -4914,7 +5004,7 @@ def cmd_smart_create(args) -> int:
                 "Атомарные действия без 'и затем'",
             ],
         }
-        return fail("Подзадачи не соответствуют flagship-качеству", payload=payload)
+        return fail(translate("ERR_FLAGSHIP_SUBTASKS"), payload=payload)
 
     task.update_status_from_progress()
     if getattr(args, "validate_only", False):
@@ -4925,7 +5015,7 @@ def cmd_smart_create(args) -> int:
     return structured_response(
         "task",
         status="OK",
-        message=f"Задача {task.id} создана",
+        message=translate("MSG_TASK_CREATED", task_id=task.id),
         payload=payload,
         summary=f"{task.id}: {task.title}",
     )
