@@ -71,6 +71,89 @@ AI_HELP = """apply_task — hardline rules for AI agents
 Language: reply to user in their language unless asked otherwise. Task text/notes follow user language; code/tests/docs stay in English. Explicit blockers/tests/criteria on every node. No checkpoints — no done.
 """
 
+LANG_PACK = {
+    "en": {
+        "TITLE": "TITLE",
+        "SUBTASKS": "SUBTASKS",
+        "SUBTASK_DETAILS": "SUBTASK DETAILS",
+        "CRITERIA": "Criteria",
+        "TESTS": "Tests",
+        "BLOCKERS": "Blockers",
+        "DESCRIPTION": "Description",
+        "BLOCKERS_HEADER": "Blockers",
+    },
+    "ru": {
+        "TITLE": "ЗАГОЛОВОК",
+        "SUBTASKS": "ПОДЗАДАЧИ",
+        "SUBTASK_DETAILS": "ДЕТАЛИ ПОДЗАДАЧИ",
+        "CRITERIA": "Критерии",
+        "TESTS": "Тесты",
+        "BLOCKERS": "Блокеры",
+        "DESCRIPTION": "Описание",
+        "BLOCKERS_HEADER": "Блокеры",
+    },
+    "uk": {
+        "TITLE": "ЗАГОЛОВОК",
+        "SUBTASKS": "ПІДЗАВДАННЯ",
+        "SUBTASK_DETAILS": "ДЕТАЛІ ПІДЗАВДАННЯ",
+        "CRITERIA": "Критерії",
+        "TESTS": "Тести",
+        "BLOCKERS": "Блокери",
+        "DESCRIPTION": "Опис",
+        "BLOCKERS_HEADER": "Блокери",
+    },
+    "es": {
+        "TITLE": "TÍTULO",
+        "SUBTASKS": "SUBTAREAS",
+        "SUBTASK_DETAILS": "DETALLES DE SUBTAREA",
+        "CRITERIA": "Criterios",
+        "TESTS": "Pruebas",
+        "BLOCKERS": "Bloqueadores",
+        "DESCRIPTION": "Descripción",
+        "BLOCKERS_HEADER": "Bloqueadores",
+    },
+    "fr": {
+        "TITLE": "TITRE",
+        "SUBTASKS": "SOUS-TÂCHES",
+        "SUBTASK_DETAILS": "DÉTAILS DE SOUS-TÂCHE",
+        "CRITERIA": "Critères",
+        "TESTS": "Tests",
+        "BLOCKERS": "Bloqueurs",
+        "DESCRIPTION": "Description",
+        "BLOCKERS_HEADER": "Bloqueurs",
+    },
+    "zh": {
+        "TITLE": "标题",
+        "SUBTASKS": "子任务",
+        "SUBTASK_DETAILS": "子任务详情",
+        "CRITERIA": "验收标准",
+        "TESTS": "测试",
+        "BLOCKERS": "阻碍",
+        "DESCRIPTION": "描述",
+        "BLOCKERS_HEADER": "阻碍",
+    },
+    "hi": {
+        "TITLE": "शीर्षक",
+        "SUBTASKS": "उप-कार्य",
+        "SUBTASK_DETAILS": "उप-कार्य विवरण",
+        "CRITERIA": "मानदंड",
+        "TESTS": "परीक्षण",
+        "BLOCKERS": "अवरोधक",
+        "DESCRIPTION": "विवरण",
+        "BLOCKERS_HEADER": "अवरोधक",
+    },
+    "ar": {
+        "TITLE": "العنوان",
+        "SUBTASKS": "المهام الفرعية",
+        "SUBTASK_DETAILS": "تفاصيل المهمة الفرعية",
+        "CRITERIA": "المعايير",
+        "TESTS": "الاختبارات",
+        "BLOCKERS": "العوائق",
+        "DESCRIPTION": "الوصف",
+        "BLOCKERS_HEADER": "العوائق",
+    },
+}
+
 
 def _get_sync_service() -> ProjectsSyncService:
     """Factory used outside TaskManager to obtain sync adapter."""
@@ -1234,6 +1317,7 @@ class TaskTrackerTUI:
         self.spinner_active = False
         self.spinner_message = ""
         self.spinner_start = 0.0
+        self.language: str = "ru"
         self.pat_validation_result = ""
         self._last_sync_enabled: Optional[bool] = None
         self._sync_flash_until: float = 0.0
@@ -1634,6 +1718,23 @@ class TaskTrackerTUI:
         if not base:
             return extra
         return f"{base} {extra}"
+
+    def _t(self, key: str) -> str:
+        base = LANG_PACK.get("en", {})
+        lang_map = LANG_PACK.get(getattr(self, "language", "en"), {})
+        return lang_map.get(key) or base.get(key, key)
+
+    def _cycle_language(self) -> None:
+        order = list(LANG_PACK.keys())
+        current = getattr(self, "language", "en")
+        try:
+            idx = order.index(current)
+        except ValueError:
+            idx = 0
+        next_lang = order[(idx + 1) % len(order)]
+        self.language = next_lang
+        self.set_status_message(f"Language set to {next_lang}")
+        self.force_render()
 
     def _flatten_detail_subtasks(self, subtasks: List[SubTask], prefix: str = "", level: int = 0) -> List[Tuple[str, SubTask, int, bool, bool]]:
         flat: List[Tuple[str, SubTask, int, bool, bool]] = []
@@ -2916,11 +3017,11 @@ class TaskTrackerTUI:
         if self.horizontal_offset > 0:
             title_display = title_display[self.horizontal_offset:] if len(title_display) > self.horizontal_offset else ""
 
-        title_text = f'ЗАГОЛОВОК: {title_display}'
+        title_text = f'{self._t("TITLE")}: {title_display}'
         if len(title_text) > content_width:
             # Wrap title
             result.append(('class:border', '| '))
-            result.append(('class:header', 'ЗАГОЛОВОК:'.ljust(content_width - 2)))
+            result.append(('class:header', f'{self._t("TITLE")}:'.ljust(content_width - 2)))
             result.append(('class:border', ' |\n'))
 
             title_lines = [title_display[i:i+content_width-4] for i in range(0, len(title_display), content_width-4)]
@@ -2943,14 +3044,14 @@ class TaskTrackerTUI:
                 summary: List[Tuple[str, str]] = []
                 desc_limit = min(2, budget)
                 if detail.description and desc_limit > 0:
-                    wrapped = self._wrap_with_prefix(detail.description, content_width - 2, "Описание: ")
+                    wrapped = self._wrap_with_prefix(detail.description, content_width - 2, f"{self._t('DESCRIPTION')}: ")
                     for ch, _ in wrapped[:desc_limit]:
                         summary.append(('class:border', '| '))
                         summary.append(('class:text', ch))
                         summary.append(('class:border', ' |\n'))
                     budget -= min(desc_limit, len(wrapped))
                 if detail.blockers and budget > 0:
-                    wrapped_bl = self._wrap_with_prefix("; ".join(detail.blockers), content_width - 2, "Блокеры: ")
+                    wrapped_bl = self._wrap_with_prefix("; ".join(detail.blockers), content_width - 2, f"{self._t('BLOCKERS_HEADER')}: ")
                     for ch, _ in wrapped_bl[:max(1, min(budget, 1))]:
                         summary.append(('class:border', '| '))
                         summary.append(('class:text', ch))
@@ -3074,7 +3175,7 @@ class TaskTrackerTUI:
 
         self.subtask_row_map = []
         result.append(('class:border', '| '))
-        header = f'ПОДЗАДАЧИ ({completed}/{len(items)} завершено)'
+        header = f'{self._t("SUBTASKS")} ({completed}/{len(items)} завершено)'
         result.append(('class:header', header[: content_width - 2].ljust(content_width - 2)))
         result.append(('class:border', ' |\n'))
         line_counter += 1
@@ -3151,7 +3252,7 @@ class TaskTrackerTUI:
                 detail_lines: List[Tuple[str, str]] = []
                 detail_lines.append(('class:border', '+' + '-'*content_width + '+\n'))
                 detail_lines.append(('class:border', '| '))
-                header = f"ДЕТАЛИ ПОДЗАДАЧИ: {self.detail_selected_path or ''}"
+                header = f"{self._t('SUBTASK_DETAILS')}: {self.detail_selected_path or ''}"
                 detail_lines.append(('class:header', header[: content_width - 2].ljust(content_width - 2)))
                 detail_lines.append(('class:border', ' |\n'))
 
@@ -3171,9 +3272,9 @@ class TaskTrackerTUI:
                             detail_lines.append(('class:text', chunk))
                             detail_lines.append(('class:border', ' |\n'))
 
-                _append_block("Критерии", st_sel.success_criteria)
-                _append_block("Тесты", st_sel.tests)
-                _append_block("Блокеры", st_sel.blockers)
+                _append_block(self._t("CRITERIA"), st_sel.success_criteria)
+                _append_block(self._t("TESTS"), st_sel.tests)
+                _append_block(self._t("BLOCKERS"), st_sel.blockers)
 
                 sliced = self._slice_formatted_lines(detail_lines, 0, remaining)
                 result.extend(sliced)
@@ -3311,7 +3412,7 @@ class TaskTrackerTUI:
 
         # Критерии выполнения
         if subtask.success_criteria:
-            add_section_header("Критерии выполнения", subtask.criteria_confirmed)
+            add_section_header(self._t("CRITERIA"), subtask.criteria_confirmed)
             for i, criterion in enumerate(subtask.success_criteria, 1):
                 prefix = f"  {i}. "
                 gid = next_group()
@@ -3323,7 +3424,7 @@ class TaskTrackerTUI:
 
         # Тесты
         if subtask.tests:
-            add_section_header("Тесты", subtask.tests_confirmed)
+            add_section_header(self._t("TESTS"), subtask.tests_confirmed)
             for i, test in enumerate(subtask.tests, 1):
                 prefix = f"  {i}. "
                 gid = next_group()
@@ -3335,7 +3436,7 @@ class TaskTrackerTUI:
 
         # Блокеры
         if subtask.blockers:
-            add_section_header("Блокеры", subtask.blockers_resolved)
+            add_section_header(self._t("BLOCKERS"), subtask.blockers_resolved)
             for i, blocker in enumerate(subtask.blockers, 1):
                 prefix = f"  {i}. "
                 gid = next_group()
@@ -3360,9 +3461,9 @@ class TaskTrackerTUI:
                     style = self._item_style(gid, continuation=not is_first)
                     lines.append((style, ch))
                     lines.append(('class:border', ' |\n'))
-        append_logs("Критерии", subtask.criteria_notes)
-        append_logs("Тесты", subtask.tests_notes)
-        append_logs("Блокеры", subtask.blockers_notes)
+        append_logs(self._t("CRITERIA"), subtask.criteria_notes)
+        append_logs(self._t("TESTS"), subtask.tests_notes)
+        append_logs(self._t("BLOCKERS"), subtask.blockers_notes)
 
         lines.append(('class:border', '+' + '='*content_width + '+'))
 
@@ -4006,6 +4107,12 @@ class TaskTrackerTUI:
             "disabled": not (snapshot['token_saved'] or snapshot['token_env']),
             "disabled_msg": "Сначала сохрани PAT",
         })
+        options.append({
+            "label": "Language / Язык",
+            "value": self.language,
+            "hint": "Enter — cycle language (en, ru, uk, es, fr, zh, hi, ar)",
+            "action": "cycle_lang",
+        })
         return options
 
     def _project_config_snapshot(self) -> Dict[str, Any]:
@@ -4140,6 +4247,8 @@ class TaskTrackerTUI:
             self.force_render()
         elif action == "validate_pat":
             self._start_pat_validation()
+        elif action == "cycle_lang":
+            self._cycle_language()
         else:
             self.set_status_message("Опция недоступна")
 
