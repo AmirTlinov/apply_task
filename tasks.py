@@ -3124,6 +3124,8 @@ class TaskTrackerTUI:
                 rendered.append(('', '\n'))
 
         if indicator_bottom:
+            if rendered and not rendered[-1][1].endswith('\n'):
+                rendered.append(('', '\n'))
             rendered.extend([
                 ('class:border', '| '),
                 ('class:text.dim', self._pad_display(f"↓ +{remaining_below}", content_width - 2)),
@@ -3321,6 +3323,17 @@ class TaskTrackerTUI:
         if not text:
             return ""
         return ' '.join(text.split())
+
+    def _detail_content_width(self, term_width: Optional[int] = None) -> int:
+        """Адаптивная ширина контента для detail/подзадач."""
+        tw = max(20, term_width or self.get_terminal_width())
+        if tw < 80:
+            base = tw - 4
+        elif tw < 120:
+            base = tw - 6
+        else:
+            base = int(tw * 0.9)
+        return max(30, min(base, tw - 2, 160))
 
     def _format_cell(self, content: str, width: int, align: str = 'left') -> str:
         """Форматирует содержимое ячейки с заданной шириной"""
@@ -3687,29 +3700,37 @@ class TaskTrackerTUI:
         result = []
 
         # Get terminal width and calculate adaptive content width
-        term_width = self.get_terminal_width()
-        content_width = max(40, term_width - 2)
+        content_width = self._detail_content_width()
         compact = self.get_terminal_height() < 32 or content_width < 90
 
         # Header
         result.append(('class:border', '+' + '='*content_width + '+\n'))
+        inner_width = max(0, content_width - 2)
         result.append(('class:border', '| '))
-        result.append(('class:header', f'{detail.id} '))
-        result.append(('class:text.dim', '| '))
 
-        # Status with color
         status_map = {
             'OK': ('class:icon.check', self._t("STATUS_DONE")),
             'WARN': ('class:icon.warn', self._t("STATUS_IN_PROGRESS")),
             'FAIL': ('class:icon.fail', self._t("STATUS_BACKLOG")),
         }
         status_style, status_label = status_map.get(detail.status, ('class:icon.fail', detail.status))
-        result.append((status_style, status_label.ljust(10)))
-        result.append(('class:text.dim', f'| {self._t("PRIORITY")}: {detail.priority:<7}'))
-        result.append(('class:text.dim', f'| {self._t("PROGRESS")}: {detail.calculate_progress():>3}%'))
-        padding_needed = content_width - 2 - (len(detail.id) + 3 + len(status_label) + 23)
-        if padding_needed > 0:
-            result.append(('class:text.dim', ' ' * padding_needed))
+
+        def _push(style: str, text: str) -> None:
+            nonlocal inner_width
+            if inner_width <= 0:
+                return
+            chunk = self._trim_display(text, inner_width)
+            result.append((style, chunk))
+            inner_width -= self._display_width(chunk)
+
+        _push('class:header', f'{detail.id} ')
+        _push('class:text.dim', '| ')
+        _push(status_style, status_label)
+        _push('class:text.dim', f' | {self._t("PRIORITY")}: {detail.priority}')
+        _push('class:text.dim', f' | {self._t("PROGRESS")}: {detail.calculate_progress():>3}%')
+        if inner_width > 0:
+            result.append(('class:text.dim', ' ' * inner_width))
+            inner_width = 0
         result.append(('class:border', ' |\n'))
         result.append(('class:border', '+' + '='*content_width + '+\n'))
         # Title - wrap if needed, apply horizontal scroll
@@ -4003,7 +4024,9 @@ class TaskTrackerTUI:
 
         result.append(('class:border', '+' + '='*content_width + '+'))
 
-        return FormattedText(result)
+        max_lines = max(5, self.get_terminal_height() - self.footer_height - 1)
+        clamped = self._slice_formatted_lines(result, 0, max_lines)
+        return FormattedText(clamped)
 
     def get_detail_items_count(self) -> int:
         if not self.current_task_detail:
@@ -4030,7 +4053,7 @@ class TaskTrackerTUI:
         self._select_subtask_by_path(path)
         self._set_footer_height(0)
         term_width = self.get_terminal_width()
-        content_width = max(40, term_width - 2)
+        content_width = self._detail_content_width(term_width)
 
         lines: List[Tuple[str, str]] = []
         group_id = 0  # логический идентификатор для многострочных элементов
