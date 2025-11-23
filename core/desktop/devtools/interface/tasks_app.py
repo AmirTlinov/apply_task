@@ -31,6 +31,11 @@ from wcwidth import wcwidth
 from core import Status, SubTask, TaskDetail
 from core.desktop.devtools.application.task_manager import TaskManager, current_timestamp, _attach_subtask, _find_subtask_by_path, _flatten_subtasks
 from core.desktop.devtools.interface.cli_parser import build_parser as build_cli_parser
+from core.desktop.devtools.interface.tui_render import (
+    render_detail_text,
+    render_task_list_text,
+    render_subtask_details,
+)
 from core.desktop.devtools.interface.constants import AI_HELP, LANG_PACK, TIMESTAMP_FORMAT, GITHUB_GRAPHQL
 from core.desktop.devtools.interface.i18n import translate, effective_lang as _effective_lang
 from core.desktop.devtools.interface.cli_io import structured_response, structured_error, validation_response
@@ -2139,6 +2144,9 @@ class TaskTrackerTUI:
         return text if self.horizontal_offset == 0 else ""
 
     def get_task_list_text(self) -> FormattedText:
+        return render_task_list_text(self)
+
+    def _render_task_list_text_impl(self) -> FormattedText:
         term_width = max(1, self.get_terminal_width())
         if not self.filtered_tasks:
             empty_width = min(term_width, max(10, min(80, term_width - 2)))
@@ -2353,6 +2361,9 @@ class TaskTrackerTUI:
 
     # -------- detail view (full card in left pane) --------
     def get_detail_text(self) -> FormattedText:
+        return render_detail_text(self)
+
+    def _render_detail_text_impl(self) -> FormattedText:
         if not self.current_task_detail:
             return FormattedText([("class:text.dim", self._t("STATUS_TASK_NOT_SELECTED"))])
 
@@ -2705,6 +2716,9 @@ class TaskTrackerTUI:
         self._set_footer_height(0)
 
     def show_subtask_details(self, path: str):
+        return render_subtask_details(self, path)
+
+    def _render_subtask_details_impl(self, path: str):
         """Render a focused view for a single subtask with full details."""
         if not self.current_task_detail:
             return
