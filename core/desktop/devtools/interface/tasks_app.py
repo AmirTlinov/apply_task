@@ -68,6 +68,8 @@ from util.sync_status import sync_status_fragments
 from util.responsive import ColumnLayout, ResponsiveLayoutManager, detail_content_width
 from core.desktop.devtools.interface.cli_commands import CliDeps, cmd_list as _cmd_list, cmd_show as _cmd_show, cmd_analyze as _cmd_analyze
 from core.desktop.devtools.interface.cli_macros_extended import cmd_update, cmd_ok, cmd_note, cmd_suggest, cmd_quick
+from core.desktop.devtools.interface.cli_edit import cmd_edit
+from core.desktop.devtools.interface.cli_guided import cmd_create_guided, cmd_automation_task_create, cmd_automation_checkpoint
 from core.desktop.devtools.interface.cli_subtask import cmd_subtask as _cmd_subtask
 from core.desktop.devtools.interface.cli_create import cmd_create as _cmd_create, cmd_smart_create as _cmd_smart_create
 from core.desktop.devtools.interface.cli_checkpoint import cmd_bulk as _cmd_bulk, cmd_checkpoint as _cmd_checkpoint
@@ -84,6 +86,7 @@ from core.desktop.devtools.interface.tui_mouse import handle_body_mouse
 from core.desktop.devtools.interface.tui_settings import build_settings_options
 from core.desktop.devtools.interface.tui_navigation import move_vertical_selection
 from core.desktop.devtools.interface.tui_focus import focusable_line_indices
+from core.desktop.devtools.interface.tui_state import maybe_reload as _maybe_reload_helper, toggle_subtask_collapse
 from core.desktop.devtools.interface.tui_settings_panel import render_settings_panel
 from core.desktop.devtools.interface.tui_status import build_status_text
 from core.desktop.devtools.interface.tui_footer import build_footer_text
@@ -877,35 +880,9 @@ class TaskTrackerTUI:
         return st
 
     def _toggle_collapse_selected(self, expand: bool) -> None:
-        entry = self._selected_subtask_entry()
-        if not entry:
-            return
-        path, st, _, collapsed, has_children = entry
-        if not has_children:
-            # нет детей – попытка перейти к родителю при сворачивании
-            if not expand and "." in path:
-                parent_path = ".".join(path.split(".")[:-1])
-                self._select_subtask_by_path(parent_path)
-                self._ensure_detail_selection_visible(len(self.detail_flat_subtasks))
-                self.force_render()
-            return
-        if expand:
-            if collapsed:
-                self.detail_collapsed.discard(path)
-                self._rebuild_detail_flat(path)
-            else:
-                # перейти к первому ребёнку
-                child_path = f"{path}.0" if st.children else path
-                self._select_subtask_by_path(child_path)
-                self._rebuild_detail_flat(child_path)
-        else:
-            if not collapsed:
-                self.detail_collapsed.add(path)
-                self._rebuild_detail_flat(path)
-            elif "." in path:
-                parent_path = ".".join(path.split(".")[:-1])
-                self._select_subtask_by_path(parent_path)
-                self._rebuild_detail_flat(parent_path)
+        from core.desktop.devtools.interface.tui_state import toggle_subtask_collapse
+
+        toggle_subtask_collapse(self, expand)
         if self.current_task_detail:
             self.collapsed_by_task[self.current_task_detail.id] = set(self.detail_collapsed)
         self._ensure_detail_selection_visible(len(self.detail_flat_subtasks))
@@ -1235,35 +1212,7 @@ class TaskTrackerTUI:
         return self.manager.compute_signature()
 
     def maybe_reload(self):
-        now = time.time()
-        if now - self._last_check < 0.7:
-            return
-        self._last_check = now
-        sig = self.compute_signature()
-        if sig != self._last_signature:
-            selected_task_file = self.tasks[self.selected_index].task_file if self.tasks else None
-            prev_detail = self.current_task_detail.id if (self.detail_mode and self.current_task_detail) else None
-            prev_detail_path = self.detail_selected_path
-            prev_single = getattr(self, "single_subtask_view", None)
-
-            self.load_tasks(preserve_selection=True, selected_task_file=selected_task_file, skip_sync=True)
-            self._last_signature = sig
-            self.set_status_message(self._t("STATUS_MESSAGE_CLI_UPDATED"), ttl=3)
-
-            if prev_detail:
-                for t in self.tasks:
-                    if t.id == prev_detail:
-                        # reopen detail preserving selection
-                        self.show_task_details(t)
-                        if prev_detail_path:
-                            self._select_subtask_by_path(prev_detail_path)
-                        items = self.get_detail_items_count()
-                        self._ensure_detail_selection_visible(items)
-                        if prev_single and prev_detail_path:
-                            st = self._get_subtask_by_path(prev_detail_path)
-                            if st:
-                                self.show_subtask_details(prev_detail_path)
-                        break
+        _maybe_reload_helper(self)
 
     def load_tasks(self, preserve_selection: bool = False, selected_task_file: Optional[str] = None, skip_sync: bool = False):
         with self._spinner(self._t("SPINNER_REFRESH_TASKS")):
@@ -1926,103 +1875,8 @@ def cmd_smart_create(args) -> int:
 
 
 def cmd_create_guided(args) -> int:
-    """Полуинтерактивное создание задачи (шаг-ответ-шаг)"""
-    if not is_interactive():
-        print(translate("GUIDED_ONLY_INTERACTIVE"))
-        print(translate("GUIDED_USE_PARAMS"))
-        return 1
-
-    print("=" * 60)
-    print(translate("GUIDED_TITLE"))
-    print("=" * 60)
-
-    manager = TaskManager()
-
-    # Шаг 1: Базовая информация
-    print(f"\n{translate('GUIDED_STEP1')}")
-    title = prompt_required(translate("GUIDED_TASK_TITLE"))
-    parent = prompt_required(translate("GUIDED_PARENT_ID"))
-    parent = normalize_task_id(parent)
-    description = prompt_required(translate("GUIDED_DESCRIPTION"))
-    while description.upper() == "TBD":
-        print(translate("GUIDED_DESCRIPTION_TBD"))
-        description = prompt_required(translate("GUIDED_DESCRIPTION"))
-
-    # Шаг 2: Контекст и метаданные
-    print(f"\n{translate('GUIDED_STEP2')}")
-    context = prompt(translate("GUIDED_CONTEXT"), default="")
-    tags_str = prompt(translate("GUIDED_TAGS"), default="")
-    tags = [t.strip() for t in tags_str.split(",") if t.strip()]
-
-    # Шаг 3: Риски
-    print(f"\n{translate('GUIDED_STEP3')}")
-    risks = prompt_list(translate("GUIDED_RISKS"), min_items=1)
-
-    # Шаг 4: Критерии успеха / Тесты
-    print(f"\n{translate('GUIDED_STEP4')}")
-    tests = prompt_list(translate("GUIDED_TESTS"), min_items=1)
-
-    # Шаг 5: Подзадачи
-    print(f"\n{translate('GUIDED_STEP5')}")
-    subtasks = []
-    for i in range(3):
-        subtasks.append(prompt_subtask_interactive(i + 1))
-
-    while confirm(translate("GUIDED_ADD_MORE"), default=False):
-        subtasks.append(prompt_subtask_interactive(len(subtasks) + 1))
-
-    # Валидация
-    print(translate("GUIDED_VALIDATION"))
-    flagship_ok, flagship_issues = validate_flagship_subtasks(subtasks)
-    if not flagship_ok:
-        print(translate("GUIDED_WARN_ISSUES"))
-        for idx, issue in enumerate(flagship_issues, 1):
-            print(f"  {idx}. {issue}")
-
-        if not confirm(translate("GUIDED_CONTINUE"), default=False):
-            print(translate("GUIDED_CANCELLED"))
-            return 1
-
-    # Создание задачи
-    print(translate("GUIDED_SAVING"))
-    domain = derive_domain_explicit(
-        getattr(args, 'domain', None),
-        getattr(args, 'phase', None),
-        getattr(args, 'component', None)
-    )
-
-    task = manager.create_task(
-        title,
-        status="FAIL",
-        priority=getattr(args, 'priority', "MEDIUM"),
-        parent=parent,
-        domain=domain,
-        phase=getattr(args, 'phase', "") or "",
-        component=getattr(args, 'component', "") or "",
-    )
-
-    task.description = description
-    task.context = context
-    task.tags = tags
-    task.risks = risks
-    task.success_criteria = tests
-    task.subtasks = subtasks
-    task.update_status_from_progress()
-
-    manager.save_task(task)
-    save_last_task(task.id, task.domain)
-
-    print("\n" + "=" * 60)
-    print(translate("GUIDED_SUCCESS", task_id=task.id))
-    print("=" * 60)
-    print(f"[TASK] {task.title}")
-    print(translate("GUIDED_PARENT", parent=task.parent))
-    print(translate("GUIDED_SUBTASK_COUNT", count=len(task.subtasks)))
-    print(translate("GUIDED_CRITERIA_COUNT", count=len(task.success_criteria)))
-    print(translate("GUIDED_RISKS_COUNT", count=len(task.risks)))
-    print("=" * 60)
-
-    return 0
+    from core.desktop.devtools.interface.cli_guided import cmd_create_guided as _impl
+    return _impl(args)
 
 
 def cmd_status_set(args) -> int:
@@ -2418,34 +2272,8 @@ def cmd_projects_workers(args) -> int:
 
 
 def cmd_edit(args) -> int:
-    manager = TaskManager()
-    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
-    task = manager.load_task(normalize_task_id(args.task_id), domain)
-    if not task:
-        return structured_error("edit", f"Задача {args.task_id} не найдена")
-    if args.description:
-        task.description = args.description
-    if args.context:
-        task.context = args.context
-    if args.tags:
-        task.tags = [t.strip() for t in args.tags.split(",") if t.strip()]
-    if args.priority:
-        task.priority = args.priority
-    if args.phase:
-        task.phase = args.phase
-    if args.component:
-        task.component = args.component
-    if args.new_domain:
-        task.domain = args.new_domain
-    manager.save_task(task)
-    payload = {"task": task_to_dict(task, include_subtasks=True)}
-    return structured_response(
-        "edit",
-        status="OK",
-        message=f"Задача {task.id} обновлена",
-        payload=payload,
-        summary=f"{task.id} updated",
-    )
+    from core.desktop.devtools.interface.cli_edit import cmd_edit as _impl
+    return _impl(args)
 
 
 def cmd_lint(args) -> int:
@@ -2644,50 +2472,8 @@ def _load_note(log_path: Path, fallback: str) -> str:
 
 
 def cmd_automation_task_create(args) -> int:
-    parent = _resolve_parent(args.parent)
-    if not parent:
-        return structured_error("automation.task-create", "Не найден parent: укажи --parent или установи .last")
-    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
-    subtasks_source = args.subtasks or str(AUTOMATION_TMP / "subtasks.template.json")
-    subtasks_path = Path(subtasks_source[1:]) if subtasks_source.startswith("@") else Path(subtasks_source)
-    if subtasks_source.startswith("@") or subtasks_path.exists():
-        if not subtasks_path.exists():
-            # автоформирование дефолтного шаблона
-            payload = _automation_template_payload(args.count, args.coverage, args.risks, args.sla)
-            _ensure_tmp_dir()
-            _write_json(subtasks_path, payload)
-        resolved_path = subtasks_path
-        try:
-            payload = json.loads(subtasks_path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict) and isinstance(payload.get("subtasks"), list):
-                _ensure_tmp_dir()
-                resolved_path = subtasks_path.parent / "subtasks.resolved.json" if subtasks_path.is_file() else (AUTOMATION_TMP / "subtasks.resolved.json")
-                _write_json(resolved_path, payload["subtasks"])
-        except Exception:
-            resolved_path = subtasks_path
-        subtasks_arg = f"@{resolved_path}"
-    else:
-        subtasks_arg = subtasks_source
-    desc = args.description or args.title
-    create_args = argparse.Namespace(
-        title=args.title,
-        status=args.status,
-        priority=args.priority,
-        parent=parent,
-        description=desc,
-        context=args.context,
-        tags=args.tags,
-        subtasks=subtasks_arg,
-        dependencies=None,
-        next_steps=None,
-        tests=args.tests,
-        risks=args.risks,
-        validate_only=not args.apply,
-        domain=domain,
-        phase=args.phase,
-        component=args.component,
-    )
-    return cmd_create(create_args)
+    from core.desktop.devtools.interface.cli_guided import cmd_automation_task_create as _impl
+    return _impl(args)
 
 
 def cmd_automation_projects_health(args) -> int:
@@ -2729,47 +2515,8 @@ def cmd_automation_health(args) -> int:
 
 
 def cmd_automation_checkpoint(args) -> int:
-    try:
-        task_id, domain = resolve_task_reference(args.task_id, getattr(args, "domain", None), getattr(args, "phase", None), getattr(args, "component", None))
-    except ValueError as exc:
-        return structured_error("automation.checkpoint", str(exc))
-    manager = TaskManager()
-    log_path = Path(args.log or (AUTOMATION_TMP / "checkpoint.log"))
-    note = args.note or _load_note(log_path, f"log missing: {log_path}")
-    payload: Dict[str, Any] = {"task_id": task_id, "index": args.index, "note": note}
-    if args.mode == "note":
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.index, args.checkpoint, True, note, domain)
-        if not ok:
-            return structured_error("automation.checkpoint", msg or "Не удалось записать чекпоинт", payload=payload)
-        detail = manager.load_task(task_id, domain)
-        if detail:
-            payload["task"] = task_to_dict(detail, include_subtasks=True)
-        return structured_response(
-            "automation.checkpoint.note",
-            status="OK",
-            message=f"Checkpoint {args.checkpoint} обновлён",
-            payload=payload,
-            summary=f"{task_id}#{args.index} {args.checkpoint}",
-        )
-
-    for checkpoint in ("criteria", "tests", "blockers"):
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.index, checkpoint, True, note, domain)
-        if not ok:
-            return structured_error("automation.checkpoint", msg or "Не удалось подтвердить чекпоинты", payload=payload)
-    ok, msg = manager.set_subtask(task_id, args.index, True, domain)
-    if not ok:
-        return structured_error("automation.checkpoint", msg or "Не удалось закрыть подзадачу", payload=payload)
-    detail = manager.load_task(task_id, domain)
-    save_last_task(task_id, domain)
-    if detail:
-        payload["task"] = task_to_dict(detail, include_subtasks=True)
-    return structured_response(
-        "automation.checkpoint",
-        status="OK",
-        message="Подзадача закрыта через automation",
-        payload=payload,
-        summary=f"{task_id}#{args.index} ok",
-    )
+    from core.desktop.devtools.interface.cli_guided import cmd_automation_checkpoint as _impl
+    return _impl(args)
 
 
 # ============================================================================
