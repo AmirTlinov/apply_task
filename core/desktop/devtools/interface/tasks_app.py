@@ -70,9 +70,18 @@ from util.responsive import ColumnLayout, ResponsiveLayoutManager, detail_conten
 from core.desktop.devtools.interface.cli_commands import CliDeps, cmd_list as _cmd_list, cmd_show as _cmd_show, cmd_analyze as _cmd_analyze, cmd_next as _cmd_next, cmd_suggest as _cmd_suggest, cmd_quick as _cmd_quick
 from core.desktop.devtools.interface.cli_subtask import cmd_subtask as _cmd_subtask
 from core.desktop.devtools.interface.cli_create import cmd_create as _cmd_create, cmd_smart_create as _cmd_smart_create
+from core.desktop.devtools.interface.cli_checkpoint import cmd_bulk as _cmd_bulk, cmd_checkpoint as _cmd_checkpoint
+from core.desktop.devtools.interface.cli_interactive import (
+    confirm,
+    is_interactive,
+    prompt,
+    prompt_list,
+    prompt_required,
+    prompt_subtask_interactive,
+    subtask_flags,
+)
 from core.desktop.devtools.interface.serializers import subtask_to_dict, task_to_dict
 from core.desktop.devtools.interface.subtask_loader import (
-    SubtaskParseError,
     parse_subtasks_flexible,
     validate_flagship_subtasks,
     load_subtasks_source,
@@ -83,12 +92,6 @@ from core.desktop.devtools.interface.subtask_validation import (
     validate_subtasks_coverage,
     validate_subtasks_quality,
     validate_subtasks_structure,
-)
-from core.desktop.devtools.interface.subtask_loader import (
-    SubtaskParseError,
-    parse_subtasks_flexible,
-    validate_flagship_subtasks,
-    load_subtasks_source,
 )
 
 import projects_sync
@@ -237,92 +240,6 @@ def validate_flagship_subtasks(subtasks: List[SubTask]) -> Tuple[bool, List[str]
 # ============================================================================
 # FLEXIBLE SUBTASK PARSING (JSON ONLY)
 # ============================================================================
-
-
-# ============================================================================
-# INTERACTIVE HELPERS
-# ============================================================================
-
-
-def is_interactive() -> bool:
-    """Проверка что мы в интерактивном TTY режиме"""
-    return sys.stdin.isatty() and sys.stdout.isatty()
-
-
-def prompt(question: str, default: str = "") -> str:
-    """Запрос строки от пользователя"""
-    if default:
-        question = f"{question} [{default}]"
-    try:
-        response = input(f"{question}: ").strip()
-        return response if response else default
-    except (EOFError, KeyboardInterrupt):
-        print(f"\n{translate('PROMPT_ABORTED')}")
-        sys.exit(1)
-
-
-def prompt_required(question: str) -> str:
-    """Запрос обязательной строки"""
-    while True:
-        response = prompt(question)
-        if response:
-            return response
-        print(f"  {translate('PROMPT_REQUIRED')}")
-
-
-def prompt_list(question: str, min_items: int = 0) -> List[str]:
-    """Запрос списка строк (по одной на строку, пустая строка = конец)"""
-    print(f"{question} {translate('PROMPT_EMPTY_TO_FINISH')}")
-    items = []
-    while True:
-        try:
-            line = input(f"  {len(items) + 1}. ").strip()
-            if not line:
-                if len(items) >= min_items:
-                    break
-                print(f"  {translate('PROMPT_MIN_ITEMS', count=min_items)}")
-                continue
-            items.append(line)
-        except (EOFError, KeyboardInterrupt):
-            print(f"\n{translate('PROMPT_ABORTED')}")
-            sys.exit(1)
-    return items
-
-
-def confirm(question: str, default: bool = True) -> bool:
-    """Запрос подтверждения (y/n)"""
-    suffix = " [Y/n]" if default else " [y/N]"
-    try:
-        response = input(f"{question}{suffix}: ").strip().lower()
-        if not response:
-            return default
-        return response in ('y', 'yes', 'д', 'да')
-    except (EOFError, KeyboardInterrupt):
-        print(f"\n{translate('PROMPT_ABORTED')}")
-        sys.exit(1)
-
-
-def prompt_subtask_interactive(index: int) -> SubTask:
-    """Интерактивное создание подзадачи"""
-    print(f"\n{translate('PROMPT_SUBTASK_HEADER', index=index)}")
-    title = prompt_required(translate("PROMPT_SUBTASK_TITLE_REQ"))
-    while len(title) < 20:
-        print(translate("PROMPT_SUBTASK_TITLE_SHORT", length=len(title)))
-        title = prompt_required(translate("PROMPT_SUBTASK_TITLE"))
-
-    criteria = prompt_list(translate("PROMPT_SUBTASK_CRITERIA"), min_items=1)
-    tests = prompt_list(translate("PROMPT_SUBTASK_TESTS"), min_items=1)
-    blockers = prompt_list(translate("PROMPT_SUBTASK_BLOCKERS"), min_items=1)
-
-    return SubTask(False, title, criteria, tests, blockers)
-
-
-def subtask_flags(st: SubTask) -> Dict[str, bool]:
-    return {
-        "criteria": st.criteria_confirmed,
-        "tests": st.tests_confirmed,
-        "blockers": st.blockers_resolved,
-    }
 
 
 # ============================================================================
@@ -3100,244 +3017,12 @@ def cmd_note(args) -> int:
     return structured_error("note", msg or "Операция не выполнена", payload=payload)
 
 
-def _parse_bulk_operations(raw: str) -> List[Dict[str, Any]]:
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise SubtaskParseError(f"Невалидный JSON payload для bulk: {exc}") from exc
-    if not isinstance(data, list):
-        raise SubtaskParseError("Bulk payload должен быть массивом операций")
-    cleaned = []
-    for item in data:
-        if not isinstance(item, dict):
-            raise SubtaskParseError("Каждый элемент bulk payload должен быть объектом")
-        cleaned.append(item)
-    return cleaned
-
-
 def cmd_bulk(args) -> int:
-    manager = TaskManager()
-    base_domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
-    default_task_id: Optional[str] = None
-    default_task_domain: str = base_domain
-    if getattr(args, "task", None):
-        try:
-            default_task_id, default_task_domain = resolve_task_reference(
-                args.task,
-                getattr(args, "domain", None),
-                getattr(args, "phase", None),
-                getattr(args, "component", None),
-            )
-        except ValueError as exc:
-            return structured_error("bulk", str(exc))
-    try:
-        raw = _load_input_source(args.input, "bulk JSON payload")
-        operations = _parse_bulk_operations(raw)
-    except SubtaskParseError as exc:
-        return structured_error("bulk", str(exc))
-    results = []
-    for op in operations:
-        raw_task_spec = op.get("task") or op.get("task_id", "")
-        op_domain = base_domain
-        try:
-            if raw_task_spec:
-                task_id, op_domain = resolve_task_reference(
-                    raw_task_spec,
-                    getattr(args, "domain", None),
-                    getattr(args, "phase", None),
-                    getattr(args, "component", None),
-                )
-            elif default_task_id:
-                task_id = default_task_id
-                op_domain = default_task_domain
-            else:
-                task_id = ""
-        except ValueError as exc:
-            results.append({"task": raw_task_spec, "status": "ERROR", "message": str(exc)})
-            continue
-        index = op.get("index")
-        if not task_id or not isinstance(index, int):
-            results.append({"task": task_id, "index": index, "status": "ERROR", "message": "Укажи task/index"})
-            continue
-        entry_payload = {"task": task_id, "index": index}
-        failed = False
-        for checkpoint in ("criteria", "tests", "blockers"):
-            spec = op.get(checkpoint)
-            if spec is None:
-                continue
-            done = bool(spec.get("done", True))
-            note = spec.get("note", "") or ""
-            ok, msg = manager.update_subtask_checkpoint(task_id, index, checkpoint, done, note, op_domain, path=op.get("path"))
-            if not ok:
-                entry_payload["status"] = "ERROR"
-                entry_payload["message"] = msg or f"Не удалось обновить {checkpoint}"
-                failed = True
-                break
-        if failed:
-            results.append(entry_payload)
-            continue
-        if op.get("complete"):
-            ok, msg = manager.set_subtask(task_id, index, True, op_domain, path=op.get("path"))
-            if not ok:
-                entry_payload["status"] = "ERROR"
-                entry_payload["message"] = msg or "Не удалось закрыть подзадачу"
-                results.append(entry_payload)
-                continue
-        detail = manager.load_task(task_id, op_domain)
-        save_last_task(task_id, op_domain)
-        entry_payload["status"] = "OK"
-        entry_payload["task_detail"] = task_to_dict(detail, include_subtasks=True) if detail else {"id": task_id}
-        if detail and 0 <= index < len(detail.subtasks):
-            entry_payload["subtask"] = subtask_to_dict(detail.subtasks[index])
-            entry_payload["checkpoint_states"] = {
-                "criteria": detail.subtasks[index].criteria_confirmed,
-                "tests": detail.subtasks[index].tests_confirmed,
-                "blockers": detail.subtasks[index].blockers_resolved,
-            }
-        results.append(entry_payload)
-    message = f"Выполнено операций: {sum(1 for r in results if r.get('status') == 'OK')}/{len(results)}"
-    return structured_response(
-        "bulk",
-        status="OK",
-        message=message,
-        payload={"results": results},
-        summary=message,
-    )
+    return _cmd_bulk(args)
 
 
 def cmd_checkpoint(args) -> int:
-    auto_mode = getattr(args, "auto", False)
-    base_note = (getattr(args, "note", "") or "").strip()
-    if not auto_mode and not is_interactive():
-        return structured_error(
-            "checkpoint",
-            "Мастер чекпоинтов требует интерактивный терминал (или укажи --auto)",
-        )
-    try:
-        task_id, domain = resolve_task_reference(
-            getattr(args, "task_id", None),
-            getattr(args, "domain", None),
-            getattr(args, "phase", None),
-            getattr(args, "component", None),
-        )
-    except ValueError as exc:
-        return structured_error("checkpoint", str(exc))
-    manager = TaskManager()
-    detail = manager.load_task(task_id, domain)
-    if not detail:
-        return structured_error("checkpoint", f"Задача {task_id} не найдена")
-    if not detail.subtasks:
-        return structured_error("checkpoint", f"Задача {task_id} не содержит подзадач")
-
-    def pick_path_and_subtask() -> Tuple[str, int, SubTask]:
-        if getattr(args, "path", None):
-            path = args.path
-            st, _, _ = _find_subtask_by_path(detail.subtasks, path)
-            if not st:
-                raise ValueError("Неверный путь подзадачи")
-            return path, int(path.split(".")[-1] or 0), st
-        if args.subtask is not None:
-            idx = args.subtask
-            if idx < 0:
-                raise ValueError("Индекс подзадачи неверный")
-            if idx < len(detail.subtasks):
-                return str(idx), idx, detail.subtasks[idx]
-            raise ValueError("Индекс подзадачи неверный")
-        if auto_mode:
-            flat = _flatten_subtasks(detail.subtasks)
-            for path, st in flat:
-                if not st.completed:
-                    return path, int(path.split(".")[-1] or 0), st
-            return flat[-1][0], int(flat[-1][0].split(".")[-1] or 0), flat[-1][1]
-        print("\n[Шаг 1] Выбор подзадачи (формат 0 или 0.1.2)")
-        flat = _flatten_subtasks(detail.subtasks)
-        for path, st in flat:
-            flags = subtask_flags(st)
-            glyphs = ''.join(['✓' if flags[k] else '·' for k in ("criteria", "tests", "blockers")])
-            print(f"  {path}. [{glyphs}] {'[OK]' if st.completed else '[ ]'} {st.title}")
-        while True:
-            raw = prompt("Введите путь подзадачи", default="0")
-            st, _, _ = _find_subtask_by_path(detail.subtasks, raw)
-            if st:
-                return raw, int(raw.split(".")[-1] or 0), st
-            print("  [!] Недопустимый путь (используй 0.1.2)")
-
-    try:
-        path, subtask_index, subtask_obj = pick_path_and_subtask()
-    except ValueError as exc:
-        return structured_error("checkpoint", str(exc))
-
-    checkpoint_labels = [
-        ("criteria", translate("CHECKPOINT_CRITERIA")),
-        ("tests", translate("CHECKPOINT_TESTS")),
-        ("blockers", translate("CHECKPOINT_BLOCKERS")),
-    ]
-    operations: List[Dict[str, Any]] = []
-
-    for checkpoint, label in checkpoint_labels:
-        st = manager.load_task(task_id, domain)
-        if not st:
-            return structured_error("checkpoint", translate("ERR_TASK_UNAVAILABLE"))
-        target, _, _ = _find_subtask_by_path(st.subtasks, path)
-        if not target:
-            return structured_error("checkpoint", translate("ERR_SUBTASK_NOT_FOUND"))
-        attr_map = {
-            "criteria": target.criteria_confirmed,
-            "tests": target.tests_confirmed,
-            "blockers": target.blockers_resolved,
-        }
-        if attr_map[checkpoint]:
-            operations.append({"checkpoint": checkpoint, "state": "already"})
-            continue
-        note_value = base_note
-        confirm_checkpoint = auto_mode
-        if not auto_mode:
-            print(f"\n[Шаг] {label}: {target.title}")
-            print(f"  Текущее состояние: TODO. Подтвердить {label.lower()}?")
-            confirm_checkpoint = confirm(f"Подтвердить {label.lower()}?", default=True)
-            if not confirm_checkpoint:
-                operations.append({"checkpoint": checkpoint, "state": "skipped"})
-                continue
-            if not note_value:
-                note_value = prompt("Комментарий/доказательство", default="")
-        if not note_value:
-            note_value = f"checkpoint:{checkpoint}"
-        ok, msg = manager.update_subtask_checkpoint(task_id, subtask_index, checkpoint, True, note_value, domain, path=path)
-        if not ok:
-            return structured_error("checkpoint", msg or f"Не удалось подтвердить {label.lower()}")
-        operations.append({"checkpoint": checkpoint, "state": "confirmed", "note": note_value})
-
-    detail = manager.load_task(task_id, domain)
-    completed = False
-    if detail:
-        target, _, _ = _find_subtask_by_path(detail.subtasks, path)
-        ready = target.ready_for_completion() if target else False
-        if ready:
-            mark_done = auto_mode
-            if not auto_mode:
-                mark_done = confirm("Все чекпоинты отмечены. Закрыть подзадачу?", default=True)
-            if mark_done:
-                ok, msg = manager.set_subtask(task_id, subtask_index, True, domain, path=path)
-                if not ok:
-                    return structured_error("checkpoint", msg or "Не удалось закрыть подзадачу")
-                operations.append({"checkpoint": "done", "state": "completed"})
-                completed = True
-    detail = manager.load_task(task_id, domain)
-    save_last_task(task_id, domain)
-    payload = {
-        "task": task_to_dict(detail, include_subtasks=True) if detail else {"id": task_id},
-        "subtask_index": subtask_index,
-        "operations": operations,
-        "auto": auto_mode,
-        "completed": completed,
-    }
-    return structured_response(
-        "checkpoint",
-        status="OK",
-        message="Мастер чекпоинтов завершён",
-        payload=payload,
-        summary=f"{task_id}#{subtask_index} checkpoints",
-    )
+    return _cmd_checkpoint(args)
 
 
 def cmd_move(args) -> int:
