@@ -85,7 +85,13 @@ from core.desktop.devtools.interface.tui_settings import build_settings_options
 from core.desktop.devtools.interface.tui_navigation import move_vertical_selection
 from core.desktop.devtools.interface.tui_status import build_status_text
 from core.desktop.devtools.interface.tui_footer import build_footer_text
-from core.desktop.devtools.interface.tui_loader import load_tasks_with_state
+from core.desktop.devtools.interface.tui_loader import (
+    load_tasks_with_state,
+    apply_context_filters,
+    build_task_models,
+    select_index_after_load,
+)
+from core.desktop.devtools.interface.tui_preview import build_side_preview_text
 from core.desktop.devtools.interface.serializers import subtask_to_dict, task_to_dict
 from core.desktop.devtools.interface.subtask_loader import (
     parse_subtasks_flexible,
@@ -1338,6 +1344,7 @@ class TaskTrackerTUI:
         with self._spinner(self._t("SPINNER_REFRESH_TASKS")):
             domain_path = derive_domain_explicit(self.domain_filter, self.phase_filter, self.component_filter)
             details = self.manager.list_tasks(domain_path, skip_sync=skip_sync)
+
         snapshot = _projects_status_payload()
         wait = snapshot.get("rate_wait") or 0
         remaining = snapshot.get("rate_remaining")
@@ -1345,43 +1352,32 @@ class TaskTrackerTUI:
             message = self._t("STATUS_MESSAGE_RATE_LIMIT", remaining=remaining if remaining is not None else "?", seconds=int(wait))
             self.set_status_message(message, ttl=5)
             self._last_rate_wait = wait
-        if self.phase_filter:
-            details = [d for d in details if d.phase == self.phase_filter]
-        if self.component_filter:
-            details = [d for d in details if d.component == self.component_filter]
-        tasks: List[Task] = []
-        for det in details:
+
+        details = apply_context_filters(details, self.phase_filter, self.component_filter)
+
+        def _task_factory(det, derived_status, calc_progress, subtasks_completed):
             task_file = f".tasks/{det.domain + '/' if det.domain else ''}{det.id}.task"
-            calc_progress = det.calculate_progress()
-            derived_status = Status.OK if calc_progress == 100 and not det.blocked else Status.from_string(det.status)
-            tasks.append(
-                Task(
-                    id=det.id,
-                    name=det.title,
-                    status=derived_status,
-                    description=(det.description or det.context or "")[:80],
-                    category=det.domain or det.priority,
-                    completed=derived_status == Status.OK,
-                    task_file=task_file,
-                    progress=calc_progress,
-                    subtasks_count=len(det.subtasks),
-                    subtasks_completed=sum(1 for st in det.subtasks if st.completed),
-                    parent=det.parent,
-                    detail=det,
-                    domain=det.domain,
-                    phase=det.phase,
-                    component=det.component,
-                    blocked=det.blocked,
-                )
+            return Task(
+                id=det.id,
+                name=det.title,
+                status=derived_status,
+                description=(det.description or det.context or "")[:80],
+                category=det.domain or det.priority,
+                completed=derived_status == Status.OK,
+                task_file=task_file,
+                progress=calc_progress,
+                subtasks_count=len(det.subtasks),
+                subtasks_completed=subtasks_completed,
+                parent=det.parent,
+                detail=det,
+                domain=det.domain,
+                phase=det.phase,
+                component=det.component,
+                blocked=det.blocked,
             )
-        self.tasks = tasks
-        if preserve_selection and selected_task_file:
-            for idx, t in enumerate(self.tasks):
-                if t.task_file == selected_task_file:
-                    self.selected_index = idx
-                    break
-        else:
-            self.selected_index = 0
+
+        self.tasks = build_task_models(details, _task_factory)
+        self.selected_index = select_index_after_load(self.tasks, preserve_selection, selected_task_file or "")
         self.detail_mode = False
         self.current_task = None
         self.current_task_detail = None
@@ -1566,84 +1562,7 @@ class TaskTrackerTUI:
         return render_task_list_text_impl(self)
 
     def get_side_preview_text(self) -> FormattedText:
-        """Описание выбранной задачи (без подзадач) в правой колонке."""
-        if not self.filtered_tasks:
-            return FormattedText([
-                ('class:border', '+------------------------------+\n'),
-                ('class:text.dim', '| ' + self._t("SIDE_EMPTY_TASKS").ljust(26) + ' |\n'),
-                ('class:border', '+------------------------------+'),
-            ])
-        idx = min(self.selected_index, len(self.filtered_tasks) - 1)
-        task = self.filtered_tasks[idx]
-        detail = task.detail
-        if not detail and task.task_file:
-            try:
-                detail = TaskFileParser.parse(Path(task.task_file))
-            except Exception:
-                detail = None
-        if not detail:
-            return FormattedText([
-                ('class:border', '+------------------------------+\n'),
-                ('class:text.dim', '| ' + self._t("SIDE_NO_DATA").ljust(26) + ' |\n'),
-                ('class:border', '+------------------------------+'),
-            ])
-
-        result = []
-        result.append(('class:border', '+------------------------------------------+\n'))
-        result.append(('class:border', '| '))
-        result.append(('class:header', f'{detail.id} '))
-        result.append(('class:text.dim', f'| '))
-
-        # Status text
-        if detail.status == 'OK':
-            result.append(('class:icon.check', 'DONE '))
-        elif detail.status == 'WARN':
-            result.append(('class:icon.warn', 'INPR '))
-        else:
-            result.append(('class:icon.fail', 'BACK '))
-
-        result.append(('class:text.dim', f'| {detail.priority}'))
-        result.append(('class:border', '                   |\n'))
-        result.append(('class:border', '+------------------------------------------+\n'))
-
-        # Title
-        title_lines = [detail.title[i:i+38] for i in range(0, len(detail.title), 38)]
-        for tline in title_lines:
-            result.append(('class:border', '| '))
-            result.append(('class:text', tline.ljust(40)))
-            result.append(('class:border', ' |\n'))
-
-        # Context
-        ctx = detail.domain or detail.phase or detail.component
-        if ctx:
-            result.append(('class:border', '| '))
-            result.append(('class:text.dim', self._t("STATUS_CONTEXT", ctx=ctx[:32]).ljust(40)))
-            result.append(('class:border', ' |\n'))
-
-        # Progress with simple ASCII bar
-        prog = detail.calculate_progress()
-        bar_width = 30
-        filled = int(prog * bar_width / 100)
-        bar = '#' * filled + '-' * (bar_width - filled)
-        result.append(('class:border', '| '))
-        result.append(('class:text.dim', f'{prog:3d}% ['))
-        result.append(('class:text.dim', bar[:30]))
-        result.append(('class:text.dim', ']'))
-        result.append(('class:border', '    |\n'))
-
-        # Description
-        if detail.description:
-            result.append(('class:border', '+------------------------------------------+\n'))
-            desc_lines = detail.description.split('\n')
-            for dline in desc_lines[:5]:  # Max 5 lines
-                chunks = [dline[i:i+38] for i in range(0, len(dline), 38)]
-                for chunk in chunks[:3]:  # Max 3 chunks per line
-                    result.append(('class:border', '| '))
-                    result.append(('class:text', chunk.ljust(40)))
-                    result.append(('class:border', ' |\n'))
-
-        result.append(('class:border', '+------------------------------------------+'))
-        return FormattedText(result)
+        return build_side_preview_text(self)
 
     # -------- detail view (full card in left pane) --------
     def get_detail_text(self) -> FormattedText:

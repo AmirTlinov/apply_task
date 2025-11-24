@@ -71,3 +71,33 @@ def test_load_tasks_with_state_includes_filter_message():
     items, message = tui_loader.load_tasks_with_state(DummyTUI())
     assert [t.status.name for t in items] == ["OK"]
     assert message == tui_loader.translate("FILTER_APPLIED", value="OK")
+
+
+def test_apply_context_filters_and_models():
+    class DummyTask:
+        def __init__(self, phase, component, status, blocked=False):
+            self.phase = phase
+            self.component = component
+            self.status = status
+            self.blocked = blocked
+            self.subtasks = []
+
+        def calculate_progress(self):
+            return 100 if self.status == "OK" else 0
+
+    tasks = [DummyTask("p", "c", "OK"), DummyTask("x", "y", "FAIL", blocked=True)]
+    filtered = tui_loader.apply_context_filters(tasks, "p", "c")
+    assert len(filtered) == 1
+
+    built = tui_loader.build_task_models(filtered, lambda det, st, prog, subs: (det.status, st, prog, subs))
+    assert built[0][1].name == "OK"
+
+
+def test_select_index_after_load():
+    class T:
+        def __init__(self, task_file):
+            self.task_file = task_file
+
+    tasks = [T("a"), T("b")]
+    assert tui_loader.select_index_after_load(tasks, True, "b") == 1
+    assert tui_loader.select_index_after_load(tasks, False, "b") == 0

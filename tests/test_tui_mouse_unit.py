@@ -90,6 +90,129 @@ def test_scroll_with_shift_up_clamps_left():
     assert tui.horizontal_offset == 0
 
 
+def test_single_subtask_view_other_event_returns_false():
+    result = tui_mouse._handle_single_subtask_view(SimpleNamespace(single_subtask_view=True), _mouse(MouseEventType.MOUSE_UP))
+    assert result is False
+
+
+def test_settings_mode_none_when_editing():
+    res = tui_mouse._handle_settings_mode(SimpleNamespace(settings_mode=True, editing_mode=True), _mouse(MouseEventType.SCROLL_DOWN))
+    assert res is None
+
+
+def test_handle_scroll_non_scroll_event():
+    res = tui_mouse._handle_scroll(SimpleNamespace(), _mouse(MouseEventType.MOUSE_UP))
+    assert res is False
+
+
+def test_detail_click_single_subtask_view_skips():
+    res = tui_mouse._handle_detail_click(
+        SimpleNamespace(detail_mode=True, current_task_detail=True, single_subtask_view=True),
+        _mouse(MouseEventType.MOUSE_UP, y=0),
+    )
+    assert res is None
+
+
+def test_detail_click_without_detail_returns_true():
+    res = tui_mouse._handle_detail_click(
+        SimpleNamespace(detail_mode=True, current_task_detail=None),
+        _mouse(MouseEventType.MOUSE_UP, y=0),
+    )
+    assert res is True
+
+
+def test_handle_body_mouse_editing_mode_returns_notimplemented():
+    res = tui_mouse.handle_body_mouse(SimpleNamespace(editing_mode=True), _mouse(MouseEventType.MOUSE_UP))
+    assert res is NotImplemented
+
+
+def test_handle_body_mouse_no_match_returns_notimplemented(monkeypatch):
+    # monkeypatch settings handler to return sentinel to hit line 111
+    monkeypatch.setattr(tui_mouse, "_handle_settings_mode", lambda tui, ev: "sentinel")
+    res = tui_mouse.handle_body_mouse(SimpleNamespace(editing_mode=False), _mouse(MouseEventType.MOUSE_MOVE))
+    assert res is NotImplemented
+
+
+def test_scroll_up_without_shift_moves_vertical():
+    class TUI:
+        def __init__(self):
+            self.moved = 0
+            self.editing_mode = False
+            self.detail_mode = False
+            self.filtered_tasks = [1]
+
+        def move_vertical_selection(self, delta):
+            self.moved = delta
+
+    tui = TUI()
+    tui_mouse.handle_body_mouse(tui, _mouse(MouseEventType.SCROLL_UP))
+    assert tui.moved == -1
+
+
+def test_scroll_down_without_shift_moves_vertical():
+    class TUI:
+        def __init__(self):
+            self.moved = 0
+            self.editing_mode = False
+            self.detail_mode = False
+            self.filtered_tasks = [1]
+
+        def move_vertical_selection(self, delta):
+            self.moved = delta
+
+    tui = TUI()
+    tui_mouse.handle_body_mouse(tui, _mouse(MouseEventType.SCROLL_DOWN))
+    assert tui.moved == 1
+
+
+def test_settings_mode_scroll_up_branch():
+    actions = []
+
+    class TUI:
+        settings_mode = True
+        editing_mode = False
+
+        def move_settings_selection(self, delta):
+            actions.append(delta)
+
+    tui = TUI()
+    tui_mouse._handle_settings_mode(tui, _mouse(MouseEventType.SCROLL_UP))
+    assert actions == [-1]
+
+
+def test_detail_click_no_index_returns_true():
+    class TUI:
+        detail_mode = True
+        current_task_detail = True
+        detail_flat_subtasks = None
+
+        def _subtask_index_from_y(self, y):
+            return None
+
+    res = tui_mouse._handle_detail_click(TUI(), _mouse(MouseEventType.MOUSE_UP, y=0))
+    assert res is True
+
+
+def test_list_click_ignored_when_detail_mode():
+    res = tui_mouse._handle_list_click(SimpleNamespace(detail_mode=True), _mouse(MouseEventType.MOUSE_UP, y=0))
+    assert res is None
+
+
+def test_handle_body_mouse_falls_through_to_notimplemented():
+    tui = SimpleNamespace(detail_mode=False, editing_mode=False, settings_mode=False)
+    res = tui_mouse.handle_body_mouse(tui, _mouse(MouseEventType.MOUSE_MOVE))
+    assert res is NotImplemented
+
+
+def test_list_click_none_index_returns_true():
+    class TUI:
+        detail_mode = False
+        def _task_index_from_y(self, y):
+            return None
+    res = tui_mouse._handle_list_click(TUI(), _mouse(MouseEventType.MOUSE_UP))
+    assert res is True
+
+
 def test_detail_click_selects_and_opens():
     calls = []
 
