@@ -69,6 +69,52 @@ def _attach_subtask(subtasks: List[SubTask], parent_path: Optional[str], new_sub
     return True
 
 
+def _validate_subtask_requirements(subtask: SubTask, idx: int, translator) -> Optional[Dict[str, str]]:
+    if not subtask.success_criteria:
+        return {
+            "code": "validation",
+            "message": translator("ERR_SUBTASK_NO_CRITERIA").format(idx=idx, title=subtask.title),
+        }
+    if not subtask.tests:
+        return {
+            "code": "validation",
+            "message": translator("ERR_SUBTASK_NO_TESTS").format(idx=idx, title=subtask.title),
+        }
+    return None
+
+
+def _validate_task_ready_for_ok(task: TaskDetail, translator) -> Tuple[bool, Optional[Dict[str, str]]]:
+    if task.subtasks and task.calculate_progress() < 100:
+        return False, {"code": "validation", "message": translator("ERR_TASK_NOT_COMPLETE")}
+    if not task.success_criteria:
+        return False, {"code": "validation", "message": translator("ERR_TASK_NO_CRITERIA_TESTS")}
+    for idx, st in enumerate(task.subtasks, 1):
+        err = _validate_subtask_requirements(st, idx, translator)
+        if err:
+            return False, err
+    return True, None
+
+
+def _normalized_fields(values: Optional[List[str]]) -> List[str]:
+    return [v.strip() for v in (values or []) if v and v.strip()]
+
+
+def _build_subtask(title: str, criteria, tests, blockers) -> Optional[SubTask]:
+    crit = _normalized_fields(criteria)
+    tst = _normalized_fields(tests)
+    bl = _normalized_fields(blockers)
+    if not crit or not tst or not bl:
+        return None
+    return SubTask(False, title, crit, tst, bl)
+
+
+def _update_progress_for_status(task: TaskDetail, status: str) -> None:
+    task.status = status
+    needs_progress = status in {"WARN", "FAIL"}
+    if needs_progress and task.progress == 0 and task.subtasks:
+        task.progress = task.calculate_progress()
+
+
 class TaskManager:
     def __init__(
         self,
@@ -270,30 +316,13 @@ class TaskManager:
         if not task:
             return False, {"code": "not_found", "message": self._t("ERR_TASK_NOT_FOUND", task_id=task_id)}
         if status == "OK":
-            if task.subtasks and task.calculate_progress() < 100:
-                return False, {"code": "validation", "message": self._t("ERR_TASK_NOT_COMPLETE")}
-            if not task.success_criteria:
-                return False, {"code": "validation", "message": self._t("ERR_TASK_NO_CRITERIA_TESTS")}
-            for idx, st in enumerate(task.subtasks, 1):
-                if not st.success_criteria:
-                    return False, {
-                        "code": "validation",
-                        "message": self._t("ERR_SUBTASK_NO_CRITERIA").format(idx=idx, title=st.title),
-                    }
-                if not st.tests:
-                    return False, {
-                        "code": "validation",
-                        "message": self._t("ERR_SUBTASK_NO_TESTS").format(idx=idx, title=st.title),
-                    }
+            ok, error = _validate_task_ready_for_ok(task, self._t)
+            if not ok:
+                return False, error
             task.progress = 100
-        else:
             task.status = status
-            if status == "WARN" and task.progress == 0 and task.subtasks:
-                task.progress = task.calculate_progress()
-            if status == "FAIL" and task.progress == 0 and task.subtasks:
-                task.progress = task.calculate_progress()
-
-        task.status = status
+        else:
+            _update_progress_for_status(task, status)
         self.save_task(task)
         return True, None
 
@@ -310,17 +339,11 @@ class TaskManager:
         task = self.load_task(task_id, domain)
         if not task:
             return False, "not_found"
-        crit = [c.strip() for c in (criteria or []) if c.strip()]
-        tst = [t.strip() for t in (tests or []) if t.strip()]
-        bl = [b.strip() for b in (blockers or []) if b.strip()]
-        if not crit or not tst or not bl:
+        new_subtask = _build_subtask(title, criteria, tests, blockers)
+        if not new_subtask:
             return False, "missing_fields"
-        if parent_path:
-            ok = _attach_subtask(task.subtasks, parent_path, SubTask(False, title, crit, tst, bl))
-            if not ok:
-                return False, "path"
-        else:
-            task.subtasks.append(SubTask(False, title, crit, tst, bl))
+        if not _attach_subtask(task.subtasks, parent_path, new_subtask):
+            return False, "path"
         task.update_status_from_progress()
         self.save_task(task)
         return True, None

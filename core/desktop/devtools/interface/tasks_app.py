@@ -83,6 +83,9 @@ from core.desktop.devtools.interface.cli_interactive import (
 from core.desktop.devtools.interface.tui_mouse import handle_body_mouse
 from core.desktop.devtools.interface.tui_settings import build_settings_options
 from core.desktop.devtools.interface.tui_navigation import move_vertical_selection
+from core.desktop.devtools.interface.tui_status import build_status_text
+from core.desktop.devtools.interface.tui_footer import build_footer_text
+from core.desktop.devtools.interface.tui_loader import load_tasks_with_state
 from core.desktop.devtools.interface.serializers import subtask_to_dict, task_to_dict
 from core.desktop.devtools.interface.subtask_loader import (
     parse_subtasks_flexible,
@@ -1335,7 +1338,6 @@ class TaskTrackerTUI:
         with self._spinner(self._t("SPINNER_REFRESH_TASKS")):
             domain_path = derive_domain_explicit(self.domain_filter, self.phase_filter, self.component_filter)
             details = self.manager.list_tasks(domain_path, skip_sync=skip_sync)
-        # показываем плашку при достижении rate-limit
         snapshot = _projects_status_payload()
         wait = snapshot.get("rate_wait") or 0
         remaining = snapshot.get("rate_remaining")
@@ -1393,83 +1395,7 @@ class TaskTrackerTUI:
         self.status_message_expires = time.time() + ttl
 
     def get_status_text(self) -> FormattedText:
-        items = self.filtered_tasks
-        total = len(items)
-        ok = sum(1 for t in items if t.status == Status.OK)
-        warn = sum(1 for t in items if t.status == Status.WARN)
-        fail = sum(1 for t in items if t.status == Status.FAIL)
-        ctx = self.domain_filter or derive_domain_explicit("", self.phase_filter, self.component_filter) or "."
-        filter_labels = {
-            "OK": "DONE",
-            "WARN": "IN PROGRESS",
-            "FAIL": "BACKLOG",
-        }
-        flt = self.current_filter.value[0] if self.current_filter else "ALL"
-        flt_display = filter_labels.get(flt, "ALL")
-        now = time.time()
-        if self._last_filter_value != flt_display:
-            self._filter_flash_until = now + 1.0
-            self._last_filter_value = flt_display
-        filter_flash_active = now < self._filter_flash_until
-
-        def back_handler(event: MouseEvent):
-            if event.event_type == MouseEventType.MOUSE_UP and event.button == MouseButton.LEFT:
-                self.exit_detail_view()
-                return None
-            return NotImplemented
-
-        def settings_handler(event: MouseEvent):
-            if event.event_type == MouseEventType.MOUSE_UP and event.button == MouseButton.LEFT:
-                self.open_settings_dialog()
-                return None
-            return NotImplemented
-
-        parts: List[Tuple[str, str]] = []
-        # back button только в статус-баре
-        if self.detail_mode or getattr(self, "single_subtask_view", None):
-            parts.append(("class:header.bigicon", "[BACK] ", back_handler))
-
-        parts.extend([
-            ("class:text.dim", f"{self._t('STATUS_TASKS_COUNT', count=total)} | "),
-            ("class:icon.check", str(ok)),
-            ("class:text.dim", "/"),
-            ("class:icon.warn", str(warn)),
-            ("class:text.dim", "/"),
-            ("class:icon.fail", str(fail)),
-        ])
-        filter_style = 'class:icon.warn' if filter_flash_active else 'class:header'
-        parts.extend([
-            ("class:text.dim", " | "),
-            (filter_style, f"{flt_display}"),
-            ("class:text.dim", " | "),
-        ])
-        parts.extend(self._sync_indicator_fragments(filter_flash_active))
-        spinner_frame = self._spinner_frame()
-        if spinner_frame:
-            parts.extend([
-                ("class:text.dim", " | "),
-                ("class:header", f"{spinner_frame} {self.spinner_message or self._t('STATUS_LOADING')}"),
-            ])
-        if self.status_message and time.time() < self.status_message_expires:
-            parts.extend([
-                ("class:text.dim", " | "),
-                ("class:header", self.status_message[:80]),
-            ])
-        elif self.status_message:
-            self.status_message = ""
-
-        # settings button pinned to the far right of the line
-        try:
-            term_width = self.get_terminal_width()
-        except Exception:
-            term_width = 120
-        current_len = sum(len(text) for _, text, *rest in parts)
-        settings_symbol = "[SETTINGS]"
-        # 1 space padding before settings
-        needed = max(1, term_width - current_len - len(settings_symbol))
-        parts.append(("class:text", " " * needed))
-        parts.append(("class:header.bigicon", settings_symbol, settings_handler))
-        return FormattedText(parts)
+        return build_status_text(self)
 
     def _current_description_snippet(self) -> str:
         detail = self._current_task_detail_obj()
@@ -1963,8 +1889,7 @@ class TaskTrackerTUI:
                 self.start_editing('task_title', task_detail.title)
 
     def get_footer_text(self) -> FormattedText:
-        scroll_info = f"{self._t('OFFSET_LABEL')}{self.horizontal_offset}" if self.horizontal_offset > 0 else ""
-        if getattr(self, 'help_visible', False):
+        if getattr(self, "help_visible", False):
             return FormattedText([
                 ("class:text.dimmer", self._t("NAV_STATUS_HINT")),
                 ("", "\n"),
@@ -1978,76 +1903,7 @@ class TaskTrackerTUI:
             return FormattedText([
                 ("class:text.dimmer", self._t("NAV_EDIT_HINT")),
             ])
-        desc = self._current_description_snippet() or self._t("DESCRIPTION_MISSING")
-        detail = self._current_task_detail_obj()
-        segments: List[str] = []
-        seen: set[str] = set()
-        if detail:
-            domain = detail.domain or ""
-            if domain:
-                for part in domain.split('/'):
-                    if part:
-                        formatted = f"[{part}]"
-                        if formatted not in seen:
-                            segments.append(formatted)
-                            seen.add(formatted)
-            for comp in (detail.phase, detail.component):
-                if comp:
-                    formatted = f"[{comp}]"
-                    if formatted not in seen:
-                        segments.append(formatted)
-                        seen.add(formatted)
-        path_text = "->".join(segments) if segments else "-"
-        start_time = "-"
-        finish_time = "-"
-        if detail:
-            if getattr(detail, "created", None):
-                start_time = str(detail.created)
-            if detail.status == "OK" and getattr(detail, "updated", None):
-                finish_time = str(detail.updated)
-        duration_value = self._task_duration_value(detail)
-        table_width = max(60, self.get_terminal_width())
-        inner_width = max(30, table_width - 4)
-
-        def add_block(rows: List[str], label: str, value: str, max_lines: int = 1) -> None:
-            label_len = len(label)
-            available = max(1, inner_width - label_len)
-            text_value = value or "—"
-            chunks = textwrap.wrap(text_value, available) or ["—"]
-            truncated = len(chunks) > max_lines
-            chunks = chunks[:max_lines]
-            if truncated and chunks:
-                tail = chunks[-1]
-                if len(tail) >= available:
-                    tail = tail[:-1] + "…"
-                else:
-                    tail = tail + "…"
-                chunks[-1] = tail
-            for idx in range(max_lines):
-                prefix = label if idx == 0 else " " * label_len
-                chunk = chunks[idx] if idx < len(chunks) else ""
-                row = (prefix + chunk).ljust(inner_width)
-                rows.append(row[:inner_width])
-
-        rows: List[str] = []
-        add_block(rows, f" {self._t('DOMAIN')}: ", path_text, max_lines=2)
-        add_block(rows, " Time: ", f"{start_time} → {finish_time}", max_lines=1)
-        add_block(rows, " Duration: ", duration_value, max_lines=1)
-        add_block(rows, f" {self._t('DESCRIPTION')}: ", desc, max_lines=2)
-        legend_text = "◉=Done/In Progress | ◎=Backlog | %=progress | Σ=subtasks | ?=help" + scroll_info
-        add_block(rows, " Legend: ", legend_text, max_lines=1)
-        while len(rows) < 7:
-            rows.append(" " * inner_width)
-
-        border = "+" + "-" * (inner_width + 2) + "+"
-        parts: List[Tuple[str, str]] = []
-        parts.append(("class:border", border + "\n"))
-        for idx, row in enumerate(rows):
-            parts.append(("class:border", "| "))
-            parts.append(("class:text", row))
-            parts.append(("class:border", " |\n"))
-        parts.append(("class:border", border))
-        return FormattedText(parts)
+        return build_footer_text(self)
 
     def get_body_content(self) -> FormattedText:
         """Returns content for main body - either task list or detail view."""

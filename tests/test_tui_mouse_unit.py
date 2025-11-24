@@ -73,6 +73,23 @@ def test_scroll_with_shift_changes_horizontal():
     assert tui.horizontal_offset == 5
 
 
+def test_scroll_with_shift_up_clamps_left():
+    class TUI:
+        horizontal_offset = 2
+        editing_mode = False
+        detail_mode = False
+        filtered_tasks = []
+
+        def move_vertical_selection(self, delta):
+            raise AssertionError("vertical move should not happen")
+
+    tui = TUI()
+    tui_mouse.handle_body_mouse(
+        tui, _mouse(MouseEventType.SCROLL_UP, modifiers=(MouseModifier.SHIFT,))
+    )
+    assert tui.horizontal_offset == 0
+
+
 def test_detail_click_selects_and_opens():
     calls = []
 
@@ -118,4 +135,3 @@ def test_list_click_selects_and_opens():
     tui_mouse.handle_body_mouse(tui, _mouse(MouseEventType.MOUSE_UP, y=1))
     tui_mouse.handle_body_mouse(tui, _mouse(MouseEventType.MOUSE_UP, y=1))
     assert calls == ["ensure", "show:B"]
-
