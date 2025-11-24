@@ -82,6 +82,7 @@ from core.desktop.devtools.interface.cli_interactive import (
 )
 from core.desktop.devtools.interface.tui_mouse import handle_body_mouse
 from core.desktop.devtools.interface.tui_settings import build_settings_options
+from core.desktop.devtools.interface.tui_navigation import move_vertical_selection
 from core.desktop.devtools.interface.serializers import subtask_to_dict, task_to_dict
 from core.desktop.devtools.interface.subtask_loader import (
     parse_subtasks_flexible,
@@ -1012,82 +1013,7 @@ class TaskTrackerTUI:
         return handle_body_mouse(self, mouse_event)
 
     def move_vertical_selection(self, delta: int) -> None:
-        """
-        Move selected row/panel pointer by `delta`, clamping to available items.
-
-        Works both in list mode (task rows) and detail mode (subtasks/dependencies).
-        """
-        if getattr(self, "single_subtask_view", None):
-            total = self._subtask_detail_total_lines or 0
-            if total <= 0:
-                return
-            lines = self._formatted_lines(self._subtask_detail_buffer)
-            pinned = min(len(lines), getattr(self, "_subtask_header_lines_count", 0))
-            focusables = self._focusable_line_indices(lines)
-            if focusables:
-                current = self._snap_cursor(self.subtask_detail_cursor, focusables)
-                steps = abs(delta)
-                direction = 1 if delta > 0 else -1
-                for _ in range(steps):
-                    if direction > 0:
-                        next_candidates = [i for i in focusables if i > current]
-                        if not next_candidates:
-                            break
-                        current = next_candidates[0]
-                    else:
-                        prev_candidates = [i for i in reversed(focusables) if i < current]
-                        if not prev_candidates:
-                            break
-                        current = prev_candidates[0]
-                self.subtask_detail_cursor = current
-            # Обеспечиваем видимость курсора в зоне скролла, не скрывая шапку и учитывая индикаторы
-            offset = self.subtask_detail_scroll
-            for _ in range(2):  # максимум два пересчёта, чтобы учесть изменение индикаторов
-                offset, visible_content, _, _, _ = self._calculate_subtask_viewport(
-                    total=len(lines), pinned=pinned, desired_offset=offset
-                )
-                cursor_rel = max(0, self.subtask_detail_cursor - pinned)
-                if cursor_rel < offset:
-                    offset = cursor_rel
-                    continue
-                if cursor_rel >= offset + visible_content:
-                    offset = cursor_rel - visible_content + 1
-                    continue
-                break
-            self.subtask_detail_scroll = offset
-            term_width = self.get_terminal_width()
-            content_width = max(40, term_width - 2)
-            self._render_single_subtask_view(content_width)
-            self.force_render()
-            return
-        if self.detail_mode:
-            if self.current_task_detail and not self.detail_flat_subtasks and self.current_task_detail.subtasks:
-                self._rebuild_detail_flat(self.detail_selected_path)
-            items = self.get_detail_items_count()
-            if items <= 0:
-                self.detail_selected_index = 0
-                return
-            new_index = max(0, min(self.detail_selected_index + delta, items - 1))
-            self.detail_selected_index = new_index
-            self._selected_subtask_entry()
-            # Даже если индекс не изменился (край списка), закрепляем видимость выделения
-            self._ensure_detail_selection_visible(items)
-        elif self.settings_mode:
-            options = self._settings_options()
-            total = len(options)
-            if total <= 0:
-                self.settings_selected_index = 0
-                return
-            self.settings_selected_index = max(0, min(self.settings_selected_index + delta, total - 1))
-            self._ensure_settings_selection_visible(total)
-        else:
-            total = len(self.filtered_tasks)
-            if total <= 0:
-                self.selected_index = 0
-                return
-            self.selected_index = max(0, min(self.selected_index + delta, total - 1))
-            self._ensure_selection_visible()
-        self.force_render()
+        move_vertical_selection(self, delta)
 
     def apply_horizontal_scroll(self, text: str) -> str:
         """Apply horizontal scroll offset to a text line."""
