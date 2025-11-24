@@ -49,5 +49,5 @@ class ContextRoutingTests(unittest.TestCase):
         self.assertEqual(relocated.folder, "phase2/api")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -155,6 +155,19 @@ def _locate_subtask(task: TaskDetail, index: int, path: Optional[str]):
     return task.subtasks[index], None
 
 
+def _subtask_completion_blockers(subtask: SubTask, translator) -> Optional[str]:
+    if subtask.ready_for_completion():
+        return None
+    missing = []
+    if not subtask.criteria_confirmed:
+        missing.append(translator("CHECKPOINT_CRITERIA"))
+    if not subtask.tests_confirmed:
+        missing.append(translator("CHECKPOINT_TESTS"))
+    if not subtask.blockers_resolved:
+        missing.append(translator("CHECKPOINT_BLOCKERS"))
+    return translator("ERR_SUBTASK_CHECKPOINTS").format(items=", ".join(missing))
+
+
 class TaskManager:
     def __init__(
         self,
@@ -393,15 +406,10 @@ class TaskManager:
         st, error = _locate_subtask(task, index, path)
         if error:
             return False, error
-        if completed and not st.ready_for_completion():
-            missing = []
-            if not st.criteria_confirmed:
-                missing.append(self._t("CHECKPOINT_CRITERIA"))
-            if not st.tests_confirmed:
-                missing.append(self._t("CHECKPOINT_TESTS"))
-            if not st.blockers_resolved:
-                missing.append(self._t("CHECKPOINT_BLOCKERS"))
-            return False, self._t("ERR_SUBTASK_CHECKPOINTS").format(items=", ".join(missing))
+        if completed:
+            blocker_msg = _subtask_completion_blockers(st, self._t)
+            if blocker_msg:
+                return False, blocker_msg
         st.completed = completed
         task.update_status_from_progress()
         self.save_task(task)

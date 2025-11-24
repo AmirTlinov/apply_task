@@ -58,7 +58,7 @@ from core.desktop.devtools.application.context import (
     normalize_task_id,
     parse_smart_title,
 )
-from core.desktop.devtools.application.recommendations import next_recommendations, suggest_tasks, quick_overview
+from core.desktop.devtools.application.recommendations import next_recommendations
 from application.ports import TaskRepository
 from infrastructure.file_repository import FileTaskRepository
 from infrastructure.task_file_parser import TaskFileParser
@@ -66,7 +66,8 @@ from infrastructure.projects_sync_service import ProjectsSyncService
 from application.sync_service import SyncService
 from util.sync_status import sync_status_fragments
 from util.responsive import ColumnLayout, ResponsiveLayoutManager, detail_content_width
-from core.desktop.devtools.interface.cli_commands import CliDeps, cmd_list as _cmd_list, cmd_show as _cmd_show, cmd_analyze as _cmd_analyze, cmd_next as _cmd_next, cmd_suggest as _cmd_suggest, cmd_quick as _cmd_quick
+from core.desktop.devtools.interface.cli_commands import CliDeps, cmd_list as _cmd_list, cmd_show as _cmd_show, cmd_analyze as _cmd_analyze
+from core.desktop.devtools.interface.cli_macros_extended import cmd_update, cmd_ok, cmd_note, cmd_suggest, cmd_quick
 from core.desktop.devtools.interface.cli_subtask import cmd_subtask as _cmd_subtask
 from core.desktop.devtools.interface.cli_create import cmd_create as _cmd_create, cmd_smart_create as _cmd_smart_create
 from core.desktop.devtools.interface.cli_checkpoint import cmd_bulk as _cmd_bulk, cmd_checkpoint as _cmd_checkpoint
@@ -2024,52 +2025,6 @@ def cmd_create_guided(args) -> int:
     return 0
 
 
-def cmd_update(args) -> int:
-    # Бекст совместимость: допускаем оба порядка аргументов
-    status = None
-    task_id = None
-    last_id, last_domain = get_last_task()
-    for candidate in (args.arg1, args.arg2):
-        if candidate and candidate.upper() in ("OK", "WARN", "FAIL"):
-            status = candidate.upper()
-        elif candidate:
-            task_id = normalize_task_id(candidate)
-
-    if status is None:
-        return structured_error("update", translate("ERR_STATUS_REQUIRED"))
-
-    if task_id is None:
-        task_id = last_id
-        if not task_id:
-            return structured_error("update", translate("ERR_NO_TASK_AND_LAST"))
-
-    manager = TaskManager()
-    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None)) or last_domain or ""
-    ok, error = manager.update_task_status(task_id, status, domain)
-    if ok:
-        save_last_task(task_id, domain)
-        detail = manager.load_task(task_id, domain)
-        payload = {"task": task_to_dict(detail, include_subtasks=True) if detail else {"id": task_id}}
-        return structured_response(
-            "update",
-            status=status,
-            message=translate("MSG_STATUS_UPDATED", task_id=task_id),
-            payload=payload,
-            summary=f"{task_id} → {status}",
-        )
-
-    payload = {"task_id": task_id, "domain": domain}
-    if error and error.get("code") == "not_found":
-        return structured_error("update", error.get("message", translate("ERR_TASK_NOT_FOUND", task_id=task_id)), payload=payload)
-    return structured_response(
-        "update",
-        status="ERROR",
-        message=(error or {}).get("message", translate("ERR_STATUS_NOT_UPDATED")),
-        payload=payload,
-        exit_code=1,
-    )
-
-
 def cmd_status_set(args) -> int:
     """Единообразная установка статуса (OK/WARN/FAIL) — терминология TUI=CLI."""
     manager = TaskManager()
@@ -2180,92 +2135,6 @@ def cmd_add_dependency(args) -> int:
 
 def cmd_subtask(args) -> int:
     return _cmd_subtask(args)
-
-
-def cmd_ok(args) -> int:
-    manager = TaskManager()
-    try:
-        task_id, domain = resolve_task_reference(
-            getattr(args, "task_id", None),
-            getattr(args, "domain", None),
-            getattr(args, "phase", None),
-            getattr(args, "component", None),
-        )
-    except ValueError as exc:
-        return structured_error("ok", str(exc))
-    index = args.index
-    checkpoints = [
-        ("criteria", args.criteria_note, "criteria_done"),
-        ("tests", args.tests_note, "tests_done"),
-        ("blockers", args.blockers_note, "blockers_done"),
-    ]
-    for checkpoint, note, action in checkpoints:
-        ok, msg = manager.update_subtask_checkpoint(task_id, index, checkpoint, True, note or "", domain)
-        if not ok:
-            payload = {"task_id": task_id, "checkpoint": checkpoint, "index": index}
-            if msg == "not_found":
-                return structured_error("ok", f"Задача {task_id} не найдена", payload=payload)
-            if msg == "index":
-                return structured_error("ok", translate("ERR_SUBTASK_INDEX"), payload=payload)
-            return structured_error("ok", msg or "Не удалось подтвердить чекпоинт", payload=payload)
-    ok, msg = manager.set_subtask(task_id, index, True, domain)
-    if not ok:
-        payload = {"task_id": task_id, "index": index}
-        return structured_error("ok", msg or "Не удалось завершить подзадачу", payload=payload)
-    detail = manager.load_task(task_id, domain)
-    save_last_task(task_id, domain)
-    payload = {
-        "task": task_to_dict(detail, include_subtasks=True) if detail else {"id": task_id},
-        "subtask_index": index,
-    }
-    if detail and 0 <= index < len(detail.subtasks):
-        payload["subtask"] = subtask_to_dict(detail.subtasks[index])
-    return structured_response(
-        "ok",
-        status="OK",
-        message=f"Подзадача {index} полностью подтверждена и закрыта",
-        payload=payload,
-        summary=f"{task_id} subtask#{index} OK",
-    )
-
-
-def cmd_note(args) -> int:
-    manager = TaskManager()
-    try:
-        task_id, domain = resolve_task_reference(
-            getattr(args, "task_id", None),
-            getattr(args, "domain", None),
-            getattr(args, "phase", None),
-            getattr(args, "component", None),
-        )
-    except ValueError as exc:
-        return structured_error("note", str(exc))
-    value = not args.undo
-    ok, msg = manager.update_subtask_checkpoint(task_id, args.index, args.checkpoint, value, args.note or "", domain)
-    if ok:
-        detail = manager.load_task(task_id, domain)
-        save_last_task(task_id, domain)
-        payload = {
-            "task": task_to_dict(detail, include_subtasks=True) if detail else {"id": task_id},
-            "checkpoint": args.checkpoint,
-            "index": args.index,
-            "state": "DONE" if value else "TODO",
-        }
-        if detail and 0 <= args.index < len(detail.subtasks):
-            payload["subtask"] = subtask_to_dict(detail.subtasks[args.index])
-        return structured_response(
-            "note",
-            status="OK",
-            message=f"{args.checkpoint.capitalize()} {'подтверждены' if value else 'сброшены'}",
-            payload=payload,
-            summary=f"{task_id} {args.checkpoint} idx {args.index}",
-        )
-    payload = {"task_id": task_id, "checkpoint": args.checkpoint, "index": args.index}
-    if msg == "not_found":
-        return structured_error("note", f"Задача {task_id} не найдена", payload=payload)
-    if msg == "index":
-        return structured_error("note", translate("ERR_SUBTASK_INDEX"), payload=payload)
-    return structured_error("note", msg or "Операция не выполнена", payload=payload)
 
 
 def cmd_bulk(args) -> int:
@@ -2617,67 +2486,6 @@ def cmd_lint(args) -> int:
         message="Lint OK",
         payload=payload,
         summary="Lint clean",
-    )
-
-
-def cmd_suggest(args) -> int:
-    manager = TaskManager()
-    folder = getattr(args, "folder", "") or ""
-    domain = derive_domain_explicit(getattr(args, "domain", "") or folder, getattr(args, "phase", None), getattr(args, "component", None))
-    filters = {
-        "folder": folder or "",
-        "domain": domain or "",
-        "phase": getattr(args, "phase", None) or "",
-        "component": getattr(args, "component", None) or "",
-    }
-    tasks = manager.list_tasks(domain, skip_sync=True)
-    payload, _ranked = suggest_tasks(tasks, filters, remember=save_last_task, serializer=task_to_dict)
-    filter_hint = f" (folder='{folder or domain or '-'}', phase='{filters['phase'] or '-'}', component='{filters['component'] or '-'}')"
-    if not payload["suggestions"]:
-        return structured_response(
-            "suggest",
-            status="OK",
-            message="Все задачи завершены" + filter_hint,
-            payload=payload,
-            summary="Нет задач для рекомендации",
-        )
-    return structured_response(
-        "suggest",
-        status="OK",
-        message="Рекомендации сформированы" + filter_hint,
-        payload=payload,
-        summary=f"{len(payload['suggestions'])} рекомендаций",
-    )
-
-
-def cmd_quick(args) -> int:
-    """Быстрый обзор: топ-3 незавершённых задачи."""
-    manager = TaskManager()
-    folder = getattr(args, "folder", "") or ""
-    domain = derive_domain_explicit(getattr(args, "domain", "") or folder, getattr(args, "phase", None), getattr(args, "component", None))
-    filters = {
-        "folder": folder or "",
-        "domain": domain or "",
-        "phase": getattr(args, "phase", None) or "",
-        "component": getattr(args, "component", None) or "",
-    }
-    tasks = manager.list_tasks(domain, skip_sync=True)
-    payload, top = quick_overview(tasks, filters, remember=save_last_task, serializer=task_to_dict)
-    filter_hint = f" (folder='{folder or domain or '-'}', phase='{filters['phase'] or '-'}', component='{filters['component'] or '-'}')"
-    if not payload["top"]:
-        return structured_response(
-            "quick",
-            status="OK",
-            message="Все задачи выполнены" + filter_hint,
-            payload=payload,
-            summary="Нет задач",
-        )
-    return structured_response(
-        "quick",
-        status="OK",
-        message="Быстрый обзор top-3" + filter_hint,
-        payload=payload,
-        summary=f"Top-{len(top)} задач",
     )
 
 

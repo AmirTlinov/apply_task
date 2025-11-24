@@ -337,6 +337,26 @@ def test_set_subtask_index_out_of_bounds(tmp_path):
     assert ok is False and err == "index"
 
 
+def test_set_subtask_blockers_message(tmp_path):
+    manager = TaskManager(tasks_dir=tmp_path / ".tasks", sync_service=DummySync(enabled=False))
+    st = SubTask(False, "child", ["c"], ["t"], ["b"], criteria_confirmed=False, tests_confirmed=True, blockers_resolved=True)
+    task = TaskDetail(id="TASK-025", title="Task", status="FAIL", created="2025", updated="2025")
+    task.subtasks.append(st)
+    manager.repo.save(task)
+    ok, err = manager.set_subtask("TASK-025", 0, True)
+    assert ok is False and err
+
+
+def test_set_subtask_tests_and_blockers_missing(tmp_path):
+    manager = TaskManager(tasks_dir=tmp_path / ".tasks", sync_service=DummySync(enabled=False))
+    st = SubTask(False, "child", ["c"], ["t"], ["b"], criteria_confirmed=True, tests_confirmed=False, blockers_resolved=False)
+    task = TaskDetail(id="TASK-026", title="Task", status="FAIL", created="2025", updated="2025")
+    task.subtasks.append(st)
+    manager.repo.save(task)
+    ok, err = manager.set_subtask("TASK-026", 0, True)
+    assert ok is False and err
+
+
 def test_update_subtask_checkpoint_unknown(tmp_path):
     manager = TaskManager(tasks_dir=tmp_path / ".tasks", sync_service=DummySync(enabled=False))
     task = TaskDetail(
@@ -562,3 +582,27 @@ def test_clean_tasks_status_and_phase(monkeypatch):
     repo.save(t2)
     matched, removed = manager.clean_tasks(tag="a", status="FAIL", phase="p")
     assert matched == ["TASK-050"] and removed == 1
+
+
+def test_load_config_invalid_yaml(monkeypatch, tmp_path):
+    cfg = tmp_path / ".apply_task_projects.yaml"
+    cfg.write_text(": bad: [", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert TaskManager.load_config() == {}
+
+
+def test_next_id_fallback_reads_files(monkeypatch, tmp_path):
+    tasks_dir = tmp_path / ".tasks"
+    tasks_dir.mkdir()
+    (tasks_dir / "TASK-003.task").write_text("x", encoding="utf-8")
+    (tasks_dir / "TASK-bad.task").write_text("x", encoding="utf-8")
+
+    class BrokenRepo(FileTaskRepository):
+        def __init__(self, base):
+            super().__init__(base)
+
+        def next_id(self):
+            raise Exception("boom")
+
+    manager = TaskManager(tasks_dir=tasks_dir, repository=BrokenRepo(tasks_dir), sync_service=DummySync(enabled=False))
+    assert manager._next_id() == "TASK-004"

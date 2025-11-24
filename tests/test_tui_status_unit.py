@@ -50,6 +50,8 @@ def test_build_status_text_basic():
     assert "ALL" in text
     # ensure settings button exists
     assert any("SETTINGS" in frag[1] for frag in result)
+    tui.exit_detail_view()
+    tui.open_settings_dialog()
 
 
 def test_build_status_text_filter_flash(monkeypatch):
@@ -91,6 +93,8 @@ def test_build_status_text_filter_flash(monkeypatch):
     result = build_status_text(tui)
     text = "".join(fragment[1] for fragment in result)
     assert "IN PROGRESS" in text
+    tui.exit_detail_view()
+    tui.open_settings_dialog()
 
 
 def test_build_status_text_spinner_and_status_message_clear():
@@ -137,6 +141,8 @@ def test_build_status_text_spinner_and_status_message_clear():
     assert tui.status_message == ""
     text = "".join(fragment[1] for fragment in result)
     assert "Loading" in text and "*" in text
+    tui.exit_detail_view()
+    tui.open_settings_dialog()
 
 
 def test_build_status_text_width_fallback_and_settings_handler():
@@ -181,6 +187,8 @@ def test_build_status_text_width_fallback_and_settings_handler():
     settings_handler(SimpleNamespace(event_type=MouseEventType.MOUSE_UP, button=MouseButton.LEFT))
     text = "".join(f[1] for f in result)
     assert "SETTINGS" in text
+    tui.exit_detail_view()
+    tui.open_settings_dialog()
 
 
 def test_status_handlers_return_not_implemented():
@@ -217,6 +225,8 @@ def test_status_handlers_return_not_implemented():
     assert back_handler(SimpleNamespace(event_type=MouseEventType.MOUSE_UP, button=MouseButton.RIGHT)) is NotImplemented
     settings_handler = res[-1][2]
     assert settings_handler(SimpleNamespace(event_type=MouseEventType.MOUSE_UP, button=MouseButton.RIGHT)) is NotImplemented
+    tui.exit_detail_view()
+    tui.open_settings_dialog()
 
 
 def test_status_message_displayed_when_not_expired():
@@ -257,6 +267,8 @@ def test_status_message_displayed_when_not_expired():
     tui = DummyTUI()
     text = "".join(part[1] for part in build_status_text(tui))
     assert "msg" in text
+    tui.exit_detail_view()
+    tui.open_settings_dialog()
 
 
 def test_status_message_expired_clears():
@@ -297,6 +309,94 @@ def test_status_message_expired_clears():
     tui = Dummy()
     build_status_text(tui)
     assert tui.status_message == ""
+    tui.exit_detail_view()
+    tui.open_settings_dialog()
+
+
+def test_status_filter_flash_changes_on_new_filter():
+    class Dummy(SimpleNamespace):
+        def __init__(self):
+            super().__init__(
+                filtered_tasks=[],
+                domain_filter="",
+                phase_filter=None,
+                component_filter=None,
+                current_filter=SimpleNamespace(value=["FAIL"]),
+                _filter_flash_until=0,
+                spinner_message="",
+                status_message="",
+                status_message_expires=0,
+                detail_mode=False,
+                single_subtask_view=False,
+                _last_filter_value="ALL",
+            )
+
+        def _t(self, key, **kwargs):
+            return key
+
+        def _sync_indicator_fragments(self, flash=False):
+            return []
+
+        def _spinner_frame(self):
+            return None
+
+        def get_terminal_width(self):
+            return 80
+
+        def exit_detail_view(self):
+            pass
+
+        def open_settings_dialog(self):
+            pass
+
+    tui = Dummy()
+    build_status_text(tui)
+    assert tui._filter_flash_until > 0
+    tui.exit_detail_view()
+    tui.open_settings_dialog()
+
+
+def test_status_message_shown_with_flash_and_spinner():
+    class Dummy(SimpleNamespace):
+        def __init__(self):
+            super().__init__(
+                filtered_tasks=[SimpleNamespace(status=SimpleNamespace(name="OK", value=0))],
+                domain_filter="",
+                phase_filter=None,
+                component_filter=None,
+                current_filter=None,
+                _filter_flash_until=time.time() + 1,
+                spinner_message="spin",
+                status_message="msg",
+                status_message_expires=time.time() + 1,
+                detail_mode=False,
+                single_subtask_view=False,
+                _last_filter_value="ALL",
+            )
+
+        def _t(self, key, **kwargs):
+            return key
+
+        def _sync_indicator_fragments(self, flash=False):
+            return []
+
+        def _spinner_frame(self):
+            return "*"
+
+        def get_terminal_width(self):
+            return 200
+
+        def exit_detail_view(self):
+            pass
+
+        def open_settings_dialog(self):
+            pass
+
+    tui = Dummy()
+    text = "".join(t[1] for t in build_status_text(tui))
+    assert "spin" in text and "msg" in text and "BACKLOG" not in text
+    tui.exit_detail_view()
+    tui.open_settings_dialog()
 
 
 def test_status_filter_flash_sets_flag():
@@ -339,3 +439,5 @@ def test_status_filter_flash_sets_flag():
     res = build_status_text(tui)
     assert tui._filter_flash_until > time.time()
     assert res[0][1] == "[BACK] "
+    tui.exit_detail_view()
+    tui.open_settings_dialog()
