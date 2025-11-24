@@ -69,7 +69,27 @@ from util.sync_status import sync_status_fragments
 from util.responsive import ColumnLayout, ResponsiveLayoutManager, detail_content_width
 from core.desktop.devtools.interface.cli_commands import CliDeps, cmd_list as _cmd_list, cmd_show as _cmd_show, cmd_analyze as _cmd_analyze, cmd_next as _cmd_next, cmd_suggest as _cmd_suggest, cmd_quick as _cmd_quick
 from core.desktop.devtools.interface.cli_subtask import cmd_subtask as _cmd_subtask
+from core.desktop.devtools.interface.cli_create import cmd_create as _cmd_create, cmd_smart_create as _cmd_smart_create
 from core.desktop.devtools.interface.serializers import subtask_to_dict, task_to_dict
+from core.desktop.devtools.interface.subtask_loader import (
+    SubtaskParseError,
+    parse_subtasks_flexible,
+    validate_flagship_subtasks,
+    load_subtasks_source,
+    _load_input_source,
+)
+from core.desktop.devtools.interface.subtask_validation import (
+    CHECKLIST_SECTIONS,
+    validate_subtasks_coverage,
+    validate_subtasks_quality,
+    validate_subtasks_structure,
+)
+from core.desktop.devtools.interface.subtask_loader import (
+    SubtaskParseError,
+    parse_subtasks_flexible,
+    validate_flagship_subtasks,
+    load_subtasks_source,
+)
 
 import projects_sync
 from projects_sync import (
@@ -141,31 +161,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 # Domain entities SubTask/TaskDetail импортируются из core.
 
 
-def _load_input_source(raw: str, label: str) -> str:
-    """Load text payload from string, file, or STDIN."""
-    source = (raw or "").strip()
-    if not source:
-        return source
-    if source == "-":
-        data = sys.stdin.read()
-        if not data.strip():
-            raise SubtaskParseError(f"STDIN is empty: provide {label}")
-        return data
-    if source.startswith("@"):
-        path_str = source[1:].strip()
-        if not path_str:
-            raise SubtaskParseError(f"Specify path to {label} after '@'")
-        file_path = Path(path_str).expanduser()
-        if not file_path.exists():
-            raise SubtaskParseError(f"File not found: {file_path}")
-        return file_path.read_text(encoding="utf-8")
-    return source
-
-
-def _load_subtasks_source(raw: str) -> str:
-    return _load_input_source(raw, translate("LABEL_SUBTASKS_JSON"))
-
-
 @dataclass
 class Task:
     name: str
@@ -234,179 +229,14 @@ CHECKLIST_SECTIONS = [
 ]
 
 
-def validate_subtasks_coverage(subtasks: List[SubTask]) -> Tuple[bool, List[str]]:
-    """Checks that all required checklist sections are covered with substantive content."""
-    present: Dict[str, SubTask] = {}
-    for st in subtasks:
-        low = st.title.lower()
-        for name, keywords, *_ in CHECKLIST_SECTIONS:
-            if any(k in low for k in keywords):
-                # first match wins to keep deterministic error reporting
-                present.setdefault(name, st)
-
-    missing = [name for name, *_ in CHECKLIST_SECTIONS if name not in present]
-    return not missing, missing
-
-
-def validate_subtasks_quality(subtasks: List[SubTask]) -> Tuple[bool, List[str]]:
-    """Проверяет, что каждая подзадача детализирована: есть двоеточия, ключевые блоки, достаточная длина."""
-    issues: List[str] = []
-    present: Dict[str, SubTask] = {}
-    for _, st in _flatten_subtasks(subtasks):
-        low = st.title.lower()
-        for name, keywords, _, anchors in CHECKLIST_SECTIONS:
-            if any(k in low for k in keywords) and any(a in low for a in anchors):
-                # сохраняем самую подробную подзадачу для секции
-                if name not in present or len(st.title) > len(present[name].title):
-                    present[name] = st
-
-    for name, _, desc, anchors in CHECKLIST_SECTIONS:
-        st = present.get(name)
-        if not st:
-            continue
-        text = st.title.strip()
-        long_enough = len(text) >= 30
-        has_colon = ":" in text
-        has_any_anchor = any(a.lower() in text.lower() for a in anchors)
-        if not (long_enough and has_colon and has_any_anchor):
-            issues.append(f"{name}: добавь детали (>=30 символов, включи ':' и ключевые слова из темы)")
-    return len(issues) == 0, issues
-
-
-def validate_subtasks_structure(subtasks: List[SubTask]) -> Tuple[bool, List[str]]:
-    """Каждая подзадача должна содержать критерии, тесты и блокеры."""
-    issues: List[str] = []
-    for idx, (_, st) in enumerate(_flatten_subtasks(subtasks), 1):
-        missing = []
-        if not st.success_criteria:
-            missing.append("критерии")
-        if not st.tests:
-            missing.append("тесты")
-        if not st.blockers:
-            missing.append("блокеры")
-        if missing:
-            issues.append(f"Подзадача {idx}: добавь {', '.join(missing)}")
-    return len(issues) == 0, issues
-
-
 def validate_flagship_subtasks(subtasks: List[SubTask]) -> Tuple[bool, List[str]]:
-    """
-    Flagship-валидация: каждая подзадача должна иметь:
-    - Критерии выполнения (success_criteria)
-    - Тесты для проверки (tests)
-    - Блокеры/зависимости и план снятия блокеров
-    - Быть атомарной (не содержать составных действий)
-    - Минимум 20 символов в описании
-    """
-    flat = _flatten_subtasks(subtasks)
-    if not flat:
-        return False, [translate("ERR_TASK_NEEDS_SUBTASKS")]
-
-    if len(flat) < 3:
-        return False, [translate("ERR_SUBTASKS_MIN", count=len(flat))]
-
-    all_issues = []
-    for idx, (_, st) in enumerate(flat, 1):
-        valid, issues = st.is_valid_flagship()
-        if not valid:
-            all_issues.extend([translate("ERR_SUBTASK_PREFIX", idx=idx, issue=issue) for issue in issues])
-
-    return len(all_issues) == 0, all_issues
+    from core.desktop.devtools.interface.subtask_loader import validate_flagship_subtasks as _vf
+    return _vf(subtasks)
 
 
 # ============================================================================
 # FLEXIBLE SUBTASK PARSING (JSON ONLY)
 # ============================================================================
-
-
-class SubtaskParseError(Exception):
-    """Ошибка парсинга подзадач"""
-    pass
-
-
-def _to_bool(value) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in ("true", "1", "yes", "y", "ok", "done", "ready", "готов", "готово", "+")
-    return bool(value)
-
-
-def parse_subtasks_json(raw: str) -> List[SubTask]:
-    """Парсинг подзадач из JSON формата"""
-    try:
-        data = json.loads(raw)
-        if not isinstance(data, list):
-            raise SubtaskParseError(translate("ERR_JSON_ARRAY_REQUIRED"))
-
-        subtasks = []
-        for idx, item in enumerate(data, 1):
-            if not isinstance(item, dict):
-                raise SubtaskParseError(translate("ERR_JSON_ELEMENT_OBJECT", idx=idx))
-
-            title = item.get("title", "")
-            if not title:
-                raise SubtaskParseError(translate("ERR_JSON_ELEMENT_TITLE", idx=idx))
-
-            criteria = item.get("criteria", item.get("success_criteria", []))
-            tests = item.get("tests", [])
-            blockers = item.get("blockers", [])
-
-            if not isinstance(criteria, list):
-                criteria = [str(criteria)]
-            if not isinstance(tests, list):
-                tests = [str(tests)]
-            if not isinstance(blockers, list):
-                blockers = [str(blockers)]
-
-            if not criteria:
-                raise SubtaskParseError(translate("ERR_JSON_ELEMENT_CRITERIA", idx=idx))
-            if not tests:
-                raise SubtaskParseError(translate("ERR_JSON_ELEMENT_TESTS", idx=idx))
-            if not blockers:
-                raise SubtaskParseError(translate("ERR_JSON_ELEMENT_BLOCKERS", idx=idx))
-
-            criteria_notes = item.get("criteria_notes", [])
-            tests_notes = item.get("tests_notes", [])
-            blockers_notes = item.get("blockers_notes", [])
-            if not isinstance(criteria_notes, list):
-                criteria_notes = [str(criteria_notes)]
-            if not isinstance(tests_notes, list):
-                tests_notes = [str(tests_notes)]
-            if not isinstance(blockers_notes, list):
-                blockers_notes = [str(blockers_notes)]
-
-            st = SubTask(
-                False,
-                title,
-                criteria,
-                tests,
-                blockers,
-                criteria_confirmed=_to_bool(item.get("criteria_confirmed", False)),
-                tests_confirmed=_to_bool(item.get("tests_confirmed", False)),
-                blockers_resolved=_to_bool(item.get("blockers_resolved", False)),
-                criteria_notes=[str(n).strip() for n in criteria_notes if str(n).strip()],
-                tests_notes=[str(n).strip() for n in tests_notes if str(n).strip()],
-                blockers_notes=[str(n).strip() for n in blockers_notes if str(n).strip()],
-            )
-            subtasks.append(st)
-
-        return subtasks
-    except json.JSONDecodeError as e:
-        raise SubtaskParseError(translate("ERR_JSON_INVALID", error=e))
-
-
-def parse_subtasks_flexible(raw: str) -> List[SubTask]:
-    """Парсинг подзадач в единственном поддерживаемом формате: JSON-массив объектов"""
-    raw = raw.strip()
-
-    if not raw:
-        return []
-
-    try:
-        return parse_subtasks_json(raw)
-    except SubtaskParseError as e:
-        raise SubtaskParseError(translate("ERR_JSON_FORMAT_HINT", error=e))
 
 
 # ============================================================================
@@ -493,16 +323,6 @@ def subtask_flags(st: SubTask) -> Dict[str, bool]:
         "tests": st.tests_confirmed,
         "blockers": st.blockers_resolved,
     }
-
-
-def load_template(kind: str, manager: TaskManager) -> Tuple[str, str]:
-    cfg = manager.config.get("templates", {})
-    tpl = cfg.get(kind, cfg.get("default", {})) or {}
-    desc = tpl.get("description", "")
-    tests = tpl.get("tests", "")
-    if not desc and not tests:
-        return "TBD", "acceptance"
-    return desc, tests
 
 
 # ============================================================================
@@ -2929,176 +2749,11 @@ def cmd_show(args) -> int:
 
 
 def cmd_create(args) -> int:
-    manager = TaskManager()
-    args.parent = normalize_task_id(args.parent)
-    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
-
-    def fail(message: str, payload: Optional[Dict[str, Any]] = None) -> int:
-        if getattr(args, "validate_only", False):
-            return validation_response("create", False, message, payload)
-        return structured_error("create", message, payload=payload)
-
-    def success_preview(task: TaskDetail, message: str = "") -> int:
-        task_snapshot = task_to_dict(task, include_subtasks=True)
-        payload = {"task": task_snapshot}
-        msg = message or translate("MSG_VALIDATION_PASSED")
-        return validation_response("create", True, msg, payload)
-
-    task = manager.create_task(
-        args.title,
-        status=args.status,
-        priority=args.priority,
-        parent=args.parent,
-        domain=domain,
-        phase=args.phase or "",
-        component=args.component or "",
-    )
-    if not args.description or not args.description.strip() or args.description.strip().upper() == "TBD":
-        return fail(translate("ERR_DESCRIPTION_REQUIRED"))
-    task.description = args.description.strip()
-    task.context = args.context or ""
-    if args.tags:
-        task.tags = [t.strip() for t in args.tags.split(",") if t.strip()]
-    if args.subtasks:
-        try:
-            subtasks_payload = _load_subtasks_source(args.subtasks)
-            task.subtasks = parse_subtasks_flexible(subtasks_payload)
-        except SubtaskParseError as e:
-            return fail(str(e))
-    if args.dependencies:
-        for dep in args.dependencies.split(","):
-            dep = dep.strip()
-            if dep:
-                task.dependencies.append(dep)
-    if args.next_steps:
-        for step in args.next_steps.split(";"):
-            if step.strip():
-                task.next_steps.append(step.strip())
-    if args.tests:
-        for t in args.tests.split(";"):
-            if t.strip():
-                task.success_criteria.append(t.strip())
-    if not task.success_criteria:
-        return fail(translate("ERR_TESTS_REQUIRED"))
-    if args.risks:
-        for r in args.risks.split(";"):
-            if r.strip():
-                task.risks.append(r.strip())
-    if not task.risks:
-        return fail(translate("ERR_RISKS_REQUIRED"))
-
-    # Flagship-валидация подзадач
-    flagship_ok, flagship_issues = validate_flagship_subtasks(task.subtasks)
-    if not flagship_ok:
-        payload = {
-            "issues": flagship_issues,
-            "requirements": [
-                translate("REQ_MIN_SUBTASKS"),
-                translate("REQ_MIN_TITLE"),
-                translate("REQ_EXPLICIT_CHECKPOINTS"),
-                translate("REQ_ATOMIC"),
-            ],
-        }
-        return fail(translate("ERR_FLAGSHIP_SUBTASKS"), payload=payload)
-
-    task.update_status_from_progress()
-    if getattr(args, "validate_only", False):
-        return success_preview(task)
-    manager.save_task(task)
-    save_last_task(task.id, task.domain)
-    payload = {"task": task_to_dict(task, include_subtasks=True)}
-    return structured_response(
-        "create",
-        status="OK",
-        message=translate("MSG_TASK_CREATED", task_id=task.id),
-        payload=payload,
-        summary=f"{task.id}: {task.title}",
-    )
+    return _cmd_create(args)
 
 
 def cmd_smart_create(args) -> int:
-    if not args.parent:
-        return structured_error("task", translate("ERR_PARENT_REQUIRED"))
-    manager = TaskManager()
-    title, auto_tags, auto_deps = parse_smart_title(args.title)
-    args.parent = normalize_task_id(args.parent)
-
-    def fail(message: str, payload: Optional[Dict[str, Any]] = None) -> int:
-        if getattr(args, "validate_only", False):
-            return validation_response("task", False, message, payload)
-        return structured_error("task", message, payload=payload)
-
-    def success_preview(task: TaskDetail, message: str = "") -> int:
-        payload = {"task": task_to_dict(task, include_subtasks=True)}
-        msg = message or translate("MSG_VALIDATION_PASSED")
-        return validation_response("task", True, msg, payload)
-
-    domain = derive_domain_explicit(getattr(args, "domain", ""), getattr(args, "phase", None), getattr(args, "component", None))
-    task = manager.create_task(
-        title,
-        status=args.status,
-        priority=args.priority,
-        parent=args.parent,
-        domain=domain,
-        phase=args.phase or "",
-        component=args.component or "",
-    )
-    if not args.description or not args.description.strip() or args.description.strip().upper() == "TBD":
-        return fail(translate("ERR_DESCRIPTION_REQUIRED"))
-    task.description = args.description.strip()
-    task.context = args.context or ""
-    task.tags = [t.strip() for t in args.tags.split(",")] if args.tags else auto_tags
-    deps = [d.strip() for d in args.dependencies.split(",")] if args.dependencies else auto_deps
-    task.dependencies = deps
-
-    template_desc, template_tests = load_template(task.tags[0] if task.tags else "default", manager)
-    if not task.description:
-        task.description = template_desc
-    if args.tests:
-        task.success_criteria = [t.strip() for t in args.tests.split(";") if t.strip()]
-    elif template_tests:
-        task.success_criteria = [template_tests]
-    if not task.success_criteria:
-        return fail(translate("ERR_TESTS_REQUIRED"))
-    if args.risks:
-        task.risks = [r.strip() for r in args.risks.split(";") if r.strip()]
-    if not task.risks:
-        return fail(translate("ERR_RISKS_REQUIRED"))
-
-    if args.subtasks:
-        try:
-            subtasks_payload = _load_subtasks_source(args.subtasks)
-            task.subtasks = parse_subtasks_flexible(subtasks_payload)
-        except SubtaskParseError as e:
-            return fail(str(e))
-
-    # Flagship-валидация подзадач
-    flagship_ok, flagship_issues = validate_flagship_subtasks(task.subtasks)
-    if not flagship_ok:
-        payload = {
-            "issues": flagship_issues,
-            "requirements": [
-                translate("REQ_MIN_SUBTASKS"),
-                translate("REQ_MIN_TITLE"),
-                translate("REQ_EXPLICIT_CHECKPOINTS"),
-                translate("REQ_ATOMIC"),
-            ],
-        }
-        return fail(translate("ERR_FLAGSHIP_SUBTASKS"), payload=payload)
-
-    task.update_status_from_progress()
-    if getattr(args, "validate_only", False):
-        return success_preview(task)
-    manager.save_task(task)
-    save_last_task(task.id, task.domain)
-    payload = {"task": task_to_dict(task, include_subtasks=True)}
-    return structured_response(
-        "task",
-        status="OK",
-        message=translate("MSG_TASK_CREATED", task_id=task.id),
-        payload=payload,
-        summary=f"{task.id}: {task.title}",
-    )
+    return _cmd_smart_create(args)
 
 
 def cmd_create_guided(args) -> int:
