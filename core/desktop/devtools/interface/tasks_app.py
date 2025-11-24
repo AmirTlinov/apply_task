@@ -68,6 +68,8 @@ from application.sync_service import SyncService
 from util.sync_status import sync_status_fragments
 from util.responsive import ColumnLayout, ResponsiveLayoutManager, detail_content_width
 from core.desktop.devtools.interface.cli_commands import CliDeps, cmd_list as _cmd_list, cmd_show as _cmd_show, cmd_analyze as _cmd_analyze, cmd_next as _cmd_next, cmd_suggest as _cmd_suggest, cmd_quick as _cmd_quick
+from core.desktop.devtools.interface.cli_subtask import cmd_subtask as _cmd_subtask
+from core.desktop.devtools.interface.serializers import subtask_to_dict, task_to_dict
 
 import projects_sync
 from projects_sync import (
@@ -162,56 +164,6 @@ def _load_input_source(raw: str, label: str) -> str:
 
 def _load_subtasks_source(raw: str) -> str:
     return _load_input_source(raw, translate("LABEL_SUBTASKS_JSON"))
-
-
-def subtask_to_dict(subtask: SubTask) -> Dict[str, Any]:
-    """Структурированное представление подзадачи."""
-    return {
-        "title": subtask.title,
-        "completed": subtask.completed,
-        "success_criteria": list(subtask.success_criteria),
-        "tests": list(subtask.tests),
-        "blockers": list(subtask.blockers),
-        "criteria_confirmed": subtask.criteria_confirmed,
-        "tests_confirmed": subtask.tests_confirmed,
-        "blockers_resolved": subtask.blockers_resolved,
-        "criteria_notes": list(subtask.criteria_notes),
-        "tests_notes": list(subtask.tests_notes),
-        "blockers_notes": list(subtask.blockers_notes),
-    }
-
-
-def task_to_dict(task: TaskDetail, include_subtasks: bool = False) -> Dict[str, Any]:
-    """Структурированное представление задачи."""
-    data: Dict[str, Any] = {
-        "id": task.id,
-        "title": task.title,
-        "status": task.status,
-        "progress": task.calculate_progress(),
-        "priority": task.priority,
-        "domain": task.domain,
-        "phase": task.phase,
-        "component": task.component,
-        "parent": task.parent,
-        "tags": list(task.tags),
-        "assignee": task.assignee,
-        "blocked": task.blocked,
-        "blockers": list(task.blockers),
-        "description": task.description,
-        "context": task.context,
-        "success_criteria": list(task.success_criteria),
-        "dependencies": list(task.dependencies),
-        "next_steps": list(task.next_steps),
-        "problems": list(task.problems),
-        "risks": list(task.risks),
-        "history": list(task.history),
-        "subtasks_count": len(task.subtasks),
-        "project_remote_updated": task.project_remote_updated,
-        "project_issue_number": task.project_issue_number,
-    }
-    if include_subtasks:
-        data["subtasks"] = [subtask_to_dict(st) for st in task.subtasks]
-    return data
 
 
 @dataclass
@@ -3404,155 +3356,7 @@ def cmd_add_dependency(args) -> int:
 
 
 def cmd_subtask(args) -> int:
-    """Управление подзадачами: добавить / отметить выполненной / вернуть"""
-    manager = TaskManager()
-    task_id = normalize_task_id(args.task_id)
-    domain_arg = getattr(args, "domain", "")
-    domain = derive_domain_explicit(domain_arg, getattr(args, "phase", None), getattr(args, "component", None))
-    actions = [
-        ("add", bool(args.add)),
-        ("done", args.done is not None),
-        ("undo", args.undo is not None),
-        ("criteria_done", args.criteria_done is not None),
-        ("criteria_undo", args.criteria_undo is not None),
-        ("tests_done", args.tests_done is not None),
-        ("tests_undo", args.tests_undo is not None),
-        ("blockers_done", args.blockers_done is not None),
-        ("blockers_undo", args.blockers_undo is not None),
-    ]
-    active = [name for name, flag in actions if flag]
-    if len(active) != 1:
-        return structured_error(
-            "subtask",
-            "Укажи ровно одно действие: --add | --done | --undo | --criteria-done | --tests-done | --blockers-done (и соответствующие --undo)",
-            payload={"actions": active},
-        )
-
-    action = active[0]
-
-    def _snapshot(index: Optional[int] = None, path: Optional[str] = None) -> Dict[str, Any]:
-        detail = manager.load_task(task_id, domain)
-        payload: Dict[str, Any] = {"task_id": task_id}
-        if detail:
-            payload["task"] = task_to_dict(detail, include_subtasks=True)
-            if path:
-                payload["path"] = path
-                target, _, _ = _find_subtask_by_path(detail.subtasks, path)
-                if target:
-                    payload["subtask"] = {"path": path, **subtask_to_dict(target)}
-            if index is not None and 0 <= index < len(detail.subtasks) and "subtask" not in payload:
-                payload["subtask"] = {"index": index, **subtask_to_dict(detail.subtasks[index])}
-        return payload
-
-    if action == "add":
-        criteria = _parse_semicolon_list(args.criteria)
-        tests = _parse_semicolon_list(args.tests)
-        blockers = _parse_semicolon_list(args.blockers)
-        if not args.add or len(args.add.strip()) < 20:
-            return structured_error("subtask", translate("ERR_SUBTASK_TITLE_MIN"))
-        ok, err = manager.add_subtask(task_id, args.add.strip(), domain, criteria, tests, blockers, parent_path=args.path)
-        if ok:
-            payload = _snapshot(path=args.path)
-            payload["operation"] = "add"
-            payload["subtask_title"] = args.add.strip()
-            return structured_response(
-                "subtask",
-                status="OK",
-                message=f"Subtask added to {task_id}",
-                payload=payload,
-                summary=f"{task_id} +subtask",
-            )
-        if err == "missing_fields":
-            return structured_error(
-                "subtask",
-                "Add criteria/tests/blockers: --criteria \"...\" --tests \"...\" --blockers \"...\" (semicolon-separated)",
-                payload={"task_id": task_id},
-            )
-        return structured_error("subtask", translate("ERR_TASK_NOT_FOUND", task_id=task_id), payload={"task_id": task_id})
-
-    if action == "done":
-        ok, msg = manager.set_subtask(task_id, args.done, True, domain, path=args.path)
-        if ok:
-            payload = _snapshot(args.done, path=args.path)
-            payload["operation"] = "done"
-            return structured_response(
-                "subtask",
-                status="OK",
-                message=f"Подзадача {args.path or args.done} отмечена выполненной в {task_id}",
-                payload=payload,
-                summary=f"{task_id} subtask#{args.path or args.done} DONE",
-            )
-        if msg == "not_found":
-            return structured_error("subtask", f"Задача {task_id} не найдена", payload={"task_id": task_id})
-        if msg == "index":
-            return structured_error("subtask", translate("ERR_SUBTASK_INDEX"), payload={"task_id": task_id})
-        return structured_error("subtask", msg or "Операция не выполнена", payload={"task_id": task_id})
-
-    if action == "undo":
-        ok, msg = manager.set_subtask(task_id, args.undo, False, domain, path=args.path)
-        if ok:
-            payload = _snapshot(args.undo, path=args.path)
-            payload["operation"] = "undo"
-            return structured_response(
-                "subtask",
-                status="OK",
-                message=f"Подзадача {args.path or args.undo} возвращена в работу в {task_id}",
-                payload=payload,
-                summary=f"{task_id} subtask#{args.path or args.undo} UNDO",
-            )
-        if msg == "not_found":
-            return structured_error("subtask", f"Задача {task_id} не найдена", payload={"task_id": task_id})
-        if msg == "index":
-            return structured_error("subtask", translate("ERR_SUBTASK_INDEX"), payload={"task_id": task_id})
-        return structured_error("subtask", msg or "Операция не выполнена", payload={"task_id": task_id})
-
-    note = (args.note or "").strip()
-    if action == "criteria_done":
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.criteria_done, "criteria", True, note, domain, path=args.path)
-    elif action == "criteria_undo":
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.criteria_undo, "criteria", False, note, domain, path=args.path)
-    elif action == "tests_done":
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.tests_done, "tests", True, note, domain, path=args.path)
-    elif action == "tests_undo":
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.tests_undo, "tests", False, note, domain, path=args.path)
-    elif action == "blockers_done":
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.blockers_done, "blockers", True, note, domain, path=args.path)
-    else:  # blockers_undo
-        ok, msg = manager.update_subtask_checkpoint(task_id, args.blockers_undo, "blockers", False, note, domain, path=args.path)
-
-    if ok:
-        labels = {
-            "criteria_done": "Критерии подтверждены",
-            "criteria_undo": "Критерии возвращены в работу",
-            "tests_done": "Тесты подтверждены",
-            "tests_undo": "Тесты возвращены в работу",
-            "blockers_done": "Блокеры сняты",
-            "blockers_undo": "Блокеры возвращены",
-        }
-        index_map = {
-            "criteria_done": args.criteria_done,
-            "criteria_undo": args.criteria_undo,
-            "tests_done": args.tests_done,
-            "tests_undo": args.tests_undo,
-            "blockers_done": args.blockers_done,
-            "blockers_undo": args.blockers_undo,
-        }
-        payload = _snapshot(index_map.get(action), path=args.path)
-        payload["operation"] = action
-        if note:
-            payload["note"] = note
-        return structured_response(
-            "subtask",
-            status="OK",
-            message=labels.get(action, action),
-            payload=payload,
-            summary=f"{task_id} {labels.get(action, action)}",
-        )
-    if msg == "not_found":
-        return structured_error("subtask", f"Задача {task_id} не найдена", payload={"task_id": task_id})
-    if msg == "index":
-        return structured_error("subtask", translate("ERR_SUBTASK_INDEX"), payload={"task_id": task_id})
-    return structured_error("subtask", msg or "Операция не выполнена", payload={"task_id": task_id})
+    return _cmd_subtask(args)
 
 
 def cmd_ok(args) -> int:
