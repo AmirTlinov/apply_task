@@ -76,3 +76,26 @@ def test_preview_warn_and_fail_status_chunks():
     warn_text = "".join(chunk[1] for chunk in build_side_preview_text(DummyTUI(warn_detail)))
     fail_text = "".join(chunk[1] for chunk in build_side_preview_text(DummyTUI(fail_detail)))
     assert "INPR" in warn_text and "BACK" in fail_text
+
+
+def test_preview_loads_from_file_and_handles_parse_failure(monkeypatch, tmp_path):
+    task_file = tmp_path / "TASK-1.task"
+    task_file.write_text("---\n", encoding="utf-8")
+    detail = SimpleNamespace(id="TASK-1", title="T", status="OK", priority="P", description="", domain="d", phase="p", component="c", blocked=False, calculate_progress=lambda: 0)
+
+    class DummyTask(SimpleNamespace):
+        pass
+
+    # success path
+    monkeypatch.setattr("core.desktop.devtools.interface.tui_preview.TaskFileParser.parse", lambda path: detail)
+    tui = SimpleNamespace(filtered_tasks=[DummyTask(detail=None, task_file=str(task_file))], selected_index=0, _t=lambda key, **k: key)
+    text = "".join(part[1] for part in build_side_preview_text(tui))
+    assert "STATUS_CONTEXT" in text  # context branch
+
+    # failure path
+    def fail_parse(path):
+        raise ValueError("boom")
+
+    monkeypatch.setattr("core.desktop.devtools.interface.tui_preview.TaskFileParser.parse", fail_parse)
+    text2 = "".join(part[1] for part in build_side_preview_text(tui))
+    assert "SIDE_NO_DATA" in text2

@@ -26,7 +26,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union, Set
 from contextlib import contextmanager
 
 import yaml
-import textwrap
 from wcwidth import wcwidth
 from core import Status, SubTask, TaskDetail
 from core.desktop.devtools.application.task_manager import TaskManager, current_timestamp, _attach_subtask, _find_subtask_by_path, _flatten_subtasks
@@ -83,6 +82,8 @@ from core.desktop.devtools.interface.cli_interactive import (
 from core.desktop.devtools.interface.tui_mouse import handle_body_mouse
 from core.desktop.devtools.interface.tui_settings import build_settings_options
 from core.desktop.devtools.interface.tui_navigation import move_vertical_selection
+from core.desktop.devtools.interface.tui_focus import focusable_line_indices
+from core.desktop.devtools.interface.tui_settings_panel import render_settings_panel
 from core.desktop.devtools.interface.tui_status import build_status_text
 from core.desktop.devtools.interface.tui_footer import build_footer_text
 from core.desktop.devtools.interface.tui_loader import (
@@ -1205,32 +1206,7 @@ class TaskTrackerTUI:
 
     @staticmethod
     def _focusable_line_indices(lines: List[List[Tuple[str, str]]]) -> List[int]:
-        focusable: List[int] = []
-        seen_groups: set[int] = set()
-        for idx, line in enumerate(lines):
-            texts = "".join(text for _, text in line).strip()
-            if not texts:
-                continue
-            # treat pure table borders (ascii or box-drawing) as non-focusable
-            border_chars = set("+-=─═│|")
-            if texts and all(ch in border_chars for ch in texts):
-                continue
-            group = TaskTrackerTUI._extract_group(line)
-            if group is not None:
-                if group in seen_groups:
-                    continue
-                seen_groups.add(group)
-            if any(
-                ('header' in (style or '')) or ('label' in (style or '')) or ('status.' in (style or ''))
-                for style, _ in line
-            ):
-                continue
-            if texts.startswith('↑') or texts.startswith('↓'):
-                continue
-            if texts.startswith('○'):
-                continue
-            focusable.append(idx)
-        return focusable
+        return focusable_line_indices(lines, TaskTrackerTUI._extract_group)
 
     @staticmethod
     def _snap_cursor(desired: int, focusables: List[int]) -> int:
@@ -1891,74 +1867,7 @@ class TaskTrackerTUI:
         return HSplit(children, padding=0)
 
     def get_settings_panel(self) -> FormattedText:
-        options = self._settings_options()
-        if not options:
-            return FormattedText([("class:text.dim", self._t("SETTINGS_UNAVAILABLE"))])
-        width = max(70, min(110, self.get_terminal_width() - 4))
-        inner_width = max(30, width - 2)
-        max_label = max(len(opt["label"]) for opt in options)
-        label_width = max(14, min(inner_width - 12, max_label + 2))
-        value_width = max(10, inner_width - label_width - 2)
-        self.settings_selected_index = min(self.settings_selected_index, len(options) - 1)
-        # учитываем высоту хедера/хинтов и футера, оставляем запас под подсказки
-        occupied = 8  # рамки и заголовок
-        available = self.get_terminal_height() - self.footer_height - occupied
-        visible = max(3, available - 3)
-        max_offset = max(0, len(options) - visible)
-        self.settings_view_offset = max(0, min(self.settings_view_offset, max_offset))
-        if self.settings_selected_index < self.settings_view_offset:
-            self.settings_view_offset = self.settings_selected_index
-        elif self.settings_selected_index >= self.settings_view_offset + visible:
-            self.settings_view_offset = self.settings_selected_index - visible + 1
-        start = self.settings_view_offset
-        end = min(len(options), start + visible)
-
-        lines: List[Tuple[str, str]] = []
-        lines.append(('class:border', '+' + '='*width + '+\n'))
-        lines.append(('class:border', '| '))
-        title = self._t("SETTINGS_TITLE")
-        lines.append(('class:header', title.center(width - 2)))
-        lines.append(('class:border', ' |\n'))
-        lines.append(('class:border', '+' + '-'*width + '+\n'))
-
-        hidden_above = start
-        hidden_below = len(options) - end
-
-        for idx in range(start, end):
-            option = options[idx]
-            prefix = '▸' if idx == self.settings_selected_index else ' '
-            label_text = option['label'][:label_width].ljust(label_width)
-            value_text = option['value']
-            if len(value_text) > value_width:
-                value_text = value_text[:max(1, value_width - 1)] + '…'
-            row_text = f"{prefix} {label_text}{value_text.ljust(value_width)}"
-            style = 'class:selected' if idx == self.settings_selected_index else ('class:text.dim' if option.get('disabled') else 'class:text')
-            lines.append(('class:border', '| '))
-            lines.append((style, row_text.ljust(inner_width)))
-            lines.append(('class:border', ' |\n'))
-            if idx == self.settings_selected_index and option.get('hint'):
-                hint_lines = textwrap.wrap(option['hint'], width - 6) or ['']
-                for hint_line in hint_lines:
-                    lines.append(('class:border', '| '))
-                    lines.append(('class:text.dim', f"  {hint_line}".ljust(inner_width)))
-                    lines.append(('class:border', ' |\n'))
-
-        if hidden_below:
-            lines.append(('class:border', '| '))
-            lines.append(('class:text.dim', f"↓ +{hidden_below}".ljust(inner_width)))
-            lines.append(('class:border', ' |\n'))
-        if hidden_above:
-            lines.append(('class:border', '| '))
-            lines.append(('class:text.dim', f"↑ +{hidden_above}".ljust(inner_width)))
-            lines.append(('class:border', ' |\n'))
-
-        lines.append(('class:border', '+' + '-'*width + '+\n'))
-        hint = self._t("SETTINGS_NAV_HINT")
-        lines.append(('class:border', '| '))
-        lines.append(('class:text.dim', hint[:width - 2].ljust(width - 2)))
-        lines.append(('class:border', ' |\n'))
-        lines.append(('class:border', '+' + '='*width + '+'))
-        return FormattedText(lines)
+        return render_settings_panel(self)
 
     def _settings_options(self) -> List[Dict[str, Any]]:
         return build_settings_options(self)

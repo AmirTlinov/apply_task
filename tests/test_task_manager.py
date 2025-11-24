@@ -511,6 +511,16 @@ def test_dependency_and_move_operations(monkeypatch, tmp_path):
     assert manager.move_glob("TASK-*", "dom") == 2 and repo.moved_glob
 
 
+def test_auto_sync_all_short_circuits(monkeypatch, tmp_path):
+    monkeypatch.setattr(task_manager.TaskManager, "load_config", staticmethod(lambda: {"auto_sync": False}))
+    manager = TaskManager(tasks_dir=tmp_path / ".tasks", sync_service=DummySync(enabled=False))
+    assert manager._auto_sync_all() == 0
+
+    manager.config = {"auto_sync": True}
+    manager.sync_service.enabled = False
+    assert manager._auto_sync_all() == 0
+
+
 def test_clean_tasks_status_and_phase(monkeypatch):
     monkeypatch.setattr(task_manager.TaskManager, "load_config", staticmethod(lambda: {"auto_sync": False}))
 

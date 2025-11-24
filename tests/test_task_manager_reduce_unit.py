@@ -101,3 +101,17 @@ def test_select_index_after_load():
     tasks = [T("a"), T("b")]
     assert tui_loader.select_index_after_load(tasks, True, "b") == 1
     assert tui_loader.select_index_after_load(tasks, False, "b") == 0
+
+
+def test_load_tasks_with_state_no_filter_message():
+    class DummyManager:
+        def list_tasks(self, domain):
+            return []
+
+    class DummyTUI:
+        manager = DummyManager()
+        domain_filter = ""
+        current_filter = None
+
+    items, message = tui_loader.load_tasks_with_state(DummyTUI())
+    assert items == [] and message == ""
