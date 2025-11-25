@@ -280,6 +280,27 @@ def test_update_task_status_requires_full_progress(tmp_path):
     assert err and err["code"] == "validation"
 
 
+def test_update_task_status_force_allows_incomplete_subtasks(tmp_path):
+    manager = TaskManager(tasks_dir=tmp_path / ".tasks", sync_service=DummySync(enabled=False))
+    task = TaskDetail(
+        id="TASK-019F",
+        title="Force OK",
+        status="FAIL",
+        created="2025-01-01 00:00",
+        updated="2025-01-01 00:00",
+    )
+    task.subtasks.append(SubTask(completed=False, title="child", success_criteria=["c"], tests=["t"], blockers=["b"]))
+    manager.repo.save(task)
+
+    ok, err = manager.update_task_status("TASK-019F", "OK", force=True)
+    assert ok and err is None
+    updated = manager.load_task("TASK-019F", skip_sync=True)
+    assert updated.status == "OK"
+    assert updated.status_manual is True
+    assert updated.calculate_progress() == 0
+    assert updated.subtasks[0].completed is False
+
+
 def test_set_subtask_ready_and_not_ready(tmp_path):
     manager = TaskManager(tasks_dir=tmp_path / ".tasks", sync_service=DummySync(enabled=False))
     task = TaskDetail(
@@ -355,6 +376,22 @@ def test_set_subtask_tests_and_blockers_missing(tmp_path):
     manager.repo.save(task)
     ok, err = manager.set_subtask("TASK-026", 0, True)
     assert ok is False and err
+
+
+def test_set_subtask_force_keeps_checkpoints(tmp_path):
+    manager = TaskManager(tasks_dir=tmp_path / ".tasks", sync_service=DummySync(enabled=False))
+    st = SubTask(False, "child", ["c"], ["t"], ["b"], criteria_confirmed=False, tests_confirmed=False, blockers_resolved=False)
+    task = TaskDetail(id="TASK-026F", title="Task", status="FAIL", created="2025", updated="2025")
+    task.subtasks.append(st)
+    manager.repo.save(task)
+    ok, err = manager.set_subtask("TASK-026F", 0, True, force=True)
+    assert ok is True and err is None
+    updated = manager.load_task("TASK-026F")
+    updated_st = updated.subtasks[0]
+    assert updated_st.completed is True
+    assert updated_st.criteria_confirmed is False
+    assert updated_st.tests_confirmed is False
+    assert updated_st.blockers_resolved is False
 
 
 def test_update_subtask_checkpoint_unknown(tmp_path):
@@ -510,6 +547,23 @@ def test_update_subtask_checkpoint_with_path(tmp_path):
     updated = manager.load_task("TASK-033")
     assert updated.subtasks[0].children[0].tests_confirmed is True
     assert updated.subtasks[0].children[0].tests_notes == ["n"]
+
+
+def test_manual_status_not_overwritten_by_progress_changes(tmp_path):
+    manager = TaskManager(tasks_dir=tmp_path / ".tasks", sync_service=DummySync(enabled=False))
+    task = TaskDetail(id="TASK-034M", title="Manual OK", status="FAIL", created="2025", updated="2025")
+    task.subtasks.append(SubTask(False, "child", ["c"], ["t"], ["b"]))
+    manager.repo.save(task)
+
+    ok, err = manager.update_task_status("TASK-034M", "OK", force=True)
+    assert ok and err is None
+    ok, err = manager.update_subtask_checkpoint("TASK-034M", 0, "criteria", False, note="still pending")
+    assert ok and err is None
+
+    updated = manager.load_task("TASK-034M", skip_sync=True)
+    assert updated.status_manual is True
+    assert updated.status == "OK"
+    assert updated.calculate_progress() == 0
 
 
 def test_compute_worker_count_env_override(monkeypatch, tmp_path):

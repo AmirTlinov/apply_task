@@ -8,7 +8,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -100,12 +100,35 @@ def _normalized_fields(values: Optional[List[str]]) -> List[str]:
 
 
 def _build_subtask(title: str, criteria, tests, blockers) -> Optional[SubTask]:
+    """Build subtask with Normal mode validation.
+
+    Normal mode:
+    - criteria: REQUIRED (at least 1 item)
+    - tests: optional (auto_confirmed if empty)
+    - blockers: optional (auto_resolved if empty)
+
+    Returns None only if criteria is empty.
+    """
     crit = _normalized_fields(criteria)
     tst = _normalized_fields(tests)
     bl = _normalized_fields(blockers)
-    if not crit or not tst or not bl:
+
+    # Normal mode: only criteria is required
+    if not crit:
         return None
-    return SubTask(False, title, crit, tst, bl)
+
+    return SubTask(
+        completed=False,
+        title=title,
+        success_criteria=crit,
+        tests=tst,
+        blockers=bl,
+        # Auto-confirmed flags based on whether fields were empty
+        criteria_auto_confirmed=False,  # Never auto - criteria always required
+        tests_auto_confirmed=not tst,   # Auto-OK if tests empty
+        blockers_auto_resolved=not bl,  # Auto-OK if blockers empty
+        created_at=current_timestamp(),
+    )
 
 
 def _update_progress_for_status(task: TaskDetail, status: str) -> None:
@@ -156,16 +179,24 @@ def _locate_subtask(task: TaskDetail, index: int, path: Optional[str]):
 
 
 def _subtask_completion_blockers(subtask: SubTask, translator) -> Optional[str]:
+    """Check what's blocking subtask completion.
+
+    Normal mode logic:
+    - criteria: must be explicitly confirmed
+    - tests: OK if confirmed OR auto_confirmed (empty at creation)
+    - blockers: OK if resolved OR auto_resolved (empty at creation)
+    """
     if subtask.ready_for_completion():
         return None
     missing = []
     if not subtask.criteria_confirmed:
         missing.append(translator("CHECKPOINT_CRITERIA"))
-    if not subtask.tests_confirmed:
+    # Account for auto_confirmed flags (Normal mode)
+    if not (subtask.tests_confirmed or subtask.tests_auto_confirmed):
         missing.append(translator("CHECKPOINT_TESTS"))
-    if not subtask.blockers_resolved:
+    if not (subtask.blockers_resolved or subtask.blockers_auto_resolved):
         missing.append(translator("CHECKPOINT_BLOCKERS"))
-    return translator("ERR_SUBTASK_CHECKPOINTS").format(items=", ".join(missing))
+    return translator("ERR_SUBTASK_CHECKPOINTS").format(items=", ".join(missing)) if missing else None
 
 
 class TaskManager:
@@ -190,12 +221,111 @@ class TaskManager:
         self.language = _effective_lang()
         self.auto_sync_message = ""
         self.last_sync_error = ""
+        # Track tasks known to AI for detecting external changes
+        self._known_tasks: Set[str] = set()
+        # Store task snapshots for change detection: {task_id: (subtasks_count, progress, hash)}
+        self._task_snapshots: Dict[str, Tuple[int, int, str]] = {}
         synced = self._auto_sync_all()
         if synced:
             self.auto_sync_message = translate("STATUS_MESSAGE_AUTO_SYNC", lang=self.language, count=synced)
 
     def _t(self, key: str, **kwargs) -> str:
         return translate(key, lang=getattr(self, "language", "en"), **kwargs)
+
+    def _task_hash(self, task: TaskDetail) -> str:
+        """Create a simple hash of task state for change detection."""
+        # Hash based on key mutable fields
+        parts = [
+            task.title,
+            task.status,
+            str(getattr(task, "status_manual", False)),
+            str(len(task.subtasks)),
+            str(sum(1 for s in task.subtasks if s.completed)),
+        ]
+        # Add subtask titles and completion states
+        for st in task.subtasks:
+            parts.append(f"{st.title}:{st.completed}")
+        return "|".join(parts)
+
+    def track_task(self, task_id: str, task: Optional[TaskDetail] = None) -> None:
+        """Register task as known to AI and snapshot its state."""
+        self._known_tasks.add(task_id)
+        if task:
+            self._task_snapshots[task_id] = (
+                len(task.subtasks),
+                task.calculate_progress(),
+                self._task_hash(task),
+            )
+
+    def check_external_changes(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Check for tasks created/modified/deleted externally (by user via TUI/CLI).
+
+        Returns dict with keys: created_by_user, modified_by_user, deleted_by_user
+        """
+        result: Dict[str, List[Dict[str, Any]]] = {
+            "created_by_user": [],
+            "modified_by_user": [],
+            "deleted_by_user": [],
+        }
+
+        current_tasks = {t.id: t for t in self.list_tasks()}
+        current_ids = set(current_tasks.keys())
+
+        # Deleted: was known but no longer exists
+        deleted = self._known_tasks - current_ids
+        for task_id in deleted:
+            result["deleted_by_user"].append({"id": task_id})
+            self._known_tasks.discard(task_id)
+            self._task_snapshots.pop(task_id, None)
+
+        # Created: exists but was not known (and AI didn't just create it)
+        created = current_ids - self._known_tasks
+        for task_id in created:
+            task = current_tasks[task_id]
+            result["created_by_user"].append({
+                "id": task_id,
+                "title": task.title,
+                "subtasks_count": len(task.subtasks),
+            })
+            # Now track it
+            self.track_task(task_id, task)
+
+        # Modified: known task but state changed
+        for task_id in self._known_tasks & current_ids:
+            task = current_tasks[task_id]
+            old_snapshot = self._task_snapshots.get(task_id)
+            new_hash = self._task_hash(task)
+
+            if old_snapshot and old_snapshot[2] != new_hash:
+                old_subtasks, old_progress, _ = old_snapshot
+                new_progress = task.calculate_progress()
+                change_info: Dict[str, Any] = {
+                    "id": task_id,
+                    "title": task.title,
+                }
+                # Add specific changes
+                if old_subtasks != len(task.subtasks):
+                    change_info["subtasks_changed"] = f"{old_subtasks} -> {len(task.subtasks)}"
+                if old_progress != new_progress:
+                    change_info["progress_changed"] = f"{old_progress}% -> {new_progress}%"
+                    # Determine if user marked something completed
+                    if new_progress > old_progress:
+                        change_info["user_completed_items"] = True
+                result["modified_by_user"].append(change_info)
+            # Update snapshot
+            self._task_snapshots[task_id] = (
+                len(task.subtasks),
+                task.calculate_progress(),
+                new_hash,
+            )
+
+        return result
+
+    def get_and_clear_external_changes(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Get pending external change notifications."""
+        changes = self.check_external_changes()
+        # Filter out empty lists
+        return {k: v for k, v in changes.items() if v}
 
     @staticmethod
     def sanitize_domain(domain: Optional[str]) -> str:
@@ -259,34 +389,37 @@ class TaskManager:
         # НЕ сохраняем здесь - валидация должна пройти первой
         return task
 
-    def save_task(self, task: TaskDetail) -> None:
+    def save_task(self, task: TaskDetail, skip_sync: bool = False) -> None:
         task.updated = current_timestamp()
         prog = task.calculate_progress()
-        if prog == 100 and not task.blocked:
+        task.progress = prog
+        if not getattr(task, "status_manual", False) and prog == 100 and not task.blocked:
             task.status = "OK"
         task.domain = self.sanitize_domain(task.domain)
         self.repo.save(task)
-        sync = self.sync_service
-        if sync.enabled:
-            changed = bool(sync.sync_task(task))
-            if getattr(task, "_sync_error", None):
-                self._report_sync_error(task._sync_error)
-                task._sync_error = None
-            if changed:
-                self.repo.save(task)
+        if not skip_sync:
+            sync = self.sync_service
+            if sync.enabled:
+                changed = bool(sync.sync_task(task))
+                if getattr(task, "_sync_error", None):
+                    self._report_sync_error(task._sync_error)
+                    task._sync_error = None
+                if changed:
+                    self.repo.save(task)
 
-    def load_task(self, task_id: str, domain: str = "") -> Optional[TaskDetail]:
+    def load_task(self, task_id: str, domain: str = "", skip_sync: bool = False) -> Optional[TaskDetail]:
         task = self.repo.load(task_id, domain)
         if not task:
             return None
         if task.subtasks:
             prog = task.calculate_progress()
-            if prog == 100 and not task.blocked and task.status != "OK":
+            if not getattr(task, "status_manual", False) and prog == 100 and not task.blocked and task.status != "OK":
                 task.status = "OK"
                 self.save_task(task)
-        sync = self.sync_service
-        if sync.enabled and task.project_item_id:
-            sync.pull_task_fields(task)
+        if not skip_sync:
+            sync = self.sync_service
+            if sync.enabled and task.project_item_id:
+                sync.pull_task_fields(task)
         return task
 
     def _report_sync_error(self, message: str) -> None:
@@ -298,9 +431,9 @@ class TaskManager:
         for parsed in tasks:
             if parsed.subtasks:
                 prog = parsed.calculate_progress()
-                if prog == 100 and not parsed.blocked and parsed.status != "OK":
+                if not getattr(parsed, "status_manual", False) and prog == 100 and not parsed.blocked and parsed.status != "OK":
                     parsed.status = "OK"
-                    self.save_task(parsed)
+                    self.save_task(parsed, skip_sync=skip_sync)
             if not skip_sync:
                 sync = self.sync_service
                 if sync.enabled and parsed.project_item_id:
@@ -362,20 +495,48 @@ class TaskManager:
     def compute_signature(self) -> int:
         return self.repo.compute_signature()
 
-    def update_task_status(self, task_id: str, status: str, domain: str = "") -> Tuple[bool, Optional[Dict[str, str]]]:
-        task = self.load_task(task_id, domain)
+    def update_task_status(self, task_id: str, status: str, domain: str = "", force: bool = False) -> Tuple[bool, Optional[Dict[str, str]]]:
+        # skip_sync=True чтобы не перезаписать локальные изменения данными из GitHub
+        task = self.load_task(task_id, domain, skip_sync=True)
         if not task:
             return False, {"code": "not_found", "message": self._t("ERR_TASK_NOT_FOUND", task_id=task_id)}
         if status == "OK":
-            ok, error = _validate_task_ready_for_ok(task, self._t)
-            if not ok:
-                return False, error
-            task.progress = 100
+            if not force:
+                ok, error = _validate_task_ready_for_ok(task, self._t)
+                if not ok:
+                    return False, error
+                task.progress = 100
+                task.status_manual = False
+            else:
+                # keep actual progress/subtasks, but mark status as explicitly set
+                task.progress = task.calculate_progress()
+                task.status_manual = True
             task.status = status
         else:
+            task.status_manual = False
             _update_progress_for_status(task, status)
-        self.save_task(task)
+            # When reopening task, also reopen subtasks if force
+            if force and task.subtasks:
+                for st in task.subtasks:
+                    st.completed = False
+                    st.completed_at = None
+        # skip_sync=True чтобы sync не перезаписал локальные изменения
+        self.save_task(task, skip_sync=True)
         return True, None
+
+    def _mark_subtask_completed_recursive(self, subtask: SubTask) -> None:
+        """Mark subtask and all nested subtasks as completed."""
+        subtask.completed = True
+        subtask.completed_at = current_timestamp()
+        # Auto-confirm checkpoints if not already
+        if not subtask.criteria_confirmed:
+            subtask.criteria_confirmed = True
+        if not subtask.tests_confirmed:
+            subtask.tests_confirmed = True
+        if not subtask.blockers_resolved:
+            subtask.blockers_resolved = True
+        for child in subtask.children:
+            self._mark_subtask_completed_recursive(child)
 
     def add_subtask(
         self,
@@ -399,20 +560,27 @@ class TaskManager:
         self.save_task(task)
         return True, None
 
-    def set_subtask(self, task_id: str, index: int, completed: bool, domain: str = "", path: Optional[str] = None) -> Tuple[bool, Optional[str]]:
-        task = self.load_task(task_id, domain)
+    def set_subtask(self, task_id: str, index: int, completed: bool, domain: str = "", path: Optional[str] = None, force: bool = False) -> Tuple[bool, Optional[str]]:
+        # skip_sync=True чтобы не перезаписать локальные изменения данными из GitHub
+        task = self.load_task(task_id, domain, skip_sync=True)
         if not task:
             return False, "not_found"
         st, error = _locate_subtask(task, index, path)
         if error:
             return False, error
-        if completed:
+        if completed and not force:
             blocker_msg = _subtask_completion_blockers(st, self._t)
             if blocker_msg:
                 return False, blocker_msg
         st.completed = completed
+        # Set completed_at timestamp when marking as done
+        if completed:
+            st.completed_at = current_timestamp()
+        else:
+            st.completed_at = None  # Clear when reopening
         task.update_status_from_progress()
-        self.save_task(task)
+        # skip_sync=True чтобы sync не перезаписал локальные изменения
+        self.save_task(task, skip_sync=True)
         return True, None
 
     def update_subtask_checkpoint(
@@ -425,7 +593,8 @@ class TaskManager:
         domain: str = "",
         path: Optional[str] = None,
     ) -> Tuple[bool, Optional[str]]:
-        task = self.load_task(task_id, domain)
+        # skip_sync=True чтобы не перезаписать локальные изменения данными из GitHub
+        task = self.load_task(task_id, domain, skip_sync=True)
         if not task:
             return False, "not_found"
         if path:
@@ -452,7 +621,8 @@ class TaskManager:
         if not value:
             st.completed = False
         task.update_status_from_progress()
-        self.save_task(task)
+        # skip_sync=True чтобы sync не перезаписал локальные изменения
+        self.save_task(task, skip_sync=True)
         return True, None
 
     def add_dependency(self, task_id: str, dep: str, domain: str = "") -> bool:

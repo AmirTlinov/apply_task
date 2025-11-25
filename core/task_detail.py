@@ -12,6 +12,7 @@ class TaskDetail:
     id: str
     title: str
     status: str
+    status_manual: bool = False  # True when status was explicitly set by user and should not be auto-recalculated
     description: str = ""
     domain: str = ""
     phase: str = ""
@@ -69,7 +70,10 @@ class TaskDetail:
         return (base / self.domain / f"{self.id}.task").resolve() if self.domain else base / f"{self.id}.task"
 
     def update_status_from_progress(self) -> None:
+        if self.status_manual:
+            return
         prog = self.calculate_progress()
+        self.progress = prog
         if self.blocked:
             self.status = "FAIL"
         elif prog == 100:
@@ -109,6 +113,8 @@ class TaskDetail:
         subtask_ids = [st.project_item_id for st in self.subtasks]
         if any(subtask_ids):
             metadata["subtask_project_ids"] = subtask_ids
+        if self.status_manual:
+            metadata["status_manual"] = True
 
         lines = ["---", yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip(), "---", ""]
         lines.append(f"# {self.title}\n")
@@ -168,3 +174,18 @@ class TaskDetail:
     @staticmethod
     def _now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+
+def subtask_to_task_detail(subtask: SubTask, parent_id: str, path: str) -> "TaskDetail":
+    """Convert a SubTask to TaskDetail for unified navigation."""
+    status = "OK" if subtask.completed else ("WARN" if subtask.ready_for_completion() else "FAIL")
+    return TaskDetail(
+        id=f"{parent_id}/{path}",
+        title=subtask.title,
+        status=status,
+        description="",
+        parent=parent_id,
+        subtasks=subtask.children,
+        success_criteria=subtask.success_criteria,
+        blockers=subtask.blockers,
+    )

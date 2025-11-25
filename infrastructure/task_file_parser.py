@@ -26,6 +26,7 @@ class TaskFileParser:
             id=metadata.get("id", ""),
             title=metadata.get("title", ""),
             status=metadata.get("status", "FAIL"),
+            status_manual=bool(metadata.get("status_manual", False)),
             domain=metadata.get("domain", "") or "",
             phase=metadata.get("phase", "") or "",
             component=metadata.get("component", "") or "",
@@ -71,7 +72,7 @@ class TaskFileParser:
             if sub_id and idx < len(task.subtasks):
                 task.subtasks[idx].project_item_id = sub_id
         try:
-            if task.subtasks and task.calculate_progress() == 100 and not task.blocked:
+            if not task.status_manual and task.subtasks and task.calculate_progress() == 100 and not task.blocked:
                 task.status = "OK"
         except Exception:
             pass
@@ -130,6 +131,10 @@ class TaskFileParser:
                     current.tests_notes = [n.strip() for n in stripped.split(":", 1)[1].split(";") if n.strip()]
                 elif stripped.startswith("Отметки блокеров:"):
                     current.blockers_notes = [n.strip() for n in stripped.split(":", 1)[1].split(";") if n.strip()]
+                elif stripped.startswith("Создано:"):
+                    current.created_at = stripped.split(":", 1)[1].strip()
+                elif stripped.startswith("Завершено:"):
+                    current.completed_at = stripped.split(":", 1)[1].strip()
         elif section == "Критерии успеха":
             task.success_criteria = cls._parse_list(lines)
         elif section == "Следующие шаги":
