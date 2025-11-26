@@ -829,12 +829,9 @@ class TaskTrackerTUI:
     def return_to_projects(self):
         """Return to project picker view."""
         self.load_projects()
-        max_offset = max(0, total - visible)
-        if self.settings_selected_index < self.settings_view_offset:
-            self.settings_view_offset = self.settings_selected_index
-        elif self.settings_selected_index >= self.settings_view_offset + visible:
-            self.settings_view_offset = self.settings_selected_index - visible + 1
-        self.settings_view_offset = max(0, min(self.settings_view_offset, max_offset))
+        self.list_view_offset = 0
+        self.selected_index = 0
+        self.force_render()
 
     @staticmethod
     def _normalize_status_value(status: Union[Status, str, bool, None]) -> Status:
