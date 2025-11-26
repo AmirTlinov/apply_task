@@ -1145,7 +1145,7 @@ class TaskTrackerTUI:
         return self.manager.compute_signature()
 
     def maybe_reload(self):
-        if getattr(self, "project_mode", False):
+        if getattr(self, "project_mode", False) and not self.detail_mode:
             return
         _maybe_reload_helper(self)
 
