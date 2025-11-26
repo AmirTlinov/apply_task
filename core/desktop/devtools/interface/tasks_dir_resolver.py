@@ -52,7 +52,7 @@ def get_tasks_dir_for_project(use_global: bool = True, tasks_dir: Path | None = 
     Priority:
     1. Explicit tasks_dir if provided.
     2. Global (~/.tasks/<namespace>) when use_global=True.
-    3. Local .tasks under project root.
+    3. Local .tasks under project root (fallback for test/temp dirs without git).
     """
     if tasks_dir:
         return Path(tasks_dir).expanduser().resolve()
@@ -60,7 +60,15 @@ def get_tasks_dir_for_project(use_global: bool = True, tasks_dir: Path | None = 
     project_root = resolve_project_root()
     if use_global:
         namespace = get_project_namespace(project_root)
-        return (Path.home() / ".tasks" / namespace).resolve()
+        global_dir = (Path.home() / ".tasks" / namespace).resolve()
+        # Fallback: if no git/namespace dir exists and local .tasks is present, use local
+        local_dir = (project_root / ".tasks").resolve()
+        if not global_dir.exists() and local_dir.exists():
+            return local_dir
+        if not global_dir.exists() and not local_dir.exists():
+            # test/temp dir with no git: use local
+            return local_dir
+        return global_dir
 
     return (project_root / ".tasks").resolve()
 

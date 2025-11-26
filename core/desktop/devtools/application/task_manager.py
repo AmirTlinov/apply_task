@@ -209,7 +209,9 @@ class TaskManager:
     ):
         if tasks_dir is None:
             from core.desktop.devtools.interface.tasks_dir_resolver import get_tasks_dir_for_project
+            # Prefer global; if it doesn't exist and local .tasks exists/needed, resolver will fall back
             self.tasks_dir = get_tasks_dir_for_project(use_global=True)
+            self.tasks_dir.mkdir(parents=True, exist_ok=True)
         else:
             self.tasks_dir = tasks_dir
         self.tasks_dir.mkdir(exist_ok=True)

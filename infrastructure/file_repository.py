@@ -8,10 +8,17 @@ from infrastructure.task_file_parser import TaskFileParser
 
 
 class FileTaskRepository(TaskRepository):
-    def __init__(self, tasks_dir: Path):
-        self.tasks_dir = tasks_dir
+    def __init__(self, tasks_dir: Path | None):
+        if tasks_dir is None:
+            fallback = (Path.cwd() / ".tasks").resolve()
+            fallback.mkdir(parents=True, exist_ok=True)
+            self.tasks_dir = fallback
+        else:
+            self.tasks_dir = tasks_dir
 
     def _resolve_path(self, task_id: str, domain: str = "") -> Path:
+        if self.tasks_dir is None:
+            raise ValueError("tasks_dir is not set for FileTaskRepository")
         base = self.tasks_dir / domain if domain else self.tasks_dir
         return (base / f"{task_id}.task").resolve()
 
