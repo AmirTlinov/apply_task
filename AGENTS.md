@@ -6,6 +6,7 @@
 - **Quality**: diff coverage ≥85%, cyclomatic complexity ≤10, no mocks/stubs in prod, one file = one responsibility, Conventional Commits.
 - **GitHub Projects**: config `.apply_task_projects.yaml`, token `APPLY_TASK_GITHUB_TOKEN|GITHUB_TOKEN`; without token sync is off, CLI works offline.
 - **Devtools automation** (`automation`): `task-template` → `.tmp/subtasks.template.json`, `task-create` (validate-only default, auto-template), `checkpoint` (notes/ok from log), `health` (pytest → `.tmp/health.log`), `projects-health` (short sync status).
+- **Storage**: single mode — tasks live in `~/.tasks/<namespace>` derived from git remote (or folder name). Local `.tasks` inside the repo is ignored. TUI стартует с выбором проекта (namespace) из глобального стора.
 
 ## Aliases
 - `README.md` — what the tool is and how to start.

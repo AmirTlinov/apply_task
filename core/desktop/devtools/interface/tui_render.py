@@ -82,10 +82,13 @@ def render_task_list_text_impl(tui) -> FormattedText:
     line_counter += 1
     result.append((header_style, '|'))
 
+    title_label = tui._t("TABLE_HEADER_TASK")
+    if getattr(tui, "project_mode", False):
+        title_label = tui._t("TABLE_HEADER_PROJECT", fallback="Проект")
     column_labels = {
         'idx': ('#', widths.get('idx', 3)),
         'stat': ('◉', widths.get('stat', 3)),
-        'title': (tui._t("TABLE_HEADER_TASK"), widths.get('title', 20)),
+        'title': (title_label, widths.get('title', 20)),
         'progress': (tui._t("TABLE_HEADER_PROGRESS"), widths.get('progress', 4)),
         'subtasks': (tui._t("TABLE_HEADER_SUBTASKS"), widths.get('subtasks', 3)),
     }

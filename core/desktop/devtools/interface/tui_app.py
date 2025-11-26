@@ -43,6 +43,7 @@ from core.desktop.devtools.interface.tui_status import build_status_text
 from core.desktop.devtools.interface.tui_footer import build_footer_text
 from core.desktop.devtools.interface.cli_history import get_project_tasks_dir, resolve_project_root
 from core.desktop.devtools.interface.tasks_dir_resolver import get_tasks_dir_for_project
+from infrastructure.file_repository import FileTaskRepository
 from core.desktop.devtools.interface.tui_loader import (
     load_tasks_with_state,
     apply_context_filters,
@@ -110,6 +111,10 @@ class TaskTrackerTUI:
         resolved_dir.mkdir(parents=True, exist_ok=True)
         self.tasks_dir = resolved_dir
         self.global_storage_used = True
+        # Project picker state
+        self.project_mode: bool = True
+        self.projects_root: Path = Path.home() / ".tasks"
+        self.current_project_path: Optional[Path] = None
 
         self.manager = TaskManager(self.tasks_dir)
         self.domain_filter = domain
@@ -187,7 +192,8 @@ class TaskTrackerTUI:
         self.checkpoint_mode = False
         self.checkpoint_selected_index = 0
 
-        self.load_tasks(skip_sync=True)
+        # Initial screen: project picker
+        self.load_projects()
 
         self.style = self.build_style(theme)
 
@@ -203,7 +209,17 @@ class TaskTrackerTUI:
         @kb.add("r")
         @kb.add("к")
         def _(event):
-            self.load_tasks(preserve_selection=True)
+            if self.project_mode:
+                self.load_projects()
+            else:
+                self.load_tasks(preserve_selection=True)
+
+        @kb.add("p")
+        @kb.add("з")
+        def _(event):
+            if not self.project_mode and not self.detail_mode:
+                self.return_to_projects()
+                return
 
         @kb.add("down")
         @kb.add("j")
@@ -737,6 +753,73 @@ class TaskTrackerTUI:
         if total <= visible:
             self.settings_view_offset = 0
             return
+
+    # ---------- Project selection ----------
+
+    def load_projects(self) -> None:
+        """Load list of projects from global storage and show in list view."""
+        self.project_mode = True
+        self.detail_mode = False
+        self.current_task_detail = None
+        self.current_task = None
+        self.navigation_stack = []
+
+        projects: List[Task] = []
+        root = self.projects_root
+        if root.exists():
+            for path in sorted([p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")]):
+                repo = FileTaskRepository(path)
+                tasks = repo.list("", skip_sync=True)
+                if not tasks:
+                    continue
+                total = len(tasks)
+                ok_count = sum(1 for t in tasks if str(t.status).upper() == "OK")
+                warn_count = sum(1 for t in tasks if str(t.status).upper() == "WARN")
+                fail_count = total - ok_count - warn_count
+                avg_progress = int(sum(t.calculate_progress() for t in tasks) / total) if total else 0
+                status = Status.FAIL if fail_count else (Status.WARN if warn_count else Status.OK)
+                projects.append(
+                    Task(
+                        id=path.name,
+                        name=path.name,
+                        status=status,
+                        description="",
+                        category="project",
+                        completed=status == Status.OK,
+                        task_file=str(path),
+                        progress=avg_progress,
+                        subtasks_count=total,
+                        subtasks_completed=ok_count,
+                        parent=None,
+                        detail=None,
+                        domain="",
+                        phase="",
+                        component="",
+                        blocked=False,
+                    )
+                )
+        self.tasks = projects
+        self.selected_index = 0
+        self.current_filter = None
+        self._ensure_selection_visible()
+        self.force_render()
+
+    def _enter_project(self, project_task: Task) -> None:
+        """Switch from project picker to tasks of the selected project."""
+        path = Path(project_task.task_file)
+        if not path.exists():
+            self.set_status_message(self._t("STATUS_NO_TASKS"))
+            return
+        self.current_project_path = path
+        self.tasks_dir = path
+        self.manager = TaskManager(self.tasks_dir)
+        self.project_mode = False
+        self.load_tasks(skip_sync=True)
+        self.set_status_message(f"Проект: {project_task.name}", ttl=2)
+
+    def return_to_projects(self):
+        """Return to project picker view."""
+        self.load_projects()
         max_offset = max(0, total - visible)
         if self.settings_selected_index < self.settings_view_offset:
             self.settings_view_offset = self.settings_selected_index
@@ -1319,6 +1402,9 @@ class TaskTrackerTUI:
         return len(self.detail_flat_subtasks)
 
     def show_task_details(self, task: Task):
+        if self.project_mode:
+            self._enter_project(task)
+            return
         self.current_task = task
         self.current_task_detail = task.detail or TaskFileParser.parse(Path(task.task_file))
         self.detail_mode = True
@@ -1413,6 +1499,9 @@ class TaskTrackerTUI:
     def toggle_task_completion(self):
         """Переключить статус задачи между ACTIVE и OK"""
         if not self.filtered_tasks or self.selected_index >= len(self.filtered_tasks):
+            return
+        if self.project_mode:
+            self._enter_project(self.filtered_tasks[self.selected_index])
             return
         task = self.filtered_tasks[self.selected_index]
         domain = getattr(task, "domain", "")

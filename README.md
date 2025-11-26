@@ -18,7 +18,7 @@ cp apply_task ~/.local/bin/ && chmod +x ~/.local/bin/apply_task
 
 # Reload your shell (or `source ~/.zshrc`)
 
-# Launch the TUI
+# Launch the TUI (project picker opens first, storage in ~/.tasks/<namespace>)
 apply_task tui
 ```
 
@@ -125,8 +125,9 @@ apply_task tui --theme dark-contrast   # TUI with alternative palette
 | Filters                      | `1` In Progress, `2` Backlog, `3` Done, `0` All|
 | Subtask toggle               | `d`, `в` or mouse click on checkbox           |
 
-## Data layout
+## Data layout / storage
 
+- All tasks for a git project live in the global directory `~/.tasks/<namespace>`, where `namespace` is derived from the git remote (or folder name if no remote). The tool ignores any local `.tasks` inside the repo.
 - `todo.machine.md` — human overview (`- [x] Title | OK | note >> .tasks/TASK-001.task`).
 - `.tasks/TASK-###.task` — YAML front matter + Markdown body (description, subtasks, risks, tests, blockers, notes).
 - `.last` — stores the last `TASK@domain` context for shorthand commands.
@@ -136,7 +137,7 @@ apply_task tui --theme dark-contrast   # TUI with alternative palette
 ```bash
 cp tasks.py requirements.txt /path/to/repo/
 cd /path/to/repo
-mkdir -p .tasks && touch todo.machine.md
+# Tasks will still be stored in ~/.tasks/<namespace> for this git project
 apply_task tui
 ```
 
