@@ -806,7 +806,11 @@ class TaskTrackerTUI:
 
     def _enter_project(self, project_task: Task) -> None:
         """Switch from project picker to tasks of the selected project."""
-        path = Path(project_task.task_file)
+        path_raw = getattr(project_task, "task_file", None)
+        if not path_raw:
+            # skip if no path (e.g., dummy tasks in tests)
+            return
+        path = Path(path_raw)
         if not path.exists():
             self.set_status_message(self._t("STATUS_NO_TASKS"))
             return
@@ -1136,9 +1140,13 @@ class TaskTrackerTUI:
         return [t for t in self.tasks if t.status == self.current_filter]
 
     def compute_signature(self) -> int:
+        if getattr(self, "project_mode", False):
+            return 0
         return self.manager.compute_signature()
 
     def maybe_reload(self):
+        if getattr(self, "project_mode", False):
+            return
         _maybe_reload_helper(self)
 
     def load_tasks(self, preserve_selection: bool = False, selected_task_file: Optional[str] = None, skip_sync: bool = False):
