@@ -7,6 +7,7 @@ import os
 import random
 import subprocess
 import time
+import yaml
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +46,32 @@ _RATE_RESET_MODE = DEFAULT_RESET_BEHAVIOR
 
 
 _RATE_LIMITER = RateLimiter()
+
+
+def _load_token() -> str:
+    """Best-effort token resolver with fallbacks.
+
+    Priority:
+    1. APPLY_TASK_GITHUB_TOKEN
+    2. GITHUB_TOKEN
+    3. GH_TOKEN
+    4. ~/.apply_task_config.yaml (get_user_token)
+    5. GitHub CLI auth (~/.config/gh/hosts.yml)
+    """
+    token = os.getenv("APPLY_TASK_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or get_user_token()
+    if token:
+        return token.strip()
+    gh_hosts = Path.home() / ".config" / "gh" / "hosts.yml"
+    if gh_hosts.exists():
+        try:
+            hosts = yaml.safe_load(gh_hosts.read_text()) or {}
+            gh = hosts.get("github.com") or {}
+            tok = gh.get("oauth_token") or gh.get("user_token")
+            if tok:
+                return str(tok).strip()
+        except Exception:
+            pass
+    return ""
 
 
 class ProjectsSyncPermissionError(RuntimeError):
@@ -134,6 +161,7 @@ class ProjectsSync:
         self._viewer_login: Optional[str] = None
         self._project_lookup_failed: bool = False
         self._metadata_attempted: bool = False
+        self.token = _load_token()
         if self.config and self.config.schema_ttl_seconds:
             # применяем кастомный TTL из конфигурации
             global SCHEMA_CACHE_TTL
