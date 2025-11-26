@@ -22,8 +22,7 @@ def test_build_status_text_basic():
                 status_message="",
                 status_message_expires=0,
                 detail_mode=False,
-                single_subtask_view=False,
-            )
+                            )
 
         def _t(self, key, **kwargs):
             return key
@@ -55,6 +54,17 @@ def test_build_status_text_basic():
 
 
 def test_build_status_text_filter_flash(monkeypatch):
+    translations = {
+        "BTN_BACK": "[BACK]",
+        "BTN_SETTINGS": "[SETTINGS]",
+        "FILTER_ALL": "ALL",
+        "FILTER_DONE": "DONE",
+        "FILTER_IN_PROGRESS": "IN PROGRESS",
+        "FILTER_BACKLOG": "BACKLOG",
+        "STATUS_TASKS_COUNT": "{count} tasks",
+        "STATUS_LOADING": "Loading",
+    }
+
     class DummyTUI(SimpleNamespace):
         def __init__(self):
             super().__init__(
@@ -68,11 +78,14 @@ def test_build_status_text_filter_flash(monkeypatch):
                 status_message="",
                 status_message_expires=0,
                 detail_mode=False,
-                single_subtask_view=False,
             )
 
         def _t(self, key, **kwargs):
-            return key
+            tpl = translations.get(key, key)
+            try:
+                return tpl.format(**kwargs)
+            except Exception:
+                return tpl
 
         def _sync_indicator_fragments(self, flash=False):
             return [("class", "sync")]
@@ -111,8 +124,7 @@ def test_build_status_text_spinner_and_status_message_clear():
                 status_message="stale",
                 status_message_expires=0,
                 detail_mode=True,
-                single_subtask_view=False,
-                _last_filter_value=None,
+                                _last_filter_value=None,
             )
 
         def _t(self, key, **kwargs):
@@ -159,8 +171,7 @@ def test_build_status_text_width_fallback_and_settings_handler():
                 status_message="",
                 status_message_expires=10,
                 detail_mode=False,
-                single_subtask_view=False,
-                _last_filter_value=None,
+                                _last_filter_value=None,
             )
 
         def _t(self, key, **kwargs):
@@ -210,8 +221,7 @@ def test_status_handlers_return_not_implemented():
         status_message="",
         status_message_expires=0,
         detail_mode=True,
-        single_subtask_view=False,
-    )
+            )
 
     def _t(key, **kwargs):
         return key
@@ -243,8 +253,7 @@ def test_status_message_displayed_when_not_expired():
                 status_message="msg",
                 status_message_expires=time.time() + 10,
                 detail_mode=False,
-                single_subtask_view=False,
-            )
+                            )
 
         def _t(self, key, **kwargs):
             return key
@@ -285,8 +294,7 @@ def test_status_message_expired_clears():
                 status_message="old",
                 status_message_expires=time.time() - 1,
                 detail_mode=False,
-                single_subtask_view=False,
-            )
+                            )
 
         def _t(self, key, **kwargs):
             return key
@@ -327,8 +335,7 @@ def test_status_filter_flash_changes_on_new_filter():
                 status_message="",
                 status_message_expires=0,
                 detail_mode=False,
-                single_subtask_view=False,
-                _last_filter_value="ALL",
+                                _last_filter_value="ALL",
             )
 
         def _t(self, key, **kwargs):
@@ -370,8 +377,7 @@ def test_status_message_shown_with_flash_and_spinner():
                 status_message="msg",
                 status_message_expires=time.time() + 1,
                 detail_mode=False,
-                single_subtask_view=False,
-                _last_filter_value="ALL",
+                                _last_filter_value="ALL",
             )
 
         def _t(self, key, **kwargs):
@@ -400,6 +406,17 @@ def test_status_message_shown_with_flash_and_spinner():
 
 
 def test_status_filter_flash_sets_flag():
+    translations = {
+        "BTN_BACK": "[BACK]",
+        "BTN_SETTINGS": "[SETTINGS]",
+        "FILTER_ALL": "ALL",
+        "FILTER_DONE": "DONE",
+        "FILTER_IN_PROGRESS": "IN PROGRESS",
+        "FILTER_BACKLOG": "BACKLOG",
+        "STATUS_TASKS_COUNT": "{count} tasks",
+        "STATUS_LOADING": "Loading",
+    }
+
     class Dummy(SimpleNamespace):
         def __init__(self):
             super().__init__(
@@ -412,13 +429,16 @@ def test_status_filter_flash_sets_flag():
                 spinner_message="",
                 status_message="",
                 status_message_expires=0,
-                detail_mode=False,
-                single_subtask_view=True,
+                detail_mode=True,
                 _last_filter_value="ALL",
             )
 
         def _t(self, key, **kwargs):
-            return key
+            tpl = translations.get(key, key)
+            try:
+                return tpl.format(**kwargs)
+            except Exception:
+                return tpl
 
         def _sync_indicator_fragments(self, flash=False):
             return []

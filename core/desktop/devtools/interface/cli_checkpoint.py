@@ -15,6 +15,7 @@ from core.desktop.devtools.interface.i18n import translate
 from core.desktop.devtools.interface.cli_interactive import prompt, is_interactive, subtask_flags
 from core.desktop.devtools.interface.serializers import subtask_to_dict, task_to_dict
 from core.desktop.devtools.interface.subtask_loader import SubtaskParseError, _load_input_source
+from core.desktop.devtools.interface.cli_activity import write_activity_marker
 
 
 def _parse_bulk_operations(raw: str) -> List[Dict[str, Any]]:
@@ -112,6 +113,10 @@ def cmd_bulk(args) -> int:
                 "blockers": detail.subtasks[index].blockers_resolved,
             }
         results.append(entry_payload)
+    # Write activity markers for all successful operations
+    for r in results:
+        if r.get("status") == "OK":
+            write_activity_marker(r.get("task", ""), "bulk", subtask_path=str(r.get("index", "")), tasks_dir=getattr(manager, "tasks_dir", None))
     message = f"Выполнено операций: {sum(1 for r in results if r.get('status') == 'OK')}/{len(results)}"
     return structured_response(
         "bulk",
@@ -229,6 +234,7 @@ def cmd_checkpoint(args) -> int:
 
     detail = manager.load_task(task_id, domain)
     save_last_task(task_id, domain)
+    write_activity_marker(task_id, "checkpoint", subtask_path=path, tasks_dir=getattr(manager, "tasks_dir", None))
     payload = {
         "task": task_to_dict(detail, include_subtasks=True) if detail else {"id": task_id},
         "subtask_path": path,

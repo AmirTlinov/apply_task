@@ -3,7 +3,8 @@ from types import SimpleNamespace
 from core.desktop.devtools.interface.tui_settings_panel import render_settings_panel
 
 
-def test_settings_panel_renders_options_and_hints():
+def test_settings_panel_renders_options():
+    """Test that settings panel renders option labels and values (hints are now in footer)."""
     class Dummy(SimpleNamespace):
         def __init__(self):
             super().__init__(
@@ -17,7 +18,7 @@ def test_settings_panel_renders_options_and_hints():
 
         def _settings_options(self):
             return [
-                {"label": "Opt1", "value": "V", "hint": "Hint"},
+                {"label": "Opt1", "value": "V", "hint": "Hint goes to footer"},
                 {"label": "Opt2", "value": "Very long value that will be trimmed"},
             ]
 
@@ -29,7 +30,9 @@ def test_settings_panel_renders_options_and_hints():
 
     tui = Dummy()
     text = "".join(part[1] for part in render_settings_panel(tui))
-    assert "Opt1" in text and "Hint" in text
+    # Hints moved to footer, so panel should only show labels and values
+    assert "Opt1" in text
+    assert "Opt2" in text
 
 
 def test_settings_panel_empty_options():

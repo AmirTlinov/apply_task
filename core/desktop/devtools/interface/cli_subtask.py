@@ -8,6 +8,7 @@ from core.desktop.devtools.interface.cli_io import structured_response, structur
 from core.desktop.devtools.interface.i18n import translate
 from core.desktop.devtools.interface.serializers import subtask_to_dict, task_to_dict
 from core.desktop.devtools.application.context import save_last_task, derive_domain_explicit, normalize_task_id
+from core.desktop.devtools.interface.cli_activity import write_activity_marker
 
 
 def _parse_semicolon_list(raw: Optional[str]) -> List[str]:
@@ -68,6 +69,7 @@ def cmd_subtask(args) -> int:
             payload = _snapshot(path=args.path)
             payload["operation"] = "add"
             payload["subtask_title"] = args.add.strip()
+            write_activity_marker(task_id, "subtask-add", subtask_path=args.path, tasks_dir=getattr(manager, "tasks_dir", None))
             return structured_response(
                 "subtask",
                 status="OK",
@@ -92,6 +94,7 @@ def cmd_subtask(args) -> int:
             payload["operation"] = action
             summary_suffix = "DONE" if desired else "UNDO"
             message = f"Подзадача {args.path or target_idx} " + ("отмечена выполненной" if desired else "возвращена в работу") + f" в {task_id}"
+            write_activity_marker(task_id, f"subtask-{action}", subtask_path=args.path or str(target_idx), tasks_dir=getattr(manager, "tasks_dir", None))
             return structured_response(
                 "subtask",
                 status="OK",
@@ -134,6 +137,7 @@ def cmd_subtask(args) -> int:
         payload["operation"] = action
         if note:
             payload["note"] = note
+        write_activity_marker(task_id, f"subtask-{action}", subtask_path=args.path or str(index_map.get(action, 0)), tasks_dir=getattr(manager, "tasks_dir", None))
         return structured_response(
             "subtask",
             status="OK",

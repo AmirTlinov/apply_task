@@ -93,6 +93,7 @@ def test_delete_current_item_list():
     class Manager:
         def delete_task(self, task_id, domain):
             calls["deleted"] = (task_id, domain)
+            return True
 
     class TUI(SimpleNamespace):
         def __init__(self):
@@ -101,8 +102,42 @@ def test_delete_current_item_list():
         def load_tasks(self, preserve_selection=False, skip_sync=False):
             calls["loaded"] = (preserve_selection, skip_sync)
 
+        def set_status_message(self, msg, ttl=0):
+            calls["status"] = msg
+
+        def _t(self, key, **kwargs):
+            return key
+
     tui_actions.delete_current_item(TUI())
     assert calls["deleted"] == ("X", "d") and calls["loaded"][0] is False
+    assert calls["status"] == "STATUS_MESSAGE_DELETED"
+
+
+def test_delete_current_item_list_fails():
+    calls = {}
+
+    class Manager:
+        def delete_task(self, task_id, domain):
+            calls["deleted"] = (task_id, domain)
+            return False
+
+    class TUI(SimpleNamespace):
+        def __init__(self):
+            super().__init__(filtered_tasks=[SimpleNamespace(id="Y", domain="d")], selected_index=0, manager=Manager())
+
+        def load_tasks(self, preserve_selection=False, skip_sync=False):
+            calls["loaded"] = True
+
+        def set_status_message(self, msg, ttl=0):
+            calls["status"] = msg
+
+        def _t(self, key, **kwargs):
+            return key
+
+    tui_actions.delete_current_item(TUI())
+    assert calls["deleted"] == ("Y", "d")
+    assert "loaded" not in calls  # load_tasks should NOT be called on failure
+    assert calls["status"] == "ERR_DELETE_FAILED"
 
 
 def test_delete_current_item_detail():

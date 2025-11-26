@@ -49,12 +49,6 @@ def render_settings_panel(tui) -> FormattedText:
         lines.append(("class:border", "| "))
         lines.append((style, row_text.ljust(inner_width)))
         lines.append(("class:border", " |\n"))
-        if idx == tui.settings_selected_index and option.get("hint"):
-            hint_lines = textwrap.wrap(option["hint"], width - 6) or [""]
-            for hint_line in hint_lines:
-                lines.append(("class:border", "| "))
-                lines.append(("class:text.dim", f"  {hint_line}".ljust(inner_width)))
-                lines.append(("class:border", " |\n"))
 
     hidden_above = start
     hidden_below = len(options) - end

@@ -202,12 +202,16 @@ def _subtask_completion_blockers(subtask: SubTask, translator) -> Optional[str]:
 class TaskManager:
     def __init__(
         self,
-        tasks_dir: Path = Path(".tasks"),
+        tasks_dir: Optional[Path] = None,
         repository: Optional[TaskRepository] = None,
         sync_service: Optional[SyncService] = None,
         sync_provider=None,
     ):
-        self.tasks_dir = tasks_dir
+        if tasks_dir is None:
+            from core.desktop.devtools.interface.tasks_dir_resolver import get_tasks_dir_for_project
+            self.tasks_dir = get_tasks_dir_for_project(use_global=True)
+        else:
+            self.tasks_dir = tasks_dir
         self.tasks_dir.mkdir(exist_ok=True)
         self.repo: TaskRepository = repository or FileTaskRepository(tasks_dir)
         # sync_provider оставлен для обратной совместимости; sync_service — основной путь

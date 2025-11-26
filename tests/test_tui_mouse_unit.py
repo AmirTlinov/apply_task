@@ -23,20 +23,6 @@ def test_middle_paste_triggers_clipboard():
     assert called.get("paste")
 
 
-def test_single_subtask_view_scroll():
-    moves = []
-
-    class TUI:
-        single_subtask_view = True
-
-        def move_vertical_selection(self, delta):
-            moves.append(delta)
-
-    tui_mouse.handle_body_mouse(TUI(), _mouse(MouseEventType.SCROLL_DOWN))
-    tui_mouse.handle_body_mouse(TUI(), _mouse(MouseEventType.SCROLL_UP))
-    assert moves == [1, -1]
-
-
 def test_settings_mode_scroll_and_click():
     actions = []
 
@@ -90,11 +76,6 @@ def test_scroll_with_shift_up_clamps_left():
     assert tui.horizontal_offset == 0
 
 
-def test_single_subtask_view_other_event_returns_false():
-    result = tui_mouse._handle_single_subtask_view(SimpleNamespace(single_subtask_view=True), _mouse(MouseEventType.MOUSE_UP))
-    assert result is False
-
-
 def test_settings_mode_none_when_editing():
     res = tui_mouse._handle_settings_mode(SimpleNamespace(settings_mode=True, editing_mode=True), _mouse(MouseEventType.SCROLL_DOWN))
     assert res is None
@@ -103,14 +84,6 @@ def test_settings_mode_none_when_editing():
 def test_handle_scroll_non_scroll_event():
     res = tui_mouse._handle_scroll(SimpleNamespace(), _mouse(MouseEventType.MOUSE_UP))
     assert res is False
-
-
-def test_detail_click_single_subtask_view_skips():
-    res = tui_mouse._handle_detail_click(
-        SimpleNamespace(detail_mode=True, current_task_detail=True, single_subtask_view=True),
-        _mouse(MouseEventType.MOUSE_UP, y=0),
-    )
-    assert res is None
 
 
 def test_detail_click_without_detail_returns_true():

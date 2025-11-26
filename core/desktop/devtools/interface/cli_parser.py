@@ -379,4 +379,34 @@ def build_parser(commands: Any, themes: Mapping[str, Any], default_theme: str, a
     add_context_args(auto_ckp)
     auto_ckp.set_defaults(func=commands.cmd_automation_checkpoint)
 
+    # ai (AI-first interface)
+    ai_p = sub.add_parser(
+        "ai",
+        help="AI-first JSON интерфейс для агентов",
+        description=(
+            "Единый JSON in/out интерфейс для ИИ-агентов.\n"
+            "Intents: context, create, decompose, define, verify, progress, complete, batch.\n"
+            "Пример: tasks ai '{\"intent\": \"context\"}'"
+        ),
+    )
+    ai_p.add_argument("json_input", nargs="?", help="JSON строка или '-' для STDIN")
+    ai_p.add_argument("--global", "-g", dest="use_global", action="store_true", help="Использовать глобальное хранилище ~/.tasks")
+    add_context_args(ai_p)
+    ai_p.set_defaults(func=commands.cmd_ai)
+
+    # mcp (MCP stdio server)
+    mcp_p = sub.add_parser(
+        "mcp",
+        help="Запустить MCP stdio сервер для AI-ассистентов",
+        description=(
+            "MCP (Model Context Protocol) stdio сервер.\n"
+            "Позволяет Claude Desktop и другим AI-ассистентам работать с задачами.\n\n"
+            "Конфигурация Claude Desktop:\n"
+            '  {"mcpServers": {"tasks": {"command": "tasks", "args": ["mcp"]}}}'
+        ),
+    )
+    mcp_p.add_argument("--tasks-dir", type=str, help="Директория задач")
+    mcp_p.add_argument("--local", action="store_true", help="Использовать локальное .tasks вместо глобального")
+    mcp_p.set_defaults(func=commands.cmd_mcp)
+
     return parser

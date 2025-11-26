@@ -44,6 +44,9 @@ class FileTaskRepository(TaskRepository):
         root = self.tasks_dir / domain_path if domain_path else self.tasks_dir
         tasks: List[TaskDetail] = []
         for file in root.rglob("TASK-*.task"):
+            # Skip snapshots directory
+            if ".snapshots" in file.parts:
+                continue
             parsed = TaskFileParser.parse(file)
             if parsed:
                 self._assign_domain(parsed, file)
@@ -53,6 +56,8 @@ class FileTaskRepository(TaskRepository):
     def compute_signature(self) -> int:
         sig = 0
         for f in self.tasks_dir.rglob("TASK-*.task"):
+            if ".snapshots" in f.parts:
+                continue
             try:
                 sig ^= int(f.stat().st_mtime_ns)
             except OSError:
@@ -62,6 +67,8 @@ class FileTaskRepository(TaskRepository):
     def next_id(self) -> str:
         ids = []
         for f in self.tasks_dir.rglob("TASK-*.task"):
+            if ".snapshots" in f.parts:
+                continue
             try:
                 ids.append(int(f.stem.split("-")[1]))
             except (IndexError, ValueError):
@@ -73,7 +80,7 @@ class FileTaskRepository(TaskRepository):
         path = self._resolve_path(task_id, domain)
         candidates = [path]
         if not path.exists():
-            candidates = list(self.tasks_dir.rglob(f"{task_id}.task"))
+            candidates = [f for f in self.tasks_dir.rglob(f"{task_id}.task") if ".snapshots" not in f.parts]
         deleted = False
         for candidate in candidates:
             try:
@@ -103,6 +110,8 @@ class FileTaskRepository(TaskRepository):
     def move_glob(self, pattern: str, new_domain: str) -> int:
         moved = 0
         for file in self.tasks_dir.rglob("TASK-*.task"):
+            if ".snapshots" in file.parts:
+                continue
             try:
                 rel = file.relative_to(self.tasks_dir)
             except Exception:
@@ -116,6 +125,8 @@ class FileTaskRepository(TaskRepository):
     def delete_glob(self, pattern: str) -> int:
         removed = 0
         for file in self.tasks_dir.rglob("TASK-*.task"):
+            if ".snapshots" in file.parts:
+                continue
             try:
                 rel = file.relative_to(self.tasks_dir)
             except Exception:
@@ -136,6 +147,8 @@ class FileTaskRepository(TaskRepository):
         norm_phase = phase.strip().lower() if phase else ""
 
         for file in self.tasks_dir.rglob("TASK-*.task"):
+            if ".snapshots" in file.parts:
+                continue
             parsed = TaskFileParser.parse(file)
             if not parsed:
                 continue

@@ -123,7 +123,7 @@ def cmd_create_guided(args) -> int:
 
 
 def cmd_automation_task_create(args) -> int:
-    from core.desktop.devtools.interface.tasks_app import _automation_template_payload, _ensure_tmp_dir, _load_note, _resolve_parent, _write_json
+    from core.desktop.devtools.interface.cli_automation import _automation_template_payload, _ensure_tmp_dir, _load_note, _resolve_parent, _write_json
 
     parent = _resolve_parent(args.parent)
     if not parent:
@@ -186,7 +186,8 @@ def cmd_automation_task_create(args) -> int:
         auto_args += ["--dependency", dep]
 
     if getattr(args, "dry_run", False):
-        print("DRY RUN:", "apply_task", " ".join(auto_args))
+        safe_args = [str(x) for x in auto_args if x is not None]
+        print("DRY RUN:", "apply_task", " ".join(safe_args))
         return 0
 
     from core.desktop.devtools.interface.cli_io import structured_response
@@ -207,7 +208,7 @@ def cmd_automation_task_create(args) -> int:
 
 def cmd_automation_checkpoint(args) -> int:
     from core.desktop.devtools.interface.cli_io import structured_response, structured_error
-    from core.desktop.devtools.interface.tasks_app import _load_note
+    from core.desktop.devtools.interface.cli_automation import _load_note
 
     task_id = getattr(args, "task_id", None)
     index = int(getattr(args, "index", 0))

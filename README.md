@@ -142,9 +142,10 @@ apply_task tui
 
 ## Additional docs
 
-- [SCROLLING.md](SCROLLING.md) — TUI navigation & scrolling design.
-- [UI_UX_IMPROVEMENTS.md](UI_UX_IMPROVEMENTS.md) — rationale behind the interface.
 - [CHANGES.md](CHANGES.md) — latest UX/feature notes.
+- [SCROLLING.md](SCROLLING.md) — TUI navigation & scrolling design.
+- [UI_UX_IMPROVEMENTS.md](UI_UX_IMPROVEMENTS.md) — rationale behind the responsive interface.
+- [GIT_PROJECT.md](GIT_PROJECT.md) — git-aware workflow details.
 - `automation` shortcuts: `apply_task automation --help` (templates, auto-create, checkpoint, health, projects-health).
 
 ## GitHub Projects v2 sync

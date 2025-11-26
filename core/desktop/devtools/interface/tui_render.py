@@ -1,5 +1,6 @@
 """Rendering helpers for TaskTrackerTUI to keep the class slim."""
 
+import time
 from typing import Dict, List, Tuple
 
 from prompt_toolkit.formatted_text import FormattedText
@@ -7,6 +8,32 @@ from prompt_toolkit.mouse_events import MouseEventType, MouseButton
 
 from core import Status
 from util.responsive import ResponsiveLayoutManager
+
+
+def _is_task_cli_active(tui, task) -> bool:
+    """Check if task has active CLI activity indicator."""
+    cli_task_id = getattr(tui, "_cli_activity_task_id", None)
+    expires = getattr(tui, "_cli_activity_expires", 0)
+    if not cli_task_id or time.time() > expires:
+        return False
+    return task.id == cli_task_id
+
+
+def _is_subtask_cli_active(tui, subtask_path: str) -> bool:
+    """Check if subtask has active CLI activity indicator."""
+    cli_task_id = getattr(tui, "_cli_activity_task_id", None)
+    cli_subtask_path = getattr(tui, "_cli_activity_subtask_path", None)
+    expires = getattr(tui, "_cli_activity_expires", 0)
+    if not cli_task_id or time.time() > expires:
+        return False
+    # Check if current detail view is for the active task
+    if not tui.current_task_detail or tui.current_task_detail.id != cli_task_id:
+        return False
+    # If no specific subtask path, all subtasks of this task are considered active
+    if not cli_subtask_path:
+        return True
+    # Check if the path matches or is a parent/child of the active path
+    return subtask_path == cli_subtask_path or subtask_path.startswith(cli_subtask_path + ".") or cli_subtask_path.startswith(subtask_path + ".")
 
 
 def render_task_list_text(tui) -> FormattedText:
@@ -106,7 +133,15 @@ def render_task_list_text_impl(tui) -> FormattedText:
 
         if 'title' in layout.columns:
             title_scrolled = tui._apply_scroll(task.name)
-            cell_data['title'] = (tui._format_cell(title_scrolled, widths['title']), 'class:text')
+            # Add CLI activity indicator
+            cli_active = _is_task_cli_active(tui, task)
+            if cli_active:
+                # Prepend activity indicator (⚡) to title
+                activity_prefix = "⚡"
+                title_with_indicator = activity_prefix + title_scrolled
+                cell_data['title'] = (tui._format_cell(title_with_indicator, widths['title']), 'class:icon.warn')
+            else:
+                cell_data['title'] = (tui._format_cell(title_scrolled, widths['title']), 'class:text')
 
         if 'progress' in layout.columns:
             prog_text = f"{task.progress}%"
@@ -325,6 +360,11 @@ def render_detail_text_impl(tui) -> FormattedText:
         if tui.horizontal_offset > 0:
             st_title = st_title[tui.horizontal_offset:] if len(st_title) > tui.horizontal_offset else ""
 
+        # Check for CLI activity on this subtask
+        subtask_cli_active = _is_subtask_cli_active(tui, path)
+        if subtask_cli_active:
+            st_title = "⚡" + st_title
+
         sub_status = tui._subtask_status(st)
         symbol, icon_class = tui._status_indicator(sub_status)
         if selected:
@@ -354,7 +394,9 @@ def render_detail_text_impl(tui) -> FormattedText:
                 flag_text.append(('class:text.dim', ' '))
         flag_width = len(' [• • •]')
         title_width = max(5, content_width - 2 - prefix_len - flag_width)
-        title_style = tui._merge_styles('class:text', bg_style) if selected else 'class:text'
+        # Use warning style for CLI-active subtasks
+        base_title_style = 'class:icon.warn' if subtask_cli_active else 'class:text'
+        title_style = tui._merge_styles(base_title_style, bg_style) if selected else base_title_style
         result.append((title_style, st_title[:title_width].ljust(title_width)))
         bracket_style = tui._merge_styles('class:text.dim', bg_style) if selected else 'class:text.dim'
         result.append((bracket_style, ' ['))
@@ -404,6 +446,22 @@ def render_detail_text_impl(tui) -> FormattedText:
             _append_block(tui._t("CRITERIA"), getattr(st_sel, "success_criteria", []))
             _append_block(tui._t("TESTS"), getattr(st_sel, "tests", []))
             _append_block(tui._t("BLOCKERS"), getattr(st_sel, "blockers", []))
+
+            # Add timestamps section if available
+            created_at = getattr(st_sel, "created_at", None)
+            completed_at = getattr(st_sel, "completed_at", None)
+            if created_at or completed_at:
+                detail_lines.append(('class:border', '| '))
+                detail_lines.append(('class:text.dim', f" {tui._t('SUBTASK_TIMESTAMPS')}:".ljust(content_width - 2)))
+                detail_lines.append(('class:border', ' |\n'))
+                if created_at:
+                    detail_lines.append(('class:border', '| '))
+                    detail_lines.append(('class:text', f"  {tui._t('SUBTASK_CREATED')}: {created_at}".ljust(content_width - 2)))
+                    detail_lines.append(('class:border', ' |\n'))
+                if completed_at:
+                    detail_lines.append(('class:border', '| '))
+                    detail_lines.append(('class:text', f"  {tui._t('SUBTASK_COMPLETED')}: {completed_at}".ljust(content_width - 2)))
+                    detail_lines.append(('class:border', ' |\n'))
 
             sliced = tui._slice_formatted_lines(detail_lines, 0, remaining)
             result.extend(sliced)
@@ -480,119 +538,6 @@ def render_detail_text_impl(tui) -> FormattedText:
     return FormattedText(output)
 
 
-def render_subtask_details(tui, path: str):
-    return render_subtask_details_impl(tui, path)
-
-
-def render_subtask_details_impl(tui, path: str):
-    if not tui.current_task_detail:
-        return
-    subtask = tui._get_subtask_by_path(path)
-    if not subtask:
-        return
-    tui._subtask_detail_buffer = []
-    tui._select_subtask_by_path(path)
-    tui._set_footer_height(0)
-    term_width = tui.get_terminal_width()
-    content_width = tui._detail_content_width(term_width)
-
-    lines: List[Tuple[str, str]] = []
-    group_id = 0
-
-    def next_group() -> int:
-        nonlocal group_id
-        group_id += 1
-        return group_id
-    lines.append(('class:border', '+' + '='*content_width + '+\n'))
-
-    def back_handler(event):
-        if event.event_type == MouseEventType.MOUSE_UP and event.button == MouseButton.LEFT:
-            tui.exit_detail_view()
-            return None
-        return NotImplemented
-
-    sub_status = tui._subtask_status(subtask)
-    symbol, icon_style = tui._status_indicator(sub_status)
-    header_label = f"SUBTASK {path}"
-    lines.append(('class:border', '| '))
-    lines.append((icon_style, f"{symbol} "))
-    inner_width = content_width - 2
-    remaining = max(0, inner_width - 2)
-    lines.append(('class:header', tui._pad_display(header_label, remaining)))
-    lines.append(('class:border', ' |\n'))
-    lines.append(('class:border', '+' + '-'*content_width + '+\n'))
-    header_lines = tui._formatted_lines(lines)
-    tui._subtask_header_lines_count = max(1, len(header_lines) - 1)
-
-    for line in header_lines:
-        line_text = "".join(text for _, text in line)
-        tui._subtask_detail_buffer.append(('class:header', f"{line_text}\n"))
-
-    text = subtask.title
-    for ch in tui._wrap_display(text, content_width - 2):
-        lines.append(('class:border', '| '))
-        lines.append(('class:text', ch))
-        lines.append(('class:border', ' |\n'))
-
-    lines.append(('class:border', '+' + '-'*content_width + '+\n'))
-
-    def append_indicator_row(entries: List[Tuple[str, bool]]):
-        inner = content_width - 2
-        lines.append(('class:border', '| '))
-        for label, flag in entries:
-            glyph = '✓' if flag else '·'
-            glyph_style = 'class:icon.check' if flag else 'class:text.dim'
-            chunk = f"[{glyph}] {label}"
-            chunk = tui._pad_display(chunk, 12)
-            lines.append((glyph_style, chunk))
-            inner -= len(chunk)
-        if inner > 0:
-            lines.append(('class:text.dim', ' ' * inner))
-        lines.append(('class:border', ' |\n'))
-
-    append_indicator_row([
-        (tui._t("CHECKPOINT_CRITERIA"), subtask.criteria_confirmed),
-        (tui._t("CHECKPOINT_TESTS"), subtask.tests_confirmed),
-        (tui._t("CHECKPOINT_BLOCKERS"), subtask.blockers_resolved),
-    ])
-
-    lines.append(('class:border', '+' + '-'*content_width + '+\n'))
-
-    def append_section(title: str, items: List[str]):
-        nonlocal group_id
-        if not items:
-            return
-        lines.append(('class:border', '| '))
-        lines.append(('class:header', f"{title}:".ljust(content_width - 2)))
-        lines.append(('class:border', ' |\n'))
-        tui._subtask_detail_buffer.append((tui._item_style(group_id), f"{title}\n"))
-        group_id = next_group()
-        for item in items:
-            continuation = False
-            for wrapped in tui._wrap_display(item, content_width - 4):
-                style = tui._item_style(group_id, continuation=continuation)
-                lines.append(('class:border', '|  '))
-                lines.append(('class:text', wrapped))
-                lines.append(('class:border', ' |\n'))
-                tui._subtask_detail_buffer.append((style, f"{wrapped}\n"))
-                continuation = True
-
-    append_section(tui._t("CRITERIA"), subtask.success_criteria)
-    append_section(tui._t("TESTS"), subtask.tests)
-    append_section(tui._t("BLOCKERS"), subtask.blockers)
-    append_section(tui._t("DESCRIPTION"), getattr(subtask, "notes", []) or [])
-
-    lines.append(('class:border', '+' + '='*content_width + '+'))
-    tui._subtask_detail_buffer.append((tui._item_style(next_group()), "footer\n"))
-    tui._subtask_detail_total_lines = len(tui._subtask_detail_buffer)
-
-    tui.detail_mode = True
-    tui.subtask_detail_scroll = 0
-    tui.subtask_detail_cursor = 0
-    tui._render_single_subtask_view(max(40, tui.get_terminal_width() - 2))
-    tui.force_render()
-
-
 def _trim_to_height(fragments: List[Tuple[str, str]], max_lines: int) -> FormattedText:
     if max_lines <= 0:
         return FormattedText([])
@@ -602,74 +547,103 @@ def _trim_to_height(fragments: List[Tuple[str, str]], max_lines: int) -> Formatt
     return FormattedText([("", clamped)])
 
 
-def render_single_subtask_view(tui, content_width: int) -> None:
-    """Apply vertical scroll to a single-subtask card, keeping header pinned."""
-    if not getattr(tui, "_subtask_detail_buffer", None):
-        return
-    lines = tui._formatted_lines(tui._subtask_detail_buffer)
-    total = len(lines)
-    pinned = min(total, getattr(tui, "_subtask_header_lines_count", 0))
-    scrollable = lines[pinned:]
-    focusables = tui._focusable_line_indices(lines)
-    if total:
-        tui.subtask_detail_cursor = tui._snap_cursor(tui.subtask_detail_cursor, focusables)
+def render_checkpoint_view(tui) -> FormattedText:
+    return render_checkpoint_view_impl(tui)
 
-    offset, visible_content, indicator_top, indicator_bottom, remaining_below = tui._calculate_subtask_viewport(
-        total=len(lines),
-        pinned=pinned,
-    )
 
-    visible_lines = scrollable[offset: offset + visible_content]
+def render_checkpoint_view_impl(tui) -> FormattedText:
+    if not tui.current_task_detail or not getattr(tui, "detail_selected_path", ""):
+        return FormattedText([("class:text.dim", tui._t("STATUS_TASK_NOT_SELECTED"))])
 
-    rendered: List[Tuple[str, str]] = []
-    for idx, line in enumerate(lines[:pinned]):
-        global_idx = idx
-        highlight = global_idx == tui.subtask_detail_cursor and global_idx in focusables
-        style_prefix = 'class:selected' if highlight else None
-        for frag_style, frag_text in line:
-            is_border = frag_style and 'border' in frag_style
-            style = tui._merge_styles(style_prefix, frag_style) if (highlight and not is_border) else frag_style
-            rendered.append((style, frag_text))
-        if pinned and idx < pinned - 1:
-            rendered.append(('', '\n'))
+    path = tui.detail_selected_path
+    subtask = tui._get_subtask_by_path(path)
+    if not subtask:
+        return FormattedText([("class:text.dim", tui._t("ERR_SUBTASK_NOT_FOUND"))])
 
-    if pinned and (indicator_top or visible_lines):
-        rendered.append(('', '\n'))
+    term_width = max(1, tui.get_terminal_width())
+    content_width = tui._detail_content_width(term_width)
+    
+    result: List[Tuple[str, str]] = []
+    
+    # Compact Header (similar to task list)
+    header_line = '+' + '-' * (content_width - 2) + '+'
+    header_style = 'class:border.dim'
+    
+    result.append((header_style, header_line + '\n'))
+    
+    # Title Row
+    title_display = f"{tui._t('CHECKPOINTS')}: {subtask.title}"
+    if tui.horizontal_offset > 0:
+        title_display = title_display[tui.horizontal_offset:] if len(title_display) > tui.horizontal_offset else ""
+    
+    result.append(('class:border', '| '))
+    result.append(('class:header', tui._pad_display(title_display, content_width - 4)))
+    result.append(('class:border', ' |\n'))
+    
+    result.append((header_style, header_line + '\n'))
 
-    if indicator_top:
-        rendered.extend([
-            ('class:border', '| '),
-            ('class:text.dim', tui._pad_display(f"↑ +{offset}", content_width - 2)),
-            ('class:border', ' |\n'),
-        ])
+    # Checkpoints List
+    checkpoints_data = [
+        ("criteria", tui._t("CHECKPOINT_CRITERIA"), subtask.criteria_confirmed, subtask.success_criteria),
+        ("tests", tui._t("CHECKPOINT_TESTS"), subtask.tests_confirmed, subtask.tests),
+        ("blockers", tui._t("CHECKPOINT_BLOCKERS"), subtask.blockers_resolved, subtask.blockers),
+    ]
 
-    visible_meta: List[Tuple[List[Tuple[str, str]], int, int, bool]] = []
-    selected_group: int | None = None
-    for idx, line in enumerate(visible_lines):
-        global_idx = pinned + offset + idx
-        group = tui._extract_group(line)
-        is_cursor = global_idx == tui.subtask_detail_cursor and global_idx in focusables
-        if is_cursor:
-            selected_group = group
-        visible_meta.append((line, global_idx, group, is_cursor))
+    tui.checkpoint_row_map = []
+    line_counter = 0
+    # Count header lines
+    for frag in result:
+        if isinstance(frag, tuple) and len(frag) >= 2:
+            line_counter += frag[1].count('\n')
 
-    for idx, (line, global_idx, group, is_cursor) in enumerate(visible_meta):
-        highlight = is_cursor or (selected_group is not None and group == selected_group and group is not None)
-        style_prefix = 'class:selected' if highlight else None
-        for frag_style, frag_text in line:
-            is_border = frag_style and 'border' in frag_style
-            style = tui._merge_styles(style_prefix, frag_style) if (highlight and not is_border) else frag_style
-            rendered.append((style, frag_text))
-        if idx < len(visible_meta) - 1:
-            rendered.append(('', '\n'))
+    for idx, (key, label, done, content_items) in enumerate(checkpoints_data):
+        selected = idx == getattr(tui, "checkpoint_selected_index", 0)
+        style_key = "selected" if selected else "text"
+        bg_style = "class:selected" if selected else None
+        
+        # Row Border
+        result.append(('class:border', '|'))
+        
+        # Checkbox
+        checkbox = "[x]" if done else "[ ]"
+        checkbox_style = "class:icon.check" if done else "class:text.dim"
+        if selected:
+            checkbox_style = tui._merge_styles(checkbox_style, bg_style)
+            
+        result.append((checkbox_style, f" {checkbox} "))
+        
+        # Label
+        label_text = label.ljust(content_width - 8)
+        label_style = tui._merge_styles(f"class:{style_key}", bg_style) if selected else f"class:{style_key}"
+        result.append((label_style, label_text))
+        
+        result.append(('class:border', '|\n'))
+        tui.checkpoint_row_map.append((line_counter, idx))
+        line_counter += 1
+        
+        # Render Content (always visible or only when selected? Plan said "below the header row when selected or always". Let's do always for now as it's cleaner)
+        if content_items:
+            for item in content_items:
+                prefix = "      - "
+                wrapped = tui._wrap_display(item, content_width - 10)
+                for line in wrapped:
+                    result.append(('class:border', '|'))
+                    content_style = tui._merge_styles("class:text.dim", bg_style) if selected else "class:text.dim"
+                    result.append((content_style, prefix + line.ljust(content_width - 10 - len(prefix))))
+                    result.append(('class:border', '|\n'))
+                    line_counter += 1
 
-    if indicator_bottom:
-        if rendered and not rendered[-1][1].endswith('\n'):
-            rendered.append(('', '\n'))
-        rendered.extend([
-            ('class:border', '| '),
-            ('class:text.dim', tui._pad_display(f"↓ +{remaining_below}", content_width - 2)),
-            ('class:border', ' |\n'),
-        ])
+    result.append((header_style, header_line + '\n'))
+    
+    # Instructions Footer
+    instructions = [
+        "SPACE/ENTER: Toggle  UP/DOWN: Navigate  ESC: Back"
+    ]
+    for instr in instructions:
+        result.append(('class:border', '| '))
+        result.append(('class:text.dim', instr.center(content_width - 4)))
+        result.append(('class:border', ' |\n'))
+        
+    result.append((header_style, header_line))
 
-    tui.single_subtask_view = FormattedText(rendered)
+    return FormattedText(result)

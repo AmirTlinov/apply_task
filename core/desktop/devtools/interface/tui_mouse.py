@@ -15,18 +15,6 @@ def _handle_middle_paste(tui, mouse_event):
     return False
 
 
-def _handle_single_subtask_view(tui, mouse_event):
-    if not getattr(tui, "single_subtask_view", None):
-        return None
-    if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
-        tui.move_vertical_selection(1)
-        return True
-    if mouse_event.event_type == MouseEventType.SCROLL_UP:
-        tui.move_vertical_selection(-1)
-        return True
-    return False
-
-
 def _handle_settings_mode(tui, mouse_event):
     if not getattr(tui, "settings_mode", False) or getattr(tui, "editing_mode", False):
         return None
@@ -66,8 +54,6 @@ def _handle_detail_click(tui, mouse_event):
         return None
     if not getattr(tui, "current_task_detail", None):
         return True
-    if getattr(tui, "single_subtask_view", None):
-        return None
     idx = tui._subtask_index_from_y(mouse_event.position.y)
     if idx is None or not getattr(tui, "detail_flat_subtasks", None):
         return True
@@ -98,9 +84,6 @@ def _handle_list_click(tui, mouse_event):
 def handle_body_mouse(tui, mouse_event):
     """Route mouse events for TaskTrackerTUI body."""
     if _handle_middle_paste(tui, mouse_event):
-        return None
-    single = _handle_single_subtask_view(tui, mouse_event)
-    if single:
         return None
     if getattr(tui, "editing_mode", False):
         return NotImplemented

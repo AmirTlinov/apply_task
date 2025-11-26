@@ -18,7 +18,7 @@ The TUI now clamps the task table to the terminal width: columns shrink and refl
 | 110–139        | Stat, Title, Progress, Subtasks (roomy)               |
 | ≥ 140          | Stat, Title, Progress, Subtasks (wide)                |
 
-Subtasks remain visible down to 72 px thanks to the compact layout (see [SUBTASKS_VISIBILITY_FIX.md](SUBTASKS_VISIBILITY_FIX.md)).
+Subtasks remain visible down to 72 px thanks to the compact layout .
 
 ## Task list refactor
 

@@ -85,10 +85,14 @@ def delete_current_item(tui) -> None:
 
     if getattr(tui, "filtered_tasks", None):
         task = tui.filtered_tasks[tui.selected_index]
-        tui.manager.delete_task(task.id, task.domain)
-        if tui.selected_index >= len(tui.filtered_tasks) - 1:
-            tui.selected_index = max(0, len(tui.filtered_tasks) - 2)
-        tui.load_tasks(preserve_selection=False, skip_sync=True)
+        deleted = tui.manager.delete_task(task.id, task.domain)
+        if deleted:
+            if tui.selected_index >= len(tui.filtered_tasks) - 1:
+                tui.selected_index = max(0, len(tui.filtered_tasks) - 2)
+            tui.load_tasks(preserve_selection=False, skip_sync=True)
+            tui.set_status_message(tui._t("STATUS_MESSAGE_DELETED", task_id=task.id))
+        else:
+            tui.set_status_message(tui._t("ERR_DELETE_FAILED", task_id=task.id))
 
 
 __all__ = ["activate_settings_option", "delete_current_item"]

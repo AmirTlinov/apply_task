@@ -2,6 +2,8 @@
 
 from typing import Optional
 
+from core.desktop.devtools.interface.cli_activity import read_activity_marker, ACTIVITY_TTL
+
 
 def toggle_collapse_selected(tui) -> None:
     if tui.detail_mode or not tui.filtered_tasks:
@@ -52,13 +54,32 @@ def maybe_reload(tui, now: Optional[float] = None) -> None:
     if ts - tui._last_check < 0.7:
         return
     tui._last_check = ts
+
+    # Check for CLI activity marker
+    activity = read_activity_marker(getattr(tui, "tasks_dir", None))
+    if activity:
+        task_id = activity.get("task_id", "")
+        subtask_path = activity.get("subtask_path")
+        command = activity.get("command", "")
+        timestamp = activity.get("timestamp", 0)
+        # Store activity info for rendering
+        tui._cli_activity_task_id = task_id
+        tui._cli_activity_subtask_path = subtask_path
+        tui._cli_activity_command = command
+        tui._cli_activity_expires = timestamp + ACTIVITY_TTL
+    else:
+        # Clear expired activity
+        if ts > getattr(tui, "_cli_activity_expires", 0):
+            tui._cli_activity_task_id = None
+            tui._cli_activity_subtask_path = None
+            tui._cli_activity_command = None
+
     sig = tui.compute_signature()
     if sig == tui._last_signature:
         return
     selected_task_file = tui.tasks[tui.selected_index].task_file if tui.tasks else None
     prev_detail = tui.current_task_detail.id if (tui.detail_mode and tui.current_task_detail) else None
     prev_detail_path = tui.detail_selected_path
-    prev_single = getattr(tui, "single_subtask_view", None)
 
     tui.load_tasks(preserve_selection=True, selected_task_file=selected_task_file, skip_sync=True)
     tui._last_signature = sig
@@ -73,14 +94,7 @@ def maybe_reload(tui, now: Optional[float] = None) -> None:
                 tui._select_subtask_by_path(prev_detail_path)
             items = tui.get_detail_items_count()
             tui._ensure_detail_selection_visible(items)
-            if prev_single and prev_detail_path:
-                st = tui._get_subtask_by_path(prev_detail_path)
-                if st:
-                    tui.show_subtask_details(prev_detail_path)
             break
 
 
 __all__ = ["toggle_collapse_selected", "toggle_subtask_collapse", "maybe_reload"]
-
-
-__all__ = ["toggle_collapse_selected", "maybe_reload"]
