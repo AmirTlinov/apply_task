@@ -350,7 +350,25 @@ class ProjectsSync:
     def _load_config(self) -> Optional[ProjectConfig]:
         data = _read_project_file(self.config_path)
         if not data:
-            return None
+            # auto-bootstrap minimal config from current repo
+            try:
+                owner, repo = detect_repo_slug()
+            except RuntimeError as exc:
+                # no git remote — disable projects sync silently
+                self.detect_error = str(exc)
+                return None
+            data = {
+                "project": {
+                    "type": "repository",
+                    "owner": owner,
+                    "repo": repo,
+                    "number": None,
+                    "enabled": True,
+                    "workers": 0,
+                },
+                "fields": DEFAULT_FIELDS_CONFIG["fields"],
+            }
+            _write_project_file(data, self.config_path)
         project = data.get("project") or {}
         fields_cfg = {}
         for alias, cfg in (data.get("fields") or {}).items():
