@@ -6,7 +6,7 @@ import logging
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -169,7 +169,7 @@ def _clean_tasks_fallback(repo, matcher) -> Tuple[List[str], int]:
     return matched, removed
 
 
-def _locate_subtask(task: TaskDetail, index: int, path: Optional[str]):
+def _locate_subtask(task: TaskDetail, index: int, path: Optional[str]) -> Tuple[Optional["SubTask"], Optional[str]]:
     if path:
         st, _, _ = _find_subtask_by_path(task.subtasks, path)
         return st, None if st else "index"
@@ -483,7 +483,7 @@ class TaskManager:
             base_sync.last_push = datetime.now().strftime(TIMESTAMP_FORMAT)
         return changed_count
 
-    def _make_parallel_sync(self, base_sync):
+    def _make_parallel_sync(self, base_sync: Any) -> Any:
         """Сохраняем совместимость с тестами: возвращаем клон сервиса."""
         return base_sync.clone() if hasattr(base_sync, "clone") else base_sync
 
