@@ -7,7 +7,6 @@ from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.mouse_events import MouseButton, MouseEventType
 
 from core import Status
-from core.desktop.devtools.application.context import derive_domain_explicit
 from core.desktop.devtools.interface.ai_state import get_ai_state, AIStatus
 
 
@@ -17,7 +16,6 @@ def build_status_text(tui) -> FormattedText:
     ok = sum(1 for t in items if t.status == Status.OK)
     warn = sum(1 for t in items if t.status == Status.WARN)
     fail = sum(1 for t in items if t.status == Status.FAIL)
-    ctx = tui.domain_filter or derive_domain_explicit("", tui.phase_filter, tui.component_filter) or "."
     filter_labels = {
         "OK": tui._t("FILTER_DONE"),
         "WARN": tui._t("FILTER_IN_PROGRESS"),
