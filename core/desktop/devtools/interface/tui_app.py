@@ -713,7 +713,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
 
     def _get_root_task_context(self) -> tuple[str, str, str]:
         """Get root task ID, domain, and path prefix for nested navigation.
-        
+
         Returns (root_task_id, root_domain, path_prefix).
         When inside a subtask via navigation_stack, returns the actual root task info.
         """
@@ -722,7 +722,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
             task_id = self.current_task_detail.id if self.current_task_detail else ""
             domain = self.current_task_detail.domain if self.current_task_detail else ""
             return task_id, domain, ""
-        
+
         # Get root from bottom of navigation stack
         root_context = self.navigation_stack[0]
         root_detail = root_context.get("detail")
@@ -731,10 +731,10 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
             task_id = self.current_task_detail.id if self.current_task_detail else ""
             domain = self.current_task_detail.domain if self.current_task_detail else ""
             return task_id, domain, ""
-        
+
         root_task_id = root_detail.id
         root_domain = root_detail.domain or ""
-        
+
         # Build path prefix from navigation stack
         # Each entry in stack has "selected_path" which is the path we entered
         path_parts = []
@@ -742,7 +742,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
             selected_path = ctx.get("selected_path", "")
             if selected_path:
                 path_parts.append(selected_path)
-        
+
         path_prefix = ".".join(path_parts) if path_parts else ""
         return root_task_id, root_domain, path_prefix
 
@@ -1200,7 +1200,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
 
     def _update_tasks_list_silent(self, skip_sync: bool = False):
         """Update tasks list without resetting view state (detail_mode, current_task, etc.)
-        
+
         Use this when you need to refresh the task list after a modification
         but want to keep the user in their current view (e.g., detail mode).
         """
@@ -1209,7 +1209,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
         saved_current_task = self.current_task
         saved_current_task_detail = self.current_task_detail
         saved_selected_index = self.selected_index
-        
+
         domain_path = derive_domain_explicit(self.domain_filter, self.phase_filter, self.component_filter)
         details = self.manager.list_tasks(domain_path, skip_sync=skip_sync)
         details = apply_context_filters(details, self.phase_filter, self.component_filter)
@@ -1236,13 +1236,13 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
             )
 
         self.tasks = build_task_models(details, _task_factory)
-        
+
         # Restore view state
         self.detail_mode = saved_detail_mode
         self.current_task = saved_current_task
         self.current_task_detail = saved_current_task_detail
         self.selected_index = saved_selected_index
-        
+
         # Update cache for current task if it was refreshed
         if saved_current_task_detail:
             for task in self.tasks:
@@ -1254,7 +1254,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
                         self.current_task_detail = updated_detail
                         self.task_details_cache[task.id] = updated_detail
                     break
-        
+
         self._last_signature = self.compute_signature()
         if self.selected_index >= len(self.filtered_tasks):
             self.selected_index = max(0, len(self.filtered_tasks) - 1)
@@ -1432,7 +1432,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
         subtask = self._get_subtask_by_path(path)
         if not subtask:
             return
-        
+
         # Save current context to navigation stack
         self.navigation_stack.append({
             "task": self.current_task,
@@ -1440,12 +1440,12 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
             "selected_index": self.detail_selected_index,
             "selected_path": self.detail_selected_path,
         })
-        
+
         # Convert subtask to task detail
         from core.task_detail import subtask_to_task_detail
         parent_id = self.current_task_detail.id
         new_detail = subtask_to_task_detail(subtask, parent_id, path)
-        
+
         # Set as current task detail
         self.current_task_detail = new_detail
         self.detail_mode = True
@@ -1466,28 +1466,28 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
             if entry:
                 path, st, _, _, _ = entry
                 desired = not st.completed
-                
+
                 # Get root task context for nested navigation
                 root_task_id, root_domain, path_prefix = self._get_root_task_context()
-                
+
                 # Build full path from root
                 if path_prefix:
                     full_path = f"{path_prefix}.{path}"
                 else:
                     full_path = path
-                
+
                 # force=True - пользователь может отметить без проверки чекпоинтов
                 ok, msg = self.manager.set_subtask(root_task_id, 0, desired, root_domain, path=full_path, force=True)
                 if not ok:
                     self.set_status_message(msg or self._t("STATUS_MESSAGE_CHECKPOINTS_REQUIRED"))
                     return
-                
+
                 # Reload root task and update current view
                 updated_root = self.manager.load_task(root_task_id, root_domain, skip_sync=True)
                 if updated_root:
                     # Update cache
                     self.task_details_cache[root_task_id] = updated_root
-                    
+
                     # If we're at root level, update current_task_detail directly
                     if not self.navigation_stack:
                         self.current_task_detail = updated_root
@@ -1500,9 +1500,9 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
                             new_detail = subtask_to_task_detail(subtask, root_task_id, path_prefix)
                             new_detail.domain = root_domain
                             self.current_task_detail = new_detail
-                    
+
                     self._rebuild_detail_flat(path)
-                
+
                 # Update tasks list without resetting view state
                 self._update_tasks_list_silent(skip_sync=True)
                 self.force_render()
@@ -1546,7 +1546,6 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
             return
 
         context = self.edit_context
-        task = self.current_task_detail
         raw_value = self.edit_buffer.text
         new_value = raw_value.strip()
 
@@ -1929,7 +1928,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
         subtask = self._get_subtask_by_path(path)
         if not subtask:
             return
-        
+
         checkpoints = ["criteria", "tests", "blockers"]
         if 0 <= self.checkpoint_selected_index < len(checkpoints):
             key = checkpoints[self.checkpoint_selected_index]
@@ -1943,16 +1942,16 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
             elif key == "blockers":
                 current = subtask.blockers_resolved
                 subtask.blockers_resolved = not current
-            
+
             # Get root task context for nested navigation
             root_task_id, root_domain, path_prefix = self._get_root_task_context()
-            
+
             # Build full path from root
             if path_prefix:
                 full_path = f"{path_prefix}.{path}"
             else:
                 full_path = path
-            
+
             # Save changes
             try:
                 top_level_index = int(full_path.split(".")[0])
@@ -1970,7 +1969,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
                 if updated_root:
                     # Update cache
                     self.task_details_cache[root_task_id] = updated_root
-                    
+
                     # If we're at root level, update current_task_detail directly
                     if not self.navigation_stack:
                         self.current_task_detail = updated_root
@@ -1982,9 +1981,9 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
                             new_detail = subtask_to_task_detail(nested_subtask, root_task_id, path_prefix)
                             new_detail.domain = root_domain
                             self.current_task_detail = new_detail
-                    
+
                     self._rebuild_detail_flat(path)
-                
+
                 # Update tasks list without resetting view state
                 self._update_tasks_list_silent(skip_sync=True)
                 save_last_task(root_task_id, root_domain)
@@ -1997,7 +1996,6 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
         self.force_render()
 
 def cmd_tui(args) -> int:
-    tasks_dir_arg = Path.cwd() / ".tasks"  # unused but kept for interface; constructor ignores and uses global default
     tui = TaskTrackerTUI(
         tasks_dir=None,  # force internal resolver to pick global project storage
         theme=getattr(args, "theme", DEFAULT_THEME),

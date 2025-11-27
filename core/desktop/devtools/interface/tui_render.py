@@ -191,7 +191,6 @@ def render_detail_text_impl(tui) -> FormattedText:
     result: List[Tuple[str, str]] = []
 
     content_width = tui._detail_content_width()
-    compact = tui.get_terminal_height() < 32 or content_width < 90
 
     result.append(('class:border', '+' + '='*content_width + '+\n'))
     inner_width = max(0, content_width - 2)
@@ -564,24 +563,24 @@ def render_checkpoint_view_impl(tui) -> FormattedText:
 
     term_width = max(1, tui.get_terminal_width())
     content_width = tui._detail_content_width(term_width)
-    
+
     result: List[Tuple[str, str]] = []
-    
+
     # Compact Header (similar to task list)
     header_line = '+' + '-' * (content_width - 2) + '+'
     header_style = 'class:border.dim'
-    
+
     result.append((header_style, header_line + '\n'))
-    
+
     # Title Row
     title_display = f"{tui._t('CHECKPOINTS')}: {subtask.title}"
     if tui.horizontal_offset > 0:
         title_display = title_display[tui.horizontal_offset:] if len(title_display) > tui.horizontal_offset else ""
-    
+
     result.append(('class:border', '| '))
     result.append(('class:header', tui._pad_display(title_display, content_width - 4)))
     result.append(('class:border', ' |\n'))
-    
+
     result.append((header_style, header_line + '\n'))
 
     # Checkpoints List
@@ -602,27 +601,27 @@ def render_checkpoint_view_impl(tui) -> FormattedText:
         selected = idx == getattr(tui, "checkpoint_selected_index", 0)
         style_key = "selected" if selected else "text"
         bg_style = "class:selected" if selected else None
-        
+
         # Row Border
         result.append(('class:border', '|'))
-        
+
         # Checkbox
         checkbox = "[x]" if done else "[ ]"
         checkbox_style = "class:icon.check" if done else "class:text.dim"
         if selected:
             checkbox_style = tui._merge_styles(checkbox_style, bg_style)
-            
+
         result.append((checkbox_style, f" {checkbox} "))
-        
+
         # Label
         label_text = label.ljust(content_width - 8)
         label_style = tui._merge_styles(f"class:{style_key}", bg_style) if selected else f"class:{style_key}"
         result.append((label_style, label_text))
-        
+
         result.append(('class:border', '|\n'))
         tui.checkpoint_row_map.append((line_counter, idx))
         line_counter += 1
-        
+
         # Render Content (always visible or only when selected? Plan said "below the header row when selected or always". Let's do always for now as it's cleaner)
         if content_items:
             for item in content_items:
@@ -636,7 +635,7 @@ def render_checkpoint_view_impl(tui) -> FormattedText:
                     line_counter += 1
 
     result.append((header_style, header_line + '\n'))
-    
+
     # Instructions Footer
     instructions = [
         "SPACE/ENTER: Toggle  UP/DOWN: Navigate  ESC: Back"
@@ -645,7 +644,7 @@ def render_checkpoint_view_impl(tui) -> FormattedText:
         result.append(('class:border', '| '))
         result.append(('class:text.dim', instr.center(content_width - 4)))
         result.append(('class:border', ' |\n'))
-        
+
     result.append((header_style, header_line))
 
     return FormattedText(result)

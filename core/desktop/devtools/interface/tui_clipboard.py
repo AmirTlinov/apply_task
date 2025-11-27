@@ -11,6 +11,7 @@ except ImportError:
     PyperclipClipboard = None  # type: ignore[misc,assignment]
 
 if TYPE_CHECKING:
+    from prompt_toolkit.buffer import Buffer
     from prompt_toolkit.clipboard import Clipboard
 
 
@@ -19,7 +20,7 @@ class ClipboardMixin:
 
     clipboard: Optional["Clipboard"]
     editing_mode: bool
-    edit_buffer: "Buffer"  # type: ignore[name-defined]
+    edit_buffer: "Buffer"
 
     def _t(self, key: str, **kwargs) -> str:
         """Translation stub - implemented by main class."""

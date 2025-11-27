@@ -30,7 +30,10 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from core import SubTask
 
 import re
 from core.desktop.devtools.interface.tasks_dir_resolver import resolve_project_root
@@ -138,8 +141,8 @@ def validate_subtasks_data(subtasks: List[Dict], depth: int = 0) -> Optional[str
         if err:
             return err
 
-        for field in ["criteria", "tests", "blockers"]:
-            err = validate_array(st.get(field), f"{field} подзадачи {i}", 100)
+        for field_name in ["criteria", "tests", "blockers"]:
+            err = validate_array(st.get(field_name), f"{field_name} подзадачи {i}", 100)
             if err:
                 return err
 
@@ -1013,9 +1016,9 @@ def handle_define(
         return error_response("define", "INVALID_PATH", err)
 
     # SEC-002: Validate arrays
-    for field in ["criteria", "tests", "blockers"]:
-        if field in data:
-            err = validate_array(data[field], field, 100)
+    for field_name in ["criteria", "tests", "blockers"]:
+        if field_name in data:
+            err = validate_array(data[field_name], field_name, 100)
             if err:
                 return error_response("define", "INVALID_DATA", err)
 
@@ -1981,7 +1984,6 @@ def handle_undo(
     if not history.can_undo():
         return error_response("undo", "NOTHING_TO_UNDO", "Нет операций для отмены")
 
-    op = history.get_undo_operation()
     success, error, undone_op = history.undo(tasks_dir)
 
     if not success:
@@ -2023,7 +2025,6 @@ def handle_redo(
     if not history.can_redo():
         return error_response("redo", "NOTHING_TO_REDO", "Нет операций для повтора")
 
-    op = history.get_redo_operation()
     success, error, redo_op = history.redo(tasks_dir)
 
     if not success:
