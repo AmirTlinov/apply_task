@@ -33,9 +33,6 @@ from dataclasses import dataclass, field
 from core.desktop.devtools.application.task_manager import TaskManager
 from core.desktop.devtools.interface.cli_ai import (
     process_intent,
-    INTENT_HANDLERS,
-    MODIFYING_INTENTS,
-    READONLY_INTENTS,
     get_project_tasks_dir,
 )
 from core.desktop.devtools.interface.tasks_dir_resolver import resolve_project_root

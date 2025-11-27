@@ -1,6 +1,5 @@
 """Navigation helpers for TaskTrackerTUI to keep tasks_app slim."""
 
-from typing import List
 
 
 def move_vertical_selection(tui, delta: int) -> None:

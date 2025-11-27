@@ -1,6 +1,5 @@
 """Action handlers extracted from TaskTrackerTUI to reduce coupling."""
 
-from typing import Any
 
 from projects_sync import update_projects_enabled, reload_projects_sync
 from core.desktop.devtools.application.task_manager import _find_subtask_by_path

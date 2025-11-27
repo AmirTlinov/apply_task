@@ -4,7 +4,6 @@ from typing import Dict, List, Tuple
 
 from core import SubTask
 from core.desktop.devtools.application.task_manager import _flatten_subtasks
-from core.desktop.devtools.interface.i18n import translate
 
 CHECKLIST_SECTIONS = [
     ("context", ["context", "контекст", "why", "motivation"], "Обоснование и цель", ["because", "зачем", "причина"]),

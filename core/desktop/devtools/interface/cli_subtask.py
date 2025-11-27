@@ -7,7 +7,7 @@ from core.desktop.devtools.application.task_manager import TaskManager, _find_su
 from core.desktop.devtools.interface.cli_io import structured_response, structured_error
 from core.desktop.devtools.interface.i18n import translate
 from core.desktop.devtools.interface.serializers import subtask_to_dict, task_to_dict
-from core.desktop.devtools.application.context import save_last_task, derive_domain_explicit, normalize_task_id
+from core.desktop.devtools.application.context import derive_domain_explicit, normalize_task_id
 from core.desktop.devtools.interface.cli_activity import write_activity_marker
 
 

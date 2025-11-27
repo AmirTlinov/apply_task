@@ -4,7 +4,6 @@ import time
 from typing import Dict, List, Tuple
 
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.mouse_events import MouseEventType, MouseButton
 
 from core import Status
 from util.responsive import ResponsiveLayoutManager

@@ -4,7 +4,6 @@ from typing import Callable, List, Tuple
 
 from core.desktop.devtools.application.task_manager import TaskManager
 from core.desktop.devtools.interface.i18n import translate
-from core.desktop.devtools.interface.cli_commands import CliDeps
 from core import TaskDetail, Status
 
 
