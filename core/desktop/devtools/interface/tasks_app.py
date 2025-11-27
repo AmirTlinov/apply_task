@@ -152,7 +152,6 @@ __all__ = [
 
 def cmd_mcp(args) -> int:
     """Запустить MCP stdio сервер."""
-    from pathlib import Path
     tasks_dir = Path(args.tasks_dir) if getattr(args, "tasks_dir", None) else None
     use_global = not getattr(args, "local", False)
     _mcp_run(tasks_dir=tasks_dir, use_global=use_global)

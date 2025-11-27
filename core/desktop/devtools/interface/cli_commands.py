@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict
 
 from core.task_detail import TaskDetail
 from core.desktop.devtools.interface.cli_io import structured_error, structured_response

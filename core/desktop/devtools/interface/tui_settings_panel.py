@@ -1,6 +1,5 @@
 """Settings panel renderer extracted from TaskTrackerTUI."""
 
-import textwrap
 from typing import List, Tuple
 
 from prompt_toolkit.formatted_text import FormattedText

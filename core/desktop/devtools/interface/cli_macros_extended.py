@@ -9,7 +9,7 @@ from core.desktop.devtools.application.context import (
     resolve_task_reference,
     save_last_task,
 )
-from core.desktop.devtools.application.recommendations import next_recommendations, quick_overview, suggest_tasks
+from core.desktop.devtools.application.recommendations import quick_overview, suggest_tasks
 from core.desktop.devtools.application.task_manager import TaskManager
 from core.desktop.devtools.interface.cli_io import structured_error, structured_response
 from core.desktop.devtools.interface.i18n import translate

@@ -1,9 +1,8 @@
 """CLI handlers for task creation to keep tasks_app slim."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from core import TaskDetail
-from application.ports import TaskRepository  # typing only
 from core.desktop.devtools.application.task_manager import TaskManager
 from core.desktop.devtools.interface.cli_io import structured_error, structured_response, validation_response
 from core.desktop.devtools.interface.i18n import translate
@@ -21,10 +20,6 @@ from core.desktop.devtools.application.context import (
     parse_smart_title,
 )
 from core.desktop.devtools.interface.templates import load_template
-from core.desktop.devtools.interface.subtask_validation import (
-    validate_subtasks_coverage,
-    validate_subtasks_quality,
-)
 
 
 def _fail(args, message: str, payload: Optional[Dict[str, Any]] = None, kind: str = "create") -> int:
