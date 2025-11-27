@@ -127,8 +127,8 @@ def test_collapse_expand_toggles_visibility(tmp_path):
     assert "0.0" in expanded
 
 
-def test_collapse_state_persists_per_task(tmp_path):
-    tui = build_tui(tmp_path)
+    def test_collapse_state_persists_per_task(tmp_path):
+        tui = build_tui(tmp_path, project_mode=False)
     child = SubTask(False, "Child", success_criteria=["c"], tests=["t"], blockers=["b"])
     parent = SubTask(False, "Parent", success_criteria=["p"], tests=["t"], blockers=["b"], children=[child])
     detail = TaskDetail(id="TASK-PERSIST", title="Demo", status="WARN")
@@ -277,5 +277,4 @@ def test_border_lines_not_focusable(tmp_path):
     assert 0 not in focusables
     assert 2 not in focusables
     assert 1 in focusables  # строка с текстом остаётся кликабельной
-
 
