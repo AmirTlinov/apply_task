@@ -1,10 +1,11 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 from pathlib import Path
 from datetime import datetime, timezone
 import yaml
 
 from .subtask import SubTask
+from .task_event import TaskEvent
 
 
 @dataclass
@@ -39,7 +40,9 @@ class TaskDetail:
     project_issue_number: Optional[str] = None
     _source_path: Optional[str] = None
     _source_mtime: float = 0.0
-    history: List[str] = field(default_factory=list)
+    history: List[str] = field(default_factory=list)  # Legacy text history
+    events: List[TaskEvent] = field(default_factory=list)  # Structured event log
+    depends_on: List[str] = field(default_factory=list)  # Task IDs this task depends on
 
     def calculate_progress(self) -> int:
         def flatten(nodes):
@@ -115,6 +118,10 @@ class TaskDetail:
             metadata["subtask_project_ids"] = subtask_ids
         if self.status_manual:
             metadata["status_manual"] = True
+        if self.depends_on:
+            metadata["depends_on"] = self.depends_on
+        if self.events:
+            metadata["events"] = [e.to_dict() for e in self.events]
 
         lines = ["---", yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip(), "---", ""]
         lines.append(f"# {self.title}\n")
@@ -157,6 +164,17 @@ class TaskDetail:
                     lines.append(f"{pad_detail}- Отметки тестов: " + "; ".join(st.tests_notes))
                 if st.blockers_notes:
                     lines.append(f"{pad_detail}- Отметки блокеров: " + "; ".join(st.blockers_notes))
+                # Phase 1 fields
+                if st.progress_notes:
+                    lines.append(f"{pad_detail}- Прогресс: " + "; ".join(st.progress_notes))
+                if st.started_at:
+                    lines.append(f"{pad_detail}- Начато: {st.started_at}")
+                if st.blocked or st.block_reason:
+                    block_value = "да" if st.blocked else "нет"
+                    if st.block_reason:
+                        lines.append(f"{pad_detail}- Заблокировано: {block_value}; {st.block_reason}")
+                    else:
+                        lines.append(f"{pad_detail}- Заблокировано: {block_value}")
                 for child in st.children:
                     dump_subtask(child, indent + 1)
             for st in self.subtasks:

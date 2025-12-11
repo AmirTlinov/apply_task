@@ -39,6 +39,7 @@ import re
 from core.desktop.devtools.interface.tasks_dir_resolver import resolve_project_root
 
 from core.desktop.devtools.application.task_manager import TaskManager, current_timestamp
+from core.desktop.devtools.application.context import derive_domain_explicit
 from core.desktop.devtools.interface.cli_activity import write_activity_marker
 from core.desktop.devtools.interface.serializers import task_to_dict
 from core.desktop.devtools.interface.cli_history import (
@@ -154,6 +155,11 @@ def validate_subtasks_data(subtasks: List[Dict], depth: int = 0) -> Optional[str
                 return err
 
     return None
+
+
+def _load_task(manager: TaskManager, task_id: str, domain: str = ""):
+    """Domain-aware task loader."""
+    return manager.load_task(task_id, domain or "")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -360,14 +366,18 @@ class Suggestion:
     target: str
     reason: str
     priority: str = "normal"  # high, normal, low
+    params: Dict[str, Any] = field(default_factory=dict)  # Additional parameters for the action
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "action": self.action,
             "target": self.target,
             "reason": self.reason,
             "priority": self.priority,
         }
+        if self.params:
+            result["params"] = self.params
+        return result
 
 
 @dataclass
@@ -519,14 +529,14 @@ class AIResponse:
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)
 
 
-def build_meta(manager: TaskManager, task_id: Optional[str] = None) -> Meta:
+def build_meta(manager: TaskManager, task_id: Optional[str] = None, domain_filter: str = "") -> Meta:
     """Построить мини-контекст для ответа."""
     meta = Meta()
 
     if not task_id:
         return meta
 
-    task = manager.load_task(task_id)
+    task = _load_task(manager, task_id, domain_filter)
     if not task:
         return meta
 
@@ -604,6 +614,7 @@ def build_context(
     task_id: Optional[str] = None,
     include_all_tasks: bool = False,
     compact: bool = False,
+    domain_filter: str = "",
 ) -> Dict[str, Any]:
     """Построить контекст для ИИ.
 
@@ -621,7 +632,7 @@ def build_context(
     if external_changes:
         ctx["external_changes"] = external_changes
 
-    all_tasks = manager.list_tasks()
+    all_tasks = manager.list_tasks(domain_filter or "")
     ctx["total_tasks"] = len(all_tasks)
 
     for t in all_tasks:
@@ -649,6 +660,147 @@ def build_context(
             manager.track_task(task_id, task)
 
     return ctx
+
+
+def render_context_markdown(
+    manager: TaskManager,
+    task_id: Optional[str] = None,
+    include_all_tasks: bool = False,
+    domain_filter: str = "",
+) -> str:
+    """Render context as prompt-friendly markdown for LLM consumption.
+
+    Optimized for:
+    - Compact yet complete information
+    - Clear structure for easy parsing
+    - Actionable next steps
+    - Minimal token usage
+    """
+    lines: List[str] = []
+    all_tasks = manager.list_tasks(domain_filter or "")
+
+    # Header with summary
+    by_status = {"OK": 0, "WARN": 0, "FAIL": 0}
+    for t in all_tasks:
+        by_status[t.status] = by_status.get(t.status, 0) + 1
+
+    lines.append(f"## Task Summary ({len(all_tasks)} total)")
+    lines.append(f"✅ OK: {by_status['OK']} | ⚠️ WARN: {by_status['WARN']} | ❌ FAIL: {by_status['FAIL']}")
+    lines.append("")
+
+    # All tasks list (if requested or no specific task)
+    if include_all_tasks or not task_id:
+        lines.append("### All Tasks")
+        for t in all_tasks:
+            status_icon = {"OK": "✅", "WARN": "⚠️", "FAIL": "❌"}.get(t.status, "❓")
+            progress = t.calculate_progress()
+            blocked_marker = " 🔒BLOCKED" if t.blocked else ""
+            lines.append(f"- {status_icon} `{t.id}` {t.title} ({progress}%){blocked_marker}")
+        lines.append("")
+
+    # Current task details
+    if task_id:
+        task = manager.load_task(task_id)
+        if task:
+            lines.append(f"## Current: {task.id}")
+            lines.append(f"**{task.title}**")
+            lines.append("")
+
+            if task.description:
+                lines.append(f"> {task.description}")
+                lines.append("")
+
+            # Status and progress
+            status_icon = {"OK": "✅", "WARN": "⚠️", "FAIL": "❌"}.get(task.status, "❓")
+            lines.append(f"Status: {status_icon} {task.status} | Progress: {task.calculate_progress()}%")
+
+            # Dependencies
+            if task.depends_on:
+                blocked_deps = []
+                for dep_id in task.depends_on:
+                    dep_task = manager.load_task(dep_id)
+                    if dep_task and dep_task.status != "OK":
+                        blocked_deps.append(dep_id)
+                if blocked_deps:
+                    lines.append(f"🔒 Blocked by: {', '.join(blocked_deps)}")
+                else:
+                    lines.append(f"Dependencies: {', '.join(task.depends_on)} (all resolved)")
+            lines.append("")
+
+            # Subtasks
+            if task.subtasks:
+                lines.append("### Subtasks")
+                _render_subtasks_md(task.subtasks, lines, "")
+                lines.append("")
+
+            # Success criteria
+            if task.success_criteria:
+                lines.append("### Success Criteria")
+                for sc in task.success_criteria:
+                    lines.append(f"- [ ] {sc}")
+                lines.append("")
+
+            # Risks
+            if task.risks:
+                lines.append("### Risks")
+                for risk in task.risks:
+                    lines.append(f"- ⚠️ {risk}")
+                lines.append("")
+
+            # Next actions
+            pending_subtasks = [
+                st for st in task.subtasks
+                if not st.completed and st.criteria_confirmed and st.tests_confirmed
+            ]
+            if pending_subtasks:
+                lines.append("### Ready for Completion")
+                for st in pending_subtasks[:3]:
+                    lines.append(f"- `{st.title}` — checkpoints confirmed, mark done")
+            else:
+                unconfirmed = [
+                    st for st in task.subtasks
+                    if not st.completed and (not st.criteria_confirmed or not st.tests_confirmed)
+                ]
+                if unconfirmed:
+                    lines.append("### Next: Confirm Checkpoints")
+                    for st in unconfirmed[:3]:
+                        missing = []
+                        if not st.criteria_confirmed:
+                            missing.append("criteria")
+                        if not st.tests_confirmed:
+                            missing.append("tests")
+                        lines.append(f"- `{st.title}` — confirm: {', '.join(missing)}")
+
+    return "\n".join(lines)
+
+
+def _render_subtasks_md(subtasks: List, lines: List[str], prefix: str, depth: int = 0) -> None:
+    """Recursively render subtasks as markdown."""
+    indent = "  " * depth
+    for i, st in enumerate(subtasks):
+        path = f"{prefix}{i}" if not prefix else f"{prefix}.{i}"
+        checkbox = "x" if st.completed else " "
+        checkpoint_status = ""
+        if not st.completed:
+            checks = []
+            if st.criteria_confirmed:
+                checks.append("✓crit")
+            if st.tests_confirmed:
+                checks.append("✓test")
+            if st.blockers_resolved:
+                checks.append("✓block")
+            if checks:
+                checkpoint_status = f" [{', '.join(checks)}]"
+        lines.append(f"{indent}- [{checkbox}] **{path}** {st.title}{checkpoint_status}")
+
+        # Show blockers if any
+        if st.blockers and not st.blockers_resolved:
+            for blocker in st.blockers:
+                lines.append(f"{indent}  - 🚫 {blocker}")
+
+        children = getattr(st, "children", [])
+        if children:
+            _render_subtasks_md(children, lines, path, depth + 1)
 
 
 def _build_subtasks_tree(
@@ -691,7 +843,7 @@ def _build_subtasks_tree(
 
 
 def generate_suggestions(
-    manager: TaskManager, task_id: Optional[str] = None
+    manager: TaskManager, task_id: Optional[str] = None, domain: str = ""
 ) -> List[Suggestion]:
     """Генерировать подсказки следующих действий."""
     suggestions = []
@@ -719,7 +871,13 @@ def generate_suggestions(
             )
         return suggestions
 
-    task = manager.load_task(task_id)
+    task = _load_task(manager, task_id, domain)
+    if not task:
+        # Fallback: try to locate task across all domains
+        for candidate in manager.list_tasks("", skip_sync=True):
+            if candidate.id == task_id:
+                task = candidate
+                break
     if not task:
         return suggestions
 
@@ -823,19 +981,231 @@ def handle_context(
         {"intent": "context", "task": "TASK-001"}
         {"intent": "context", "include_all": true}
         {"intent": "context", "compact": true}  # minimal output
+        {"intent": "context", "format": "markdown"}  # prompt-friendly markdown
     """
     task_id = data.get("task")
     include_all = data.get("include_all", False)
     compact = data.get("compact", False)
+    output_format = data.get("format", "json")
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
 
-    ctx = build_context(manager, task_id, include_all_tasks=include_all, compact=compact)
-    suggestions = generate_suggestions(manager, task_id)
+    # Markdown format for LLM prompts
+    if output_format == "markdown":
+        markdown = render_context_markdown(
+            manager, task_id, include_all_tasks=include_all, domain_filter=domain_path
+        )
+        return AIResponse(
+            success=True,
+            intent="context",
+            result={"markdown": markdown},
+            summary="Context rendered as markdown for LLM prompt",
+        )
+
+    # Default JSON format
+    ctx = build_context(manager, task_id, include_all_tasks=include_all, compact=compact, domain_filter=domain_path)
+    suggestions = generate_suggestions(manager, task_id, domain_path)
 
     return AIResponse(
         success=True,
         intent="context",
         result={"snapshot": ctx},
         context=ctx,
+        suggestions=suggestions,
+    )
+
+
+def handle_resume(
+    manager: TaskManager, data: Dict[str, Any]
+) -> AIResponse:
+    """Restore AI session context with timeline and dependencies.
+
+    Designed for AI agents resuming work after context loss.
+    Provides:
+    - Last task being worked on (from .last file)
+    - Task state with all checkpoints
+    - Event timeline (recent changes)
+    - Dependency status (blocked by which tasks)
+    - Clear next action suggestions
+
+    Input:
+        {"intent": "resume"}
+        {"intent": "resume", "task": "TASK-001"}  # specific task
+        {"intent": "resume", "events_limit": 20}  # limit events
+
+    Output:
+        {
+            "success": true,
+            "intent": "resume",
+            "result": {
+                "task": {...full task with subtasks...},
+                "timeline": [...recent events...],
+                "dependencies": {
+                    "depends_on": ["TASK-001", "TASK-002"],
+                    "blocked_by": ["TASK-001"],  # incomplete deps
+                    "blocking": ["TASK-005"]  # tasks waiting for this one
+                },
+                "checkpoint_status": {
+                    "pending": ["0", "1.0"],  # subtask paths needing checkpoints
+                    "ready": ["2"]  # subtasks ready for completion
+                }
+            },
+            "suggestions": [...]
+        }
+    """
+    from core import events_to_timeline, get_blocked_by_dependencies
+    from core.desktop.devtools.application.context import get_last_task
+
+    task_id = data.get("task")
+    events_limit = data.get("events_limit", 20)
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
+
+    # If no task specified, get last task from context
+    if not task_id:
+        last = get_last_task()
+        if last:
+            task_id, _ = last  # get_last_task() returns (task_id, domain) tuple
+
+    if not task_id:
+        return AIResponse(
+            success=True,
+            intent="resume",
+            result={
+                "task": None,
+                "timeline": [],
+                "dependencies": {},
+                "checkpoint_status": {},
+                "message": "No last task. Use 'context' intent with include_all=true to see all tasks.",
+            },
+            context=build_context(manager, include_all_tasks=True, domain_filter=domain_path),
+            suggestions=[
+                Suggestion(
+                    action="context",
+                    target="",
+                    reason="List all tasks to choose one",
+                    priority="high",
+                    params={"include_all": True},
+                )
+            ],
+        )
+
+    # Load the task
+    task = manager.load_task(task_id, domain_path)
+    if not task:
+        return error_response(
+            "resume",
+            "TASK_NOT_FOUND",
+            f"Task {task_id} not found",
+            recovery_action="context",
+            recovery_hint={"include_all": True},
+        )
+
+    # Build task dict with full details
+    task_dict = task_to_dict(task, include_subtasks=True)
+
+    # Build timeline from events
+    timeline = []
+    if task.events:
+        sorted_events = sorted(task.events, key=lambda e: e.timestamp or "", reverse=True)
+        for event in sorted_events[:events_limit]:
+            timeline.append({
+                "timestamp": event.timestamp,
+                "type": event.event_type,
+                "actor": event.actor,
+                "target": event.target,
+                "data": event.data,
+                "formatted": event.format_timeline(),
+            })
+
+    # Build dependency status
+    all_tasks = manager.list_all_tasks()
+    task_statuses = {t.id: t.status for t in all_tasks}
+
+    dependencies_info: Dict[str, Any] = {
+        "depends_on": list(task.depends_on),
+        "blocked_by": get_blocked_by_dependencies(task.id, task.depends_on, task_statuses),
+        "blocking": [],  # Tasks that depend on this one
+    }
+
+    # Find tasks that are blocked by this task
+    for t in all_tasks:
+        if task.id in t.depends_on:
+            dependencies_info["blocking"].append(t.id)
+
+    # Build checkpoint status for subtasks
+    checkpoint_status: Dict[str, List[str]] = {
+        "pending": [],  # Need checkpoints confirmed
+        "ready": [],    # Ready for completion
+    }
+
+    def analyze_subtasks(subtasks, prefix: str = "") -> None:
+        for i, st in enumerate(subtasks):
+            path = f"{prefix}{i}" if not prefix else f"{prefix}.{i}"
+            if st.completed:
+                continue
+            if st.ready_for_completion():
+                checkpoint_status["ready"].append(path)
+            else:
+                checkpoint_status["pending"].append(path)
+            # Recurse into children
+            if hasattr(st, "children") and st.children:
+                analyze_subtasks(st.children, f"{path}.")
+
+    analyze_subtasks(task.subtasks)
+
+    # Build suggestions
+    suggestions = []
+    if checkpoint_status["ready"]:
+        first_ready = checkpoint_status["ready"][0]
+        suggestions.append(
+            Suggestion(
+                action="done",
+                target=first_ready,
+                reason=f"Subtask {first_ready} has all checkpoints confirmed, ready for completion",
+                priority="high",
+                params={"task": task_id, "path": first_ready},
+            )
+        )
+    elif checkpoint_status["pending"]:
+        first_pending = checkpoint_status["pending"][0]
+        suggestions.append(
+            Suggestion(
+                action="verify",
+                target=first_pending,
+                reason=f"Subtask {first_pending} needs checkpoint confirmation",
+                priority="high",
+                params={"task": task_id, "path": first_pending},
+            )
+        )
+
+    if dependencies_info["blocked_by"]:
+        blocker = dependencies_info["blocked_by"][0]
+        suggestions.append(
+            Suggestion(
+                action="context",
+                target=blocker,
+                reason=f"Task is blocked by {blocker}, consider working on it first",
+                priority="medium",
+                params={"task": blocker},
+            )
+        )
+
+    return AIResponse(
+        success=True,
+        intent="resume",
+        result={
+            "task": task_dict,
+            "timeline": timeline,
+            "dependencies": dependencies_info,
+            "checkpoint_status": checkpoint_status,
+        },
+        context={
+            "task_id": task.id,
+            "status": task.status,
+            "progress": task.calculate_progress(),
+            "blocked": task.blocked,
+            "events_count": len(task.events),
+            "deps_count": len(task.depends_on),
+        },
         suggestions=suggestions,
     )
 
@@ -874,6 +1244,7 @@ def handle_decompose(
         }
     """
     task_id = data.get("task")
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
     if not task_id:
         return error_response("decompose", "MISSING_TASK", "Поле 'task' обязательно")
 
@@ -916,6 +1287,7 @@ def handle_decompose(
         success, error = manager.add_subtask(
             task_id,
             title,
+            domain=domain_path,
             criteria=criteria,
             tests=tests,
             blockers=blockers,
@@ -965,8 +1337,8 @@ def handle_decompose(
         tasks_dir=getattr(manager, "tasks_dir", None),
     )
 
-    ctx = build_context(manager, task_id)
-    suggestions = generate_suggestions(manager, task_id)
+    ctx = build_context(manager, task_id, domain_filter=domain_path)
+    suggestions = generate_suggestions(manager, task_id, domain_path)
 
     return AIResponse(
         success=True,
@@ -998,6 +1370,7 @@ def handle_define(
     """
     task_id = data.get("task")
     path = data.get("path")
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
 
     if not task_id:
         return error_response("define", "MISSING_TASK", "Поле 'task' обязательно")
@@ -1022,7 +1395,7 @@ def handle_define(
             if err:
                 return error_response("define", "INVALID_DATA", err)
 
-    task = manager.load_task(task_id)
+    task = _load_task(manager, task_id, domain_path)
     if not task:
         return error_response("define", "TASK_NOT_FOUND", f"Задача {task_id} не найдена")
 
@@ -1054,8 +1427,8 @@ def handle_define(
         tasks_dir=getattr(manager, "tasks_dir", None),
     )
 
-    ctx = build_context(manager, task_id)
-    suggestions = generate_suggestions(manager, task_id)
+    ctx = build_context(manager, task_id, domain_filter=domain_path)
+    suggestions = generate_suggestions(manager, task_id, domain_path)
 
     return AIResponse(
         success=True,
@@ -1091,6 +1464,7 @@ def handle_verify(
     task_id = data.get("task")
     path = data.get("path")
     checkpoints = data.get("checkpoints", {})
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
 
     if not task_id:
         return error_response("verify", "MISSING_TASK", "Поле 'task' обязательно")
@@ -1108,7 +1482,7 @@ def handle_verify(
     if err:
         return error_response("verify", "INVALID_PATH", err)
 
-    task = manager.load_task(task_id)
+    task = _load_task(manager, task_id, domain_path)
     if not task:
         return error_response("verify", "TASK_NOT_FOUND", f"Задача {task_id} не найдена")
 
@@ -1155,8 +1529,8 @@ def handle_verify(
         tasks_dir=getattr(manager, "tasks_dir", None),
     )
 
-    ctx = build_context(manager, task_id)
-    suggestions = generate_suggestions(manager, task_id)
+    ctx = build_context(manager, task_id, domain_filter=domain_path)
+    suggestions = generate_suggestions(manager, task_id, domain_path)
 
     return AIResponse(
         success=True,
@@ -1200,6 +1574,7 @@ def handle_done(
     path = data.get("path")
     note = data.get("note", "").strip()
     force = data.get("force", False)
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
 
     if not task_id:
         return error_response("done", "MISSING_TASK", "Field 'task' is required")
@@ -1217,7 +1592,7 @@ def handle_done(
     if err:
         return error_response("done", "INVALID_PATH", err)
 
-    task = manager.load_task(task_id)
+    task = _load_task(manager, task_id, domain_path)
     if not task:
         return error_response("done", "TASK_NOT_FOUND", f"Task {task_id} not found")
 
@@ -1229,7 +1604,7 @@ def handle_done(
 
     # Check if already completed
     if subtask.completed:
-        ctx = build_context(manager, task_id)
+        ctx = build_context(manager, task_id, domain_filter=domain_path)
         return AIResponse(
             success=True,
             intent="done",
@@ -1343,9 +1718,9 @@ def handle_done(
         tasks_dir=getattr(manager, "tasks_dir", None),
     )
 
-    ctx = build_context(manager, task_id)
-    suggestions = generate_suggestions(manager, task_id)
-    meta = build_meta(manager, task_id)
+    ctx = build_context(manager, task_id, domain_filter=domain_path)
+    suggestions = generate_suggestions(manager, task_id, domain_path)
+    meta = build_meta(manager, task_id, domain_filter=domain_path)
 
     return AIResponse(
         success=True,
@@ -1378,6 +1753,7 @@ def handle_progress(
     task_id = data.get("task")
     path = data.get("path")
     completed = data.get("completed", True)
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
 
     if not task_id:
         return error_response("progress", "MISSING_TASK", "Поле 'task' обязательно")
@@ -1404,7 +1780,7 @@ def handle_progress(
     except (ValueError, IndexError):
         return error_response("progress", "INVALID_PATH", f"Некорректный путь: {path}")
 
-    success, error = manager.set_subtask(task_id, index, completed, path=nested_path)
+    success, error = manager.set_subtask(task_id, index, completed, domain=domain_path, path=nested_path)
 
     if not success:
         return error_response(
@@ -1420,8 +1796,8 @@ def handle_progress(
         tasks_dir=getattr(manager, "tasks_dir", None),
     )
 
-    ctx = build_context(manager, task_id)
-    suggestions = generate_suggestions(manager, task_id)
+    ctx = build_context(manager, task_id, domain_filter=domain_path)
+    suggestions = generate_suggestions(manager, task_id, domain_path)
 
     return AIResponse(
         success=True,
@@ -1430,6 +1806,144 @@ def handle_progress(
             "path": str(path),
             "completed": completed,
             "task_progress": ctx.get("current_task", {}).get("progress", 0),
+        },
+        context=ctx,
+        suggestions=suggestions,
+    )
+
+
+def handle_note(
+    manager: TaskManager, data: Dict[str, Any]
+) -> AIResponse:
+    """Add progress note to subtask without marking complete.
+
+    Input:
+        {"intent": "note", "task": "TASK-001", "path": "0", "note": "Implemented auth logic"}
+    """
+    task_id = data.get("task")
+    path = data.get("path")
+    note = data.get("note", "")
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
+
+    if not task_id:
+        return error_response("note", "MISSING_TASK", "Field 'task' is required")
+
+    err = validate_task_id(task_id)
+    if err:
+        return error_response("note", "INVALID_TASK_ID", err)
+
+    if path is None:
+        return error_response("note", "MISSING_PATH", "Field 'path' is required")
+
+    err = validate_path(str(path))
+    if err:
+        return error_response("note", "INVALID_PATH", err)
+
+    if not note:
+        return error_response("note", "MISSING_NOTE", "Field 'note' is required")
+
+    task = _load_task(manager, task_id, domain_path)
+    if not task:
+        return error_response("note", "TASK_NOT_FOUND", f"Task {task_id} not found")
+
+    subtask = _get_subtask_by_path(task.subtasks, str(path))
+    if not subtask:
+        return error_response("note", "SUBTASK_NOT_FOUND", f"Subtask at path '{path}' not found")
+
+    # Add note to progress_notes
+    subtask.progress_notes.append(note)
+
+    # Auto-set started_at if not set
+    if not subtask.started_at:
+        subtask.started_at = datetime.now().isoformat()
+
+    manager.save_task(task)
+
+    write_activity_marker(
+        task_id,
+        "note",
+        subtask_path=str(path),
+        tasks_dir=getattr(manager, "tasks_dir", None),
+    )
+
+    ctx = build_context(manager, task_id, domain_filter=domain_path)
+    suggestions = generate_suggestions(manager, task_id, domain_path)
+
+    return AIResponse(
+        success=True,
+        intent="note",
+        result={
+            "path": str(path),
+            "note": note,
+            "total_notes": len(subtask.progress_notes),
+            "computed_status": subtask.computed_status,
+        },
+        context=ctx,
+        suggestions=suggestions,
+    )
+
+
+def handle_block(
+    manager: TaskManager, data: Dict[str, Any]
+) -> AIResponse:
+    """Block or unblock a subtask.
+
+    Input:
+        {"intent": "block", "task": "TASK-001", "path": "0", "blocked": true, "reason": "Waiting for API"}
+        {"intent": "block", "task": "TASK-001", "path": "0", "blocked": false}
+    """
+    task_id = data.get("task")
+    path = data.get("path")
+    blocked = data.get("blocked", True)
+    reason = data.get("reason", "")
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
+
+    if not task_id:
+        return error_response("block", "MISSING_TASK", "Field 'task' is required")
+
+    err = validate_task_id(task_id)
+    if err:
+        return error_response("block", "INVALID_TASK_ID", err)
+
+    if path is None:
+        return error_response("block", "MISSING_PATH", "Field 'path' is required")
+
+    err = validate_path(str(path))
+    if err:
+        return error_response("block", "INVALID_PATH", err)
+
+    task = _load_task(manager, task_id, domain_path)
+    if not task:
+        return error_response("block", "TASK_NOT_FOUND", f"Task {task_id} not found")
+
+    subtask = _get_subtask_by_path(task.subtasks, str(path))
+    if not subtask:
+        return error_response("block", "SUBTASK_NOT_FOUND", f"Subtask at path '{path}' not found")
+
+    # Update blocked status
+    subtask.blocked = bool(blocked)
+    subtask.block_reason = str(reason).strip() if blocked else ""
+
+    manager.save_task(task)
+
+    write_activity_marker(
+        task_id,
+        "block",
+        subtask_path=str(path),
+        tasks_dir=getattr(manager, "tasks_dir", None),
+    )
+
+    ctx = build_context(manager, task_id, domain_filter=domain_path)
+    suggestions = generate_suggestions(manager, task_id, domain_path)
+
+    return AIResponse(
+        success=True,
+        intent="block",
+        result={
+            "path": str(path),
+            "blocked": subtask.blocked,
+            "reason": subtask.block_reason,
+            "computed_status": subtask.computed_status,
         },
         context=ctx,
         suggestions=suggestions,
@@ -1458,7 +1972,7 @@ def handle_delete(
     if err:
         return error_response("delete", "INVALID_TASK_ID", err)
 
-    task = manager.load_task(task_id)
+    task = _load_task(manager, task_id, domain_path)
     if not task:
         return error_response("delete", "TASK_NOT_FOUND", f"Task {task_id} not found")
 
@@ -1574,6 +2088,7 @@ def handle_complete(
     """
     task_id = data.get("task")
     status = data.get("status", "OK")
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
 
     if not task_id:
         return error_response("complete", "MISSING_TASK", "Поле 'task' обязательно")
@@ -1587,7 +2102,7 @@ def handle_complete(
     if status not in ("OK", "WARN", "FAIL"):
         return error_response("complete", "INVALID_STATUS", "status должен быть OK, WARN или FAIL")
 
-    task = manager.load_task(task_id)
+    task = _load_task(manager, task_id, domain_path)
     if not task:
         return error_response(
             "complete", "TASK_NOT_FOUND", f"Задача {task_id} не найдена"
@@ -1622,8 +2137,8 @@ def handle_complete(
         task_id, "complete", tasks_dir=getattr(manager, "tasks_dir", None)
     )
 
-    ctx = build_context(manager, task_id)
-    suggestions = generate_suggestions(manager)
+    ctx = build_context(manager, task_id, domain_filter=domain_path)
+    suggestions = generate_suggestions(manager, task_id, domain_path)
 
     return AIResponse(
         success=True,
@@ -1663,6 +2178,7 @@ def handle_batch(
     task_id = data.get("task")
     operations = data.get("operations", [])
     atomic = data.get("atomic", False)
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
 
     if not operations:
         return error_response(
@@ -1711,6 +2227,12 @@ def handle_batch(
         # Подставить task_id если не указан
         if task_id and "task" not in op:
             op["task"] = task_id
+        # Подставить контекст
+        op.setdefault("domain", domain_path)
+        if data.get("phase"):
+            op.setdefault("phase", data.get("phase"))
+        if data.get("component"):
+            op.setdefault("component", data.get("component"))
 
         # Выполнить операцию (без записи в историю - batch сам записывает)
         handler = INTENT_HANDLERS.get(op_intent)
@@ -1754,9 +2276,9 @@ def handle_batch(
     if temp_dir and temp_dir.exists():
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    ctx = build_context(manager, task_id)
+    ctx = build_context(manager, task_id, domain_filter=domain_path)
     suggestions = generate_suggestions(manager, task_id)
-    meta = build_meta(manager, task_id) if task_id else None
+    meta = build_meta(manager, task_id, domain_filter=domain_path) if task_id else None
 
     all_success = all(r["success"] for r in results) if results else False
 
@@ -1841,12 +2363,17 @@ def handle_create(
         if err:
             return error_response("create", "INVALID_SUBTASKS", err)
 
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
+
     # Создать задачу - create_task возвращает TaskDetail (без сохранения)
     task = manager.create_task(
         title=title,
         status=data.get("status", "FAIL"),
         priority=data.get("priority", "MEDIUM"),
         parent=data.get("parent"),
+        domain=domain_path,
+        phase=data.get("phase", ""),
+        component=data.get("component", ""),
     )
 
     # Заполнить дополнительные поля
@@ -1874,10 +2401,10 @@ def handle_create(
     )
 
     # Reload task to get full state after decompose, then track it
-    task = manager.load_task(task_id)
+    task = _load_task(manager, task_id, domain_path)
     manager.track_task(task_id, task)
 
-    ctx = build_context(manager, task_id)
+    ctx = build_context(manager, task_id, domain_filter=domain_path)
     suggestions = generate_suggestions(manager, task_id)
 
     return AIResponse(
@@ -2052,12 +2579,52 @@ def handle_redo(
 def handle_history(
     manager: TaskManager, data: Dict[str, Any]
 ) -> AIResponse:
-    """Показать историю операций.
+    """Показать историю операций или timeline событий задачи.
 
     Input:
-        {"intent": "history"}
+        {"intent": "history"}  # operation history (undo/redo)
         {"intent": "history", "limit": 20}
+        {"intent": "history", "task": "TASK-001"}  # task event timeline
+        {"intent": "history", "task": "TASK-001", "format": "markdown"}
     """
+    task_id = data.get("task")
+
+    # Task event timeline
+    if task_id:
+        from core import events_to_timeline
+
+        task = manager.load_task(task_id)
+        if not task:
+            return AIResponse(
+                success=False,
+                intent="history",
+                error_message=f"Task {task_id} not found",
+            )
+
+        limit = data.get("limit", 50)
+        events = sorted(task.events, key=lambda e: e.timestamp or "", reverse=True)[:limit]
+        output_format = data.get("format", "json")
+
+        if output_format == "markdown":
+            timeline_md = events_to_timeline(list(reversed(events)))
+            return AIResponse(
+                success=True,
+                intent="history",
+                result={"timeline": timeline_md, "task_id": task_id},
+                summary=f"Timeline for {task_id} ({len(events)} events)",
+            )
+
+        return AIResponse(
+            success=True,
+            intent="history",
+            result={
+                "task_id": task_id,
+                "events": [e.to_dict() for e in events],
+                "total_events": len(task.events),
+            },
+        )
+
+    # Operation history (undo/redo)
     tasks_dir = manager.tasks_dir
     history = _get_history(tasks_dir)
     limit = data.get("limit", 10)
@@ -2232,14 +2799,105 @@ def _get_subtask_by_path(subtasks: List, path: str) -> Optional["SubTask"]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PROMPTS HISTORY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def handle_prompts(
+    manager: TaskManager, data: Dict[str, Any]
+) -> AIResponse:
+    """View user prompt history from Claude Code hook.
+
+    Input:
+        {"intent": "prompts"}  # all prompts
+        {"intent": "prompts", "limit": 20}
+        {"intent": "prompts", "task": "TASK-001"}  # prompts for specific task
+        {"intent": "prompts", "format": "markdown"}
+    """
+    import json
+    from pathlib import Path
+    from core.desktop.devtools.interface.tasks_dir_resolver import (
+        get_project_namespace,
+        resolve_project_root,
+    )
+
+    # Always read from global storage (hook writes there)
+    namespace = get_project_namespace(resolve_project_root())
+    global_history = Path.home() / ".tasks" / namespace / ".history" / "prompts.jsonl"
+
+    # Also check local .tasks if exists
+    local_history = manager.tasks_dir / ".history" / "prompts.jsonl"
+
+    history_files = [f for f in [global_history, local_history] if f.exists()]
+    if not history_files:
+        history_file = global_history  # Will show "not found"
+    else:
+        history_file = history_files[0]  # Prefer global
+
+    if not history_file.exists():
+        return AIResponse(
+            success=True,
+            intent="prompts",
+            result={"prompts": [], "total": 0},
+            summary="No prompt history found",
+        )
+
+    task_filter = data.get("task")
+    limit = data.get("limit", 50)
+    output_format = data.get("format", "json")
+
+    prompts = []
+    try:
+        with open(history_file) as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        entry = json.loads(line)
+                        if task_filter and entry.get("task_id") != task_filter:
+                            continue
+                        prompts.append(entry)
+                    except json.JSONDecodeError:
+                        continue
+    except IOError:
+        pass
+
+    # Most recent first, apply limit
+    prompts = list(reversed(prompts))[:limit]
+
+    if output_format == "markdown":
+        lines = ["# User Prompt History", ""]
+        for p in prompts:
+            ts = p.get("timestamp", "?")[:19]
+            task = p.get("task_id") or "-"
+            prompt = p.get("prompt", "")[:200]
+            skills = ", ".join(p.get("skills", [])) or "-"
+            lines.append(f"**[{ts}]** Task: `{task}` | Skills: {skills}")
+            lines.append(f"> {prompt}")
+            lines.append("")
+        return AIResponse(
+            success=True,
+            intent="prompts",
+            result={"markdown": "\n".join(lines)},
+            summary=f"{len(prompts)} prompts",
+        )
+
+    return AIResponse(
+        success=True,
+        intent="prompts",
+        result={"prompts": prompts, "total": len(prompts)},
+        summary=f"{len(prompts)} prompts",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # INTENT ROUTER
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Интенты которые модифицируют данные (поддерживают dry_run и записываются в историю)
-MODIFYING_INTENTS = {"decompose", "define", "verify", "progress", "complete", "create", "done", "delete"}
+MODIFYING_INTENTS = {"decompose", "define", "verify", "progress", "note", "block", "complete", "create", "done", "delete"}
 
 # Интенты только для чтения
-READONLY_INTENTS = {"context", "history", "storage"}
+READONLY_INTENTS = {"context", "history", "storage", "resume", "prompts"}
 
 # Интенты управления историей (не записываются в историю)
 HISTORY_INTENTS = {"undo", "redo", "history"}
@@ -2248,12 +2906,16 @@ INTENT_HANDLERS = {
     # Чтение
     "context": handle_context,
     "history": handle_history,
+    "prompts": handle_prompts,
     "storage": handle_storage_info,
+    "resume": handle_resume,
     # Модификация
     "decompose": handle_decompose,
     "define": handle_define,
     "verify": handle_verify,
     "progress": handle_progress,
+    "note": handle_note,  # NEW: add progress note to subtask
+    "block": handle_block,  # NEW: block/unblock subtask
     "done": handle_done,  # NEW: unified completion (auto-verify + progress)
     "delete": handle_delete,  # NEW: delete task/subtask
     "complete": handle_complete,
@@ -2289,6 +2951,7 @@ def process_intent(
     intent = data.get("intent")
     dry_run = data.get("dry_run", False)
     idempotency_key = data.get("idempotency_key")
+    domain_path = derive_domain_explicit(data.get("domain", ""), data.get("phase"), data.get("component"))
 
     if not intent:
         return error_response("unknown", "MISSING_INTENT", "Поле 'intent' обязательно")
@@ -2339,7 +3002,7 @@ def process_intent(
 
         # Add meta context to response
         if response.meta is None and task_id:
-            response.meta = build_meta(manager, task_id)
+            response.meta = build_meta(manager, task_id, domain_filter=domain_path)
 
         # === v2: Add compact fields ===
         # Build TaskState if we have a task
