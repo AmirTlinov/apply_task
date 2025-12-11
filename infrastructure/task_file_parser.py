@@ -6,6 +6,7 @@ from typing import List, Optional
 import yaml
 
 from core import SubTask, TaskDetail
+from core.task_event import TaskEvent
 
 
 class TaskFileParser:
@@ -43,6 +44,8 @@ class TaskFileParser:
             project_draft_id=metadata.get("project_draft_id"),
             project_remote_updated=metadata.get("project_remote_updated"),
             project_issue_number=metadata.get("project_issue_number"),
+            depends_on=metadata.get("depends_on", []),
+            events=[TaskEvent.from_dict(e) for e in metadata.get("events", [])],
         )
         source_path = filepath.resolve()
         task._source_path = source_path
@@ -135,6 +138,25 @@ class TaskFileParser:
                     current.created_at = stripped.split(":", 1)[1].strip()
                 elif stripped.startswith("Завершено:"):
                     current.completed_at = stripped.split(":", 1)[1].strip()
+                elif stripped.startswith("Прогресс:"):
+                    current.progress_notes = [n.strip() for n in stripped.split(":", 1)[1].split(";") if n.strip()]
+                elif stripped.startswith("Начато:"):
+                    current.started_at = stripped.split(":", 1)[1].strip()
+                elif stripped.startswith("Заблокировано:"):
+                    value = stripped.split(":", 1)[1].strip()
+                    parts = value.split(";", 1)
+                    first_part = parts[0].strip().lower()
+                    # Check if first part is explicit yes/no
+                    if first_part in ("да", "yes", "true", "1"):
+                        current.blocked = True
+                        current.block_reason = parts[1].strip() if len(parts) > 1 else ""
+                    elif first_part in ("нет", "no", "false", "0"):
+                        current.blocked = False
+                        current.block_reason = ""
+                    else:
+                        # Backward compatibility: treat as blocked with reason
+                        current.blocked = True
+                        current.block_reason = value
         elif section == "Критерии успеха":
             task.success_criteria = cls._parse_list(lines)
         elif section == "Следующие шаги":
