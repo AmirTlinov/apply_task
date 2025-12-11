@@ -24,6 +24,10 @@ class SubTask:
     children: List["SubTask"] = field(default_factory=list)
     created_at: Optional[str] = None  # ISO format timestamp
     completed_at: Optional[str] = None  # ISO format timestamp
+    progress_notes: List[str] = field(default_factory=list)
+    started_at: Optional[str] = None
+    blocked: bool = False
+    block_reason: str = ""
 
     def ready_for_completion(self) -> bool:
         """Check if subtask is ready to be marked as completed.
@@ -46,6 +50,17 @@ class SubTask:
         if self.ready_for_completion():
             return Status.WARN
         return Status.FAIL
+
+    @property
+    def computed_status(self) -> str:
+        if self.completed:
+            return "completed"
+        if self.blocked:
+            return "blocked"
+        if (self.progress_notes or self.criteria_confirmed or
+            self.tests_confirmed or self.blockers_resolved or self.started_at):
+            return "in_progress"
+        return "pending"
 
     def is_valid_flagship(self) -> tuple[bool, list[str]]:
         """Quality checks matching legacy validation."""
@@ -94,4 +109,10 @@ class SubTask:
             lines.append(f"  - Создано: {self.created_at}")
         if self.completed_at:
             lines.append(f"  - Завершено: {self.completed_at}")
+        if self.progress_notes:
+            lines.append("  - Прогресс: " + "; ".join(self.progress_notes))
+        if self.started_at:
+            lines.append(f"  - Начато: {self.started_at}")
+        if self.blocked:
+            lines.append(f"  - Заблокировано: {self.block_reason or 'да'}")
         return "\n".join(lines)
