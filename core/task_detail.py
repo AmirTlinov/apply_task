@@ -165,6 +165,10 @@ class TaskDetail:
                 if st.blockers_notes:
                     lines.append(f"{pad_detail}- Отметки блокеров: " + "; ".join(st.blockers_notes))
                 # Phase 1 fields
+                if st.created_at:
+                    lines.append(f"{pad_detail}- Создано: {st.created_at}")
+                if st.completed_at:
+                    lines.append(f"{pad_detail}- Завершено: {st.completed_at}")
                 if st.progress_notes:
                     lines.append(f"{pad_detail}- Прогресс: " + "; ".join(st.progress_notes))
                 if st.started_at:

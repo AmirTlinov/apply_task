@@ -215,7 +215,7 @@ class TaskManager:
         else:
             self.tasks_dir = tasks_dir
         self.tasks_dir.mkdir(exist_ok=True)
-        self.repo: TaskRepository = repository or FileTaskRepository(tasks_dir)
+        self.repo: TaskRepository = repository or FileTaskRepository(self.tasks_dir)
         # sync_provider оставлен для обратной совместимости; sync_service — основной путь
         provider = sync_provider
         if provider is None:
@@ -579,6 +579,9 @@ class TaskManager:
             if blocker_msg:
                 return False, blocker_msg
         st.completed = completed
+        # Phase 1: Auto-set started_at when marking complete (if not already set)
+        if completed and not st.started_at:
+            st.started_at = current_timestamp()
         # Set completed_at timestamp when marking as done
         if completed:
             st.completed_at = current_timestamp()
@@ -621,6 +624,9 @@ class TaskManager:
             return False, "unknown_checkpoint"
         flag_attr, notes_attr = attr_map[checkpoint]
         setattr(st, flag_attr, value)
+        # Phase 1: Auto-set started_at when confirming checkpoint (indicates work started)
+        if value and not st.started_at:
+            st.started_at = current_timestamp()
         note = note.strip()
         if note:
             getattr(st, notes_attr).append(note)
