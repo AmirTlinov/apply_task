@@ -2216,6 +2216,33 @@ def handle_batch(
                     shutil.copy2(task_file, backup_path)
                     backups[tid] = backup_path
 
+    # Phase 1: Expand paths array into individual operations
+    expanded_operations = []
+    for op in operations:
+        paths = op.get("paths")
+        if isinstance(paths, list):
+            if len(paths) > 0:
+                # Expand operation for each path
+                base_op = {k: v for k, v in op.items() if k != "paths"}
+                for p in paths:
+                    expanded_op = dict(base_op)
+                    expanded_op["path"] = str(p)
+                    expanded_operations.append(expanded_op)
+            # else: Skip empty paths array - don't add to expanded operations
+        else:
+            # No paths field or paths is not a list - keep operation as-is
+            expanded_operations.append(op)
+
+    # Replace operations with expanded list
+    operations = expanded_operations
+
+    # SEC-002: Re-validate after expansion
+    if len(operations) > MAX_ARRAY_LENGTH:
+        return error_response(
+            "batch", "TOO_MANY_OPERATIONS_AFTER_EXPANSION",
+            f"Too many operations after paths expansion (max {MAX_ARRAY_LENGTH})",
+        )
+
     results = []
     failed = False
 
