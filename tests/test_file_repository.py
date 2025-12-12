@@ -16,7 +16,7 @@ def _sample_task() -> TaskDetail:
     task = TaskDetail(
         id="TASK-001",
         title="Repository roundtrip sample task with rich content",
-        status="FAIL",
+        status="TODO",
         domain="demo",
         description="Demo description",
         context="Extra context",
@@ -134,13 +134,13 @@ def test_clean_filtered(tmp_path: Path):
     t1 = _sample_task()
     t1.id = "TASK-201"
     t1.tags = ["alpha", "beta"]
-    t1.status = "OK"
+    t1.status = "DONE"
     repo.save(t1)
 
     t2 = _sample_task()
     t2.id = "TASK-202"
     t2.tags = ["beta"]
-    t2.status = "FAIL"
+    t2.status = "TODO"
     repo.save(t2)
 
     matched, removed = repo.clean_filtered(tag="alpha", status="OK")

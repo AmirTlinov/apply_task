@@ -53,7 +53,7 @@ def _write_project_cfg(path, project_type="user"):
     data = {
         "project": {"type": project_type, "owner": "octo", "repo": "demo", "number": 1, "enabled": True},
         "fields": {
-            "status": {"name": "Status", "options": {"OK": "Done"}},
+            "status": {"name": "Status", "options": {"DONE": "Done"}},
             "progress": {"name": "Progress"},
             "domain": {"name": "Domain"},
         },
@@ -67,7 +67,7 @@ def test_repo_issue_created(tmp_path, monkeypatch):
     sync = _sync_with_repo(tmp_path, monkeypatch)
     dummy = DummySession(post_payload={"number": 77})
     sync.session = dummy
-    task = tasks.TaskDetail(id="TASK-001", title="Test", status="FAIL")
+    task = tasks.TaskDetail(id="TASK-001", title="Test", status="TODO")
 
     created = sync._ensure_repo_issue(task, "body")
 
@@ -80,7 +80,7 @@ def test_repo_issue_updated(tmp_path, monkeypatch):
     sync = _sync_with_repo(tmp_path, monkeypatch)
     dummy = DummySession()
     sync.session = dummy
-    task = tasks.TaskDetail(id="TASK-002", title="Done", status="OK", project_issue_number=10)
+    task = tasks.TaskDetail(id="TASK-002", title="Done", status="DONE", project_issue_number=10)
 
     created = sync._ensure_repo_issue(task, "body")
 
@@ -109,7 +109,7 @@ def test_permission_error_disables_sync(monkeypatch, tmp_path):
 
     sync.session.post = lambda *a, **k: PermissionResponse()
     monkeypatch.setattr(sync, "_persist_metadata", lambda *a, **k: True)
-    task = tasks.TaskDetail(id="TASK-123", title="Demo", status="FAIL")
+    task = tasks.TaskDetail(id="TASK-123", title="Demo", status="TODO")
 
     assert sync.sync_task(task) is False
     assert not sync.enabled
@@ -123,7 +123,7 @@ def test_fetch_remote_state_parses_text_and_numbers(monkeypatch, tmp_path):
     monkeypatch.setenv("APPLY_TASK_GITHUB_TOKEN", "tok")
     sync = projects_sync.ProjectsSync(config_path=cfg_path)
     sync.project_fields = {
-        "status": {"reverse": {"opt-ok": "OK"}},
+        "status": {"reverse": {"opt-ok": "DONE"}},
         "progress": {},
         "domain": {},
     }
@@ -144,7 +144,7 @@ def test_fetch_remote_state_parses_text_and_numbers(monkeypatch, tmp_path):
 
     sync._graphql = fake_graphql.__get__(sync, projects_sync.ProjectsSync)
     data = sync._fetch_remote_state("ITEM-1")
-    assert data["status"] == "OK"
+    assert data["status"] == "DONE"
     assert data["progress"] == 42
     assert data["domain"] == "desktop/devtools"
     assert data["remote_updated"] == "2025-01-01T00:00:00Z"

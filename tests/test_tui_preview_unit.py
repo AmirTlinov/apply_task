@@ -37,7 +37,7 @@ def test_preview_with_detail_renders_title_and_progress():
     detail = Detail(
         id="TASK-1",
         title="Demo title",
-        status="OK",
+        status="DONE",
         priority="HIGH",
         description="Line1\nLine2",
         domain="",
@@ -63,8 +63,8 @@ def test_preview_warn_and_fail_status_chunks():
         def calculate_progress(self):
             return 0
 
-    warn_detail = Detail(id="T2", title="Warn", status="WARN", priority="M", description="", domain="", phase="", component="", blocked=False)
-    fail_detail = Detail(id="T3", title="Fail", status="FAIL", priority="M", description="", domain="", phase="", component="", blocked=False)
+    warn_detail = Detail(id="T2", title="Warn", status="ACTIVE", priority="M", description="", domain="", phase="", component="", blocked=False)
+    fail_detail = Detail(id="T3", title="Fail", status="TODO", priority="M", description="", domain="", phase="", component="", blocked=False)
 
     class DummyTUI(SimpleNamespace):
         def __init__(self, detail):
@@ -81,7 +81,7 @@ def test_preview_warn_and_fail_status_chunks():
 def test_preview_loads_from_file_and_handles_parse_failure(monkeypatch, tmp_path):
     task_file = tmp_path / "TASK-1.task"
     task_file.write_text("---\n", encoding="utf-8")
-    detail = SimpleNamespace(id="TASK-1", title="T", status="OK", priority="P", description="", domain="d", phase="p", component="c", blocked=False, calculate_progress=lambda: 0)
+    detail = SimpleNamespace(id="TASK-1", title="T", status="DONE", priority="P", description="", domain="d", phase="p", component="c", blocked=False, calculate_progress=lambda: 0)
 
     class DummyTask(SimpleNamespace):
         pass

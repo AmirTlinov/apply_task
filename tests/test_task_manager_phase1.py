@@ -32,7 +32,7 @@ def task_with_subtask(manager):
     task = TaskDetail(
         id="TASK-001",
         title="Test Task",
-        status="FAIL",
+        status="TODO",
         domain="",
         created="2025-01-01 00:00",
         updated="2025-01-01 00:00",
@@ -93,7 +93,7 @@ def test_set_subtask_incomplete_no_started_at(manager):
     task = TaskDetail(
         id="TASK-002",
         title="Test Task",
-        status="FAIL",
+        status="TODO",
         domain="",
         created="2025-01-01 00:00",
         updated="2025-01-01 00:00",
@@ -128,7 +128,7 @@ def test_checkpoint_criteria_sets_started_at(manager):
     task = TaskDetail(
         id="TASK-003",
         title="Test Task",
-        status="FAIL",
+        status="TODO",
         domain="",
         created="2025-01-01 00:00",
         updated="2025-01-01 00:00",
@@ -164,7 +164,7 @@ def test_checkpoint_tests_sets_started_at(manager):
     task = TaskDetail(
         id="TASK-004",
         title="Test Task",
-        status="FAIL",
+        status="TODO",
         domain="",
         created="2025-01-01 00:00",
         updated="2025-01-01 00:00",
@@ -200,7 +200,7 @@ def test_checkpoint_blockers_sets_started_at(manager):
     task = TaskDetail(
         id="TASK-005",
         title="Test Task",
-        status="FAIL",
+        status="TODO",
         domain="",
         created="2025-01-01 00:00",
         updated="2025-01-01 00:00",
@@ -236,7 +236,7 @@ def test_checkpoint_preserves_existing_started_at(manager):
     task = TaskDetail(
         id="TASK-006",
         title="Test Task",
-        status="FAIL",
+        status="TODO",
         domain="",
         created="2025-01-01 00:00",
         updated="2025-01-01 00:00",
@@ -272,7 +272,7 @@ def test_checkpoint_unconfirm_no_started_at(manager):
     task = TaskDetail(
         id="TASK-007",
         title="Test Task",
-        status="FAIL",
+        status="TODO",
         domain="",
         created="2025-01-01 00:00",
         updated="2025-01-01 00:00",

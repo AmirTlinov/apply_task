@@ -15,6 +15,7 @@ import {
   Filter,
 } from "lucide-react";
 import type { TaskListItem } from "@/types/task";
+import { cn } from "@/lib/utils";
 
 interface TimelineViewProps {
   tasks: TaskListItem[];
@@ -33,25 +34,22 @@ interface TimelineEvent {
   description?: string;
 }
 
-const eventConfig: Record<EventType, { icon: typeof Clock; color: string; label: string }> = {
-  created: { icon: Plus, color: "var(--color-primary)", label: "Created" },
-  started: { icon: Play, color: "var(--color-status-warn)", label: "Started" },
-  completed: { icon: CheckCircle2, color: "var(--color-status-ok)", label: "Completed" },
-  blocked: { icon: AlertCircle, color: "var(--color-status-fail)", label: "Blocked" },
-  comment: { icon: MessageSquare, color: "var(--color-foreground-muted)", label: "Comment" },
-  subtask: { icon: GitBranch, color: "var(--color-primary)", label: "Subtask" },
+const eventConfig: Record<EventType, { icon: typeof Clock; colorClass: string; label: string }> = {
+  created: { icon: Plus, colorClass: "bg-primary text-primary-foreground", label: "Created" },
+  started: { icon: Play, colorClass: "bg-status-warn text-white", label: "Started" },
+  completed: { icon: CheckCircle2, colorClass: "bg-status-done text-white", label: "Completed" },
+  blocked: { icon: AlertCircle, colorClass: "bg-status-fail text-white", label: "Blocked" },
+  comment: { icon: MessageSquare, colorClass: "bg-muted text-muted-foreground", label: "Comment" },
+  subtask: { icon: GitBranch, colorClass: "bg-primary text-primary-foreground", label: "Subtask" },
 };
 
-// Generate events from real task data using updated_at timestamps
 function generateEventsFromTasks(tasks: TaskListItem[]): TimelineEvent[] {
   const events: TimelineEvent[] = [];
 
   tasks.forEach((task) => {
-    // Use real updated_at timestamp if available, otherwise skip
     const timestamp = task.updated_at ? new Date(task.updated_at) : null;
     if (!timestamp) return;
 
-    // Map current status to event type
     const statusEventMap: Record<string, EventType> = {
       DONE: "completed",
       ACTIVE: "started",
@@ -71,20 +69,18 @@ function generateEventsFromTasks(tasks: TaskListItem[]): TimelineEvent[] {
         : undefined,
     });
 
-    // If task has subtasks completed, add subtask events
     if (task.completed_count && task.completed_count > 0 && task.subtask_count && task.subtask_count > 0) {
       events.push({
         id: `${task.id}-subtask-progress`,
         type: "subtask",
         taskId: task.id,
         taskTitle: task.title,
-        timestamp: new Date(timestamp.getTime() - 1000), // Slightly before main event
+        timestamp: new Date(timestamp.getTime() - 1000),
         description: `${task.completed_count} of ${task.subtask_count} subtasks completed`,
       });
     }
   });
 
-  // Sort by timestamp descending (most recent first)
   return events.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 }
 
@@ -128,54 +124,30 @@ export function TimelineView({ tasks, isLoading = false, onTaskClick }: Timeline
 
   if (allEvents.length === 0) {
     return (
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexDirection: "column",
-          gap: "16px",
-          color: "var(--color-foreground-muted)",
-        }}
-      >
-        <Clock style={{ width: "48px", height: "48px", opacity: 0.5 }} />
-        <div style={{ fontSize: "16px", fontWeight: 500 }}>No activity yet</div>
-        <div style={{ fontSize: "14px" }}>Events will appear here as you work on tasks</div>
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 text-foreground-muted">
+        <Clock className="h-12 w-12 opacity-50" />
+        <div className="text-base font-medium">No activity yet</div>
+        <div className="text-sm">Events will appear here as you work on tasks</div>
       </div>
     );
   }
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div className="flex flex-1 flex-col overflow-hidden">
       {/* Filter bar */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "16px 24px",
-          borderBottom: "1px solid var(--color-border)",
-          backgroundColor: "var(--color-background)",
-        }}
-      >
-        <Filter style={{ width: "14px", height: "14px", color: "var(--color-foreground-muted)" }} />
-        <span style={{ fontSize: "13px", color: "var(--color-foreground-muted)" }}>Filter:</span>
+      <div className="flex items-center gap-2 border-b border-border bg-background px-6 py-4">
+        <Filter className="h-3.5 w-3.5 text-foreground-muted" />
+        <span className="text-xs text-foreground-muted mr-1">Filter:</span>
         {(["all", "created", "started", "completed", "blocked"] as const).map((type) => (
           <button
             key={type}
             onClick={() => setFilter(type)}
-            style={{
-              padding: "4px 12px",
-              borderRadius: "999px",
-              border: "none",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              backgroundColor: filter === type ? "var(--color-primary)" : "var(--color-background-muted)",
-              color: filter === type ? "white" : "var(--color-foreground-muted)",
-              transition: "all 150ms ease",
-            }}
+            className={cn(
+              "px-3 py-1 rounded-full text-xs font-medium transition-all duration-150 ease-out",
+              filter === type
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-foreground-muted hover:bg-muted/80"
+            )}
           >
             {type === "all" ? "All" : eventConfig[type].label}
           </button>
@@ -183,27 +155,11 @@ export function TimelineView({ tasks, isLoading = false, onTaskClick }: Timeline
       </div>
 
       {/* Timeline */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "24px",
-        }}
-      >
+      <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">
         {Array.from(groupedEvents.entries()).map(([dateKey, events]) => (
-          <div key={dateKey} style={{ marginBottom: "32px" }}>
+          <div key={dateKey} className="mb-8 last:mb-0">
             {/* Date header */}
-            <div
-              style={{
-                fontSize: "12px",
-                fontWeight: 600,
-                color: "var(--color-foreground-muted)",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                marginBottom: "16px",
-                paddingLeft: "28px",
-              }}
-            >
+            <div className="mb-4 pl-7 text-xs font-semibold uppercase tracking-wider text-foreground-muted">
               {new Date(dateKey).toLocaleDateString("en-US", {
                 weekday: "long",
                 month: "short",
@@ -212,15 +168,15 @@ export function TimelineView({ tasks, isLoading = false, onTaskClick }: Timeline
             </div>
 
             {/* Events */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-	              {events.map((event, idx) => (
-	                <TimelineEventItem
-	                  key={event.id}
-	                  event={event}
-	                  isLast={idx === events.length - 1}
-	                  onTaskClick={onTaskClick}
-	                />
-	              ))}
+            <div className="flex flex-col gap-0.5">
+              {events.map((event, idx) => (
+                <TimelineEventItem
+                  key={event.id}
+                  event={event}
+                  isLast={idx === events.length - 1}
+                  onTaskClick={onTaskClick}
+                />
+              ))}
             </div>
           </div>
         ))}
@@ -242,103 +198,45 @@ function TimelineEventItem({ event, isLast, onTaskClick }: TimelineEventItemProp
   return (
     <div
       onClick={() => onTaskClick?.(event.taskId)}
-      style={{
-        display: "flex",
-        gap: "12px",
-        position: "relative",
-        cursor: onTaskClick ? "pointer" : "default",
-        padding: "4px 8px",
-        borderRadius: "8px",
-      }}
-      onMouseEnter={(e) => {
-        if (onTaskClick) {
-          e.currentTarget.style.backgroundColor = "var(--color-background-muted)";
-        }
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = "transparent";
-      }}
+      className={cn(
+        "group relative flex gap-3 rounded-lg px-2 py-1 transition-all duration-200",
+        onTaskClick ? "cursor-pointer hover:bg-muted/50" : "cursor-default"
+      )}
     >
       {/* Timeline line */}
       {!isLast && (
-        <div
-          style={{
-            position: "absolute",
-            left: "9px",
-            top: "24px",
-            bottom: "-2px",
-            width: "2px",
-            backgroundColor: "var(--color-border)",
-          }}
-        />
+        <div className="absolute left-[17px] top-6 bottom-[-2px] w-[2px] bg-border" />
       )}
 
       {/* Icon */}
-      <div
-        style={{
-          width: "20px",
-          height: "20px",
-          borderRadius: "50%",
-          backgroundColor: config.color,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-          zIndex: 1,
-        }}
-      >
-        <Icon style={{ width: "10px", height: "10px", color: "white" }} />
+      <div className={cn(
+        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full z-10",
+        config.colorClass
+      )}>
+        <Icon className="h-2.5 w-2.5" />
       </div>
 
       {/* Content */}
-      <div
-        style={{
-          flex: 1,
-          padding: "4px 0 16px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "4px" }}>
-          <span style={{ fontSize: "13px", fontWeight: 500, color: "var(--color-foreground)" }}>
+      <div className="flex flex-1 flex-col pb-4">
+        <div className="mb-1 flex items-baseline gap-2">
+          <span className="text-sm font-medium text-foreground">
             {config.label}
           </span>
-          <span style={{ fontSize: "12px", color: "var(--color-foreground-muted)" }}>
+          <span className="text-xs text-foreground-muted">
             {formatRelativeTime(event.timestamp)}
           </span>
         </div>
 
-        <div
-          style={{
-            fontSize: "13px",
-            color: "var(--color-foreground-muted)",
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-          }}
-        >
-          <FileText style={{ width: "12px", height: "12px" }} />
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "11px",
-              backgroundColor: "var(--color-background-muted)",
-              padding: "1px 6px",
-              borderRadius: "4px",
-            }}
-          >
+        <div className="flex items-center gap-1.5 text-sm text-foreground-muted">
+          <FileText className="h-3 w-3" />
+          <span className="rounded bg-muted px-1.5 py-px text-[11px] font-mono">
             {event.taskId}
           </span>
-          <span>{event.taskTitle}</span>
+          <span className="line-clamp-1">{event.taskTitle}</span>
         </div>
 
         {event.description && (
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--color-foreground-subtle)",
-              marginTop: "4px",
-              fontStyle: "italic",
-            }}
-          >
+          <div className="mt-1 text-xs text-foreground-subtle italic">
             {event.description}
           </div>
         )}
@@ -349,13 +247,13 @@ function TimelineEventItem({ event, isLast, onTaskClick }: TimelineEventItemProp
 
 function TimelineSkeleton() {
   return (
-    <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "24px" }}>
+    <div className="flex flex-col gap-6 p-6 animate-pulse">
       {[1, 2, 3, 4, 5].map((i) => (
-        <div key={i} style={{ display: "flex", gap: "12px" }}>
-          <div className="skeleton" style={{ width: "20px", height: "20px", borderRadius: "50%" }} />
-          <div style={{ flex: 1 }}>
-            <div className="skeleton" style={{ height: "14px", width: "120px", marginBottom: "8px", borderRadius: "4px" }} />
-            <div className="skeleton" style={{ height: "12px", width: "80%", borderRadius: "4px" }} />
+        <div key={i} className="flex gap-3">
+          <div className="h-5 w-5 rounded-full bg-muted" />
+          <div className="flex-1">
+            <div className="mb-2 h-3.5 w-32 rounded bg-muted" />
+            <div className="h-3 w-3/4 rounded bg-muted/50" />
           </div>
         </div>
       ))}

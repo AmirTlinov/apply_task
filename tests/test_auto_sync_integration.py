@@ -54,7 +54,7 @@ def test_save_task_pushes_when_sync_enabled(tmp_path):
 def test_load_task_pulls_fields_when_has_project_id(tmp_path):
     sync = DummySync()
     manager = build_manager(tmp_path, sync)
-    task = TaskDetail(id="TASK-001", title="Pull me", status="WARN", domain="")
+    task = TaskDetail(id="TASK-001", title="Pull me", status="ACTIVE", domain="")
     task.project_item_id = "gh-item"
     manager.repo.save(task)
 

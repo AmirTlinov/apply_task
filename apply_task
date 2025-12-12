@@ -6,7 +6,7 @@ apply_task — flagship CLI for deterministic .tasks workflows
   subtask:    apply_task subtask TASK-001 --add "..." --criteria "...;..." --tests "...;..." --blockers "...;..." |
               apply_task subtask TASK-001 --criteria-done N|--tests-done N|--blockers-done N [--note "..."] | --done N
   show/list:  apply_task show [ID]/list [filters]
-  stat:       apply_task start|done|fail [ID]                               # enforce WARN/OK/FAIL discipline
+  stat:       apply_task start|done|fail [ID]                               # enforce TODO/ACTIVE/DONE discipline
   guide:      apply_task next | quick | suggest|sg [context]
   lint:       apply_task lint [--fix]
 Rules:
@@ -185,7 +185,7 @@ FORWARD_COMMANDS = {
     "gui": "gui",
 }
 
-STATUS_COMMANDS = {"done": "OK", "start": "WARN", "fail": "FAIL"}
+STATUS_COMMANDS = {"done": "DONE", "start": "ACTIVE", "fail": "TODO"}
 
 KNOWN_COMMANDS = set(FORWARD_COMMANDS) | set(STATUS_COMMANDS) | {"show", "history", "replay", "which", "help"}
 
@@ -333,7 +333,7 @@ def main(argv=None):
                 "create/task": ["title", "parent", "description", "tests", "risks", "subtasks", "domain"],
                 "subtask add": ["criteria", "tests", "blockers (>=1)", "title >=20 chars"],
                 "ok/note/bulk": ["task", "path or index", "checkpoint notes in рус"],
-                "status": ["update TASK-ID OK|WARN|FAIL"]
+                "status": ["update TASK-ID TODO|ACTIVE|DONE"]
             },
             "examples": {
                 "create_min": "apply_task create \"Ship feature\" --parent TASK-001 --description \"кратко, ≥20\" --tests \"pytest -q\" --risks \"perf;deps\" --subtasks @subtasks.json --domain lab/backend",

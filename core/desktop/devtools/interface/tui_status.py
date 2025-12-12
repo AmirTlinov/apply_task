@@ -13,13 +13,13 @@ from core.desktop.devtools.interface.ai_state import get_ai_state, AIStatus
 def build_status_text(tui) -> FormattedText:
     items = tui.filtered_tasks
     total = len(items)
-    ok = sum(1 for t in items if t.status == Status.OK)
-    warn = sum(1 for t in items if t.status == Status.WARN)
-    fail = sum(1 for t in items if t.status == Status.FAIL)
+    ok = sum(1 for t in items if t.status == Status.DONE)
+    warn = sum(1 for t in items if t.status == Status.ACTIVE)
+    fail = sum(1 for t in items if t.status == Status.TODO)
     filter_labels = {
-        "OK": tui._t("FILTER_DONE"),
-        "WARN": tui._t("FILTER_IN_PROGRESS"),
-        "FAIL": tui._t("FILTER_BACKLOG"),
+        "DONE": tui._t("FILTER_DONE"),
+        "ACTIVE": tui._t("FILTER_IN_PROGRESS"),
+        "TODO": tui._t("FILTER_BACKLOG"),
     }
     flt = tui.current_filter.value[0] if tui.current_filter else "ALL"
     flt_display = filter_labels.get(flt, tui._t("FILTER_ALL"))

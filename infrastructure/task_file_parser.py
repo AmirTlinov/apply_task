@@ -27,7 +27,7 @@ class TaskFileParser:
         task = TaskDetail(
             id=metadata.get("id", ""),
             title=metadata.get("title", ""),
-            status=cls._parse_status(metadata.get("status", "FAIL")),
+            status=cls._parse_status(metadata.get("status", "TODO")),
             status_manual=bool(metadata.get("status_manual", False)),
             domain=metadata.get("domain", "") or "",
             phase=metadata.get("phase", "") or "",
@@ -77,7 +77,7 @@ class TaskFileParser:
                 task.subtasks[idx].project_item_id = sub_id
         try:
             if not task.status_manual and task.subtasks and task.calculate_progress() == 100 and not task.blocked:
-                task.status = "OK"
+                task.status = "DONE"
         except Exception:
             pass
         return task
@@ -85,9 +85,9 @@ class TaskFileParser:
     @staticmethod
     def _parse_status(raw: str) -> str:
         try:
-            return task_status_code(raw or "FAIL")
+            return task_status_code(raw or "TODO")
         except ValueError:
-            return "FAIL"
+            return "TODO"
 
     @classmethod
     def _save_section(cls, task: TaskDetail, section: str, lines: List[str]) -> None:

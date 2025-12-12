@@ -5,7 +5,7 @@
  * Falls back to mock data when running in browser (not in Tauri).
  */
 
-import type { Task, TaskListItem, TaskStatus, TaskStatusCode } from "@/types/task";
+import type { Task, TaskListItem, TaskStatus } from "@/types/task";
 
 // Check if we're running inside Tauri (Tauri 2.0 uses __TAURI_INTERNALS__)
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -41,7 +41,6 @@ const MOCK_TASKS: TaskListItem[] = [
     id: "TASK-001",
     title: "Implement user authentication system",
     status: "DONE",
-    status_code: "OK",
     progress: 75,
     subtask_count: 4,
     completed_count: 3,
@@ -53,7 +52,6 @@ const MOCK_TASKS: TaskListItem[] = [
     id: "TASK-002",
     title: "Design dashboard UI components",
     status: "ACTIVE",
-    status_code: "WARN",
     progress: 40,
     subtask_count: 6,
     completed_count: 2,
@@ -65,7 +63,6 @@ const MOCK_TASKS: TaskListItem[] = [
     id: "TASK-003",
     title: "Setup CI/CD pipeline",
     status: "TODO",
-    status_code: "FAIL",
     progress: 20,
     subtask_count: 5,
     completed_count: 1,
@@ -272,16 +269,10 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
       const { task_id, status } = args as { task_id: string; status: TaskStatus };
       const taskIndex = MOCK_TASKS.findIndex((t) => t.id === task_id);
       if (taskIndex >= 0) {
-        const statusCodeMap: Record<TaskStatus, TaskStatusCode> = {
-          DONE: "OK",
-          ACTIVE: "WARN",
-          TODO: "FAIL",
-        };
         // Update mock data
         MOCK_TASKS[taskIndex] = {
           ...MOCK_TASKS[taskIndex],
           status,
-          status_code: statusCodeMap[status],
           progress: status === "DONE" ? 100 : status === "ACTIVE" ? 50 : 0,
           updated_at: new Date().toISOString(),
         };
@@ -313,7 +304,6 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
         task_id: newId,
         title,
         status: "TODO",
-        status_code: "FAIL",
         progress: 0,
         subtask_count: Array.isArray(subtasks) ? subtasks.length : 0,
         completed_count: 0,

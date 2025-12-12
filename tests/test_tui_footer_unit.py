@@ -17,7 +17,7 @@ class DummyTUI(SimpleNamespace):
             component="comp",
             created="2024-01-01",
             updated="2024-01-02",
-            status="OK",
+            status="DONE",
         )
 
     def _task_duration_value(self, detail):

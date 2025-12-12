@@ -149,12 +149,12 @@ def get_blocked_by_dependencies(
         task_statuses: Dictionary mapping task_id to status
 
     Returns:
-        List of dependency task IDs that are not yet complete (status != "OK")
+        List of dependency task IDs that are not yet complete (status != "DONE")
     """
     blocking = []
     for dep_id in depends_on:
         status = task_statuses.get(dep_id)
-        if status is None or status != "OK":
+        if status is None or status != "DONE":
             blocking.append(dep_id)
     return blocking
 

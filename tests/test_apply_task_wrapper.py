@@ -152,9 +152,9 @@ def test_main_routing_show_and_status(monkeypatch, apply_task_mod):
     apply_task_mod.main(["fail"])
 
     assert calls[0][0][1] == "TASK-123"
-    assert calls[1][0][:3] == ["update", "TASK-9", "OK"]
-    assert calls[2][0][:3] == ["update", "TASK-456", "WARN"]
-    assert calls[3][0][:2] == ["update", "FAIL"]
+    assert calls[1][0][:3] == ["update", "TASK-9", "DONE"]
+    assert calls[2][0][:3] == ["update", "TASK-456", "ACTIVE"]
+    assert calls[3][0][:2] == ["update", "TODO"]
     assert all(not verbose for _, verbose in calls)
 
 

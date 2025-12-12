@@ -202,9 +202,9 @@ def render_detail_text_impl(tui) -> FormattedText:
     result.append(('class:border', '| '))
 
     status_map = {
-        'OK': ('class:icon.check', tui._t("STATUS_DONE")),
-        'WARN': ('class:icon.warn', tui._t("STATUS_IN_PROGRESS")),
-        'FAIL': ('class:icon.fail', tui._t("STATUS_BACKLOG")),
+        "DONE": ("class:icon.check", tui._t("STATUS_DONE")),
+        "ACTIVE": ("class:icon.warn", tui._t("STATUS_IN_PROGRESS")),
+        "TODO": ("class:icon.fail", tui._t("STATUS_BACKLOG")),
     }
     status_style, status_label = status_map.get(detail.status, ('class:icon.fail', detail.status))
 
@@ -355,7 +355,7 @@ def render_detail_text_impl(tui) -> FormattedText:
     for global_idx in range(start, end):
         path, st, level, collapsed, has_children = items[global_idx]
         selected = global_idx == tui.detail_selected_index
-        bg_style = f"class:{tui._selection_style_for_status(Status.OK if selected else None)}" if selected else None
+        bg_style = f"class:{tui._selection_style_for_status(Status.DONE if selected else None)}" if selected else None
         base_border = 'class:border'
 
         pointer = '>' if selected else ' '

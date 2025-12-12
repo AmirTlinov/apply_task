@@ -46,10 +46,10 @@ class SubTask:
 
     def status_value(self) -> Status:
         if self.completed:
-            return Status.OK
+            return Status.DONE
         if self.ready_for_completion():
-            return Status.WARN
-        return Status.FAIL
+            return Status.ACTIVE
+        return Status.TODO
 
     @property
     def computed_status(self) -> str:

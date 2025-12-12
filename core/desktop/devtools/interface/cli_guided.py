@@ -84,7 +84,7 @@ def cmd_create_guided(args) -> int:
 
     task = manager.create_task(
         title,
-        status="FAIL",
+        status="TODO",
         priority=getattr(args, 'priority', "MEDIUM"),
         parent=parent,
         domain=domain,

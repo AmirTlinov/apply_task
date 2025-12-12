@@ -17,7 +17,7 @@ from core.desktop.devtools.interface.cli_io import structured_error, structured_
 from core.task_detail import TaskDetail
 
 
-def _make_task(task_id: str, *, status: str = "FAIL", priority: str = "MEDIUM", progress: int = 0, blocked: bool = False, deps: List[str] | None = None) -> TaskDetail:
+def _make_task(task_id: str, *, status: str = "TODO", priority: str = "MEDIUM", progress: int = 0, blocked: bool = False, deps: List[str] | None = None) -> TaskDetail:
     task = TaskDetail(task_id, task_id, status, priority=priority, progress=progress, blocked=blocked)
     task.dependencies = deps or []
     return task
@@ -52,7 +52,7 @@ def test_next_recommendations_order_and_remember():
         [
             _make_task("TASK-1", priority="HIGH", progress=10),
             _make_task("TASK-2", priority="LOW", blocked=True, progress=0),
-            _make_task("TASK-3", status="OK"),
+            _make_task("TASK-3", status="DONE"),
         ],
         {"domain": "", "phase": "", "component": ""},
         remember=lambda tid, dom: calls.append((tid, dom)),
@@ -83,7 +83,7 @@ def test_quick_overview_filters_and_remembers():
         [
             _make_task("TASK-1", priority="LOW", progress=5),
             _make_task("TASK-2", priority="HIGH", progress=1),
-            _make_task("TASK-3", status="OK", progress=0),
+            _make_task("TASK-3", status="DONE", progress=0),
         ],
         {"folder": "f", "domain": "f", "phase": "", "component": ""},
         remember=lambda tid, dom: calls.append((tid, dom)),

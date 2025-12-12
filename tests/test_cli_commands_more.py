@@ -4,7 +4,7 @@ from core.desktop.devtools.interface import cli_commands as cmds
 
 
 class DummyTask:
-    def __init__(self, id, status="FAIL", priority="LOW", progress=0, phase="", component=""):
+    def __init__(self, id, status="TODO", priority="LOW", progress=0, phase="", component=""):
         self.id = id
         self.status = status
         self.priority = priority
@@ -29,7 +29,7 @@ def _deps(tasks):
 
 
 def test_cmd_list_filters_by_status(capsys):
-    tasks = [DummyTask("A", status="OK"), DummyTask("B", status="FAIL")]
+    tasks = [DummyTask("A", status="DONE"), DummyTask("B", status="TODO")]
     args = SimpleNamespace(domain="", phase=None, component=None, status="OK", progress=False)
     rc = cmds.cmd_list(args, _deps(tasks))
     assert rc == 0

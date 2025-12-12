@@ -18,7 +18,7 @@ Tasks live in `~/.tasks/<namespace>` derived from git remote (or folder name). L
 apply_task create "..." --parent ROOT --description "..." --tests "..." --risks "..." --subtasks @file.json
 apply_task task "Title #tag @TASK-001"  # smart create (auto-parses tags & deps)
 apply_task edit TASK-001 --description "..." --priority HIGH --depends-on TASK-002
-apply_task update TASK-001 WARN|OK|FAIL
+apply_task update TASK-001 TODO|ACTIVE|DONE
 
 # Checkpoints
 apply_task ok TASK-001 0 --criteria-note "..." --tests-note "..." --blockers-note "..."

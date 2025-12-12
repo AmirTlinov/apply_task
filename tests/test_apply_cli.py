@@ -730,7 +730,7 @@ def test_e2e_create_subtask_done_and_clean_with_filters():
     assert _run_apply_cmd(["done", task_id]).returncode == 0
 
     meta = yaml.safe_load(_task_file(task_id, folder).read_text().split("---")[1])
-    assert meta.get("status") == "OK"
+    assert meta.get("status") == "DONE"
 
     dry_run_res = _run_apply_cmd(["clean", "--tag", "manual", "--dry-run"])
     assert dry_run_res.returncode == 0

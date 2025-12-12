@@ -18,7 +18,7 @@ def next_recommendations(
     serializer: Optional[TaskSerializer] = None,
 ) -> Tuple[Dict[str, object], Optional[TaskDetail]]:
     serializer = serializer or (lambda t: t)  # type: ignore[return-value]
-    candidates = [t for t in tasks if t.status != "OK" and t.calculate_progress() < 100]
+    candidates = [t for t in tasks if t.status != "DONE" and t.calculate_progress() < 100]
     if not candidates:
         return {"filters": filters, "candidates": []}, None
 
@@ -47,7 +47,7 @@ def suggest_tasks(
     serializer: Optional[TaskSerializer] = None,
 ) -> Tuple[Dict[str, object], List[TaskDetail]]:
     serializer = serializer or (lambda t: t)  # type: ignore[return-value]
-    active = [t for t in tasks if t.status != "OK"]
+    active = [t for t in tasks if t.status != "DONE"]
     if not active:
         return {"filters": filters, "suggestions": []}, []
 
@@ -74,7 +74,7 @@ def quick_overview(
     serializer: Optional[TaskSerializer] = None,
 ) -> Tuple[Dict[str, object], List[TaskDetail]]:
     serializer = serializer or (lambda t: t)  # type: ignore[return-value]
-    active = [t for t in tasks if t.status != "OK"]
+    active = [t for t in tasks if t.status != "DONE"]
     active.sort(key=lambda t: (t.priority, t.calculate_progress()))
     if not active:
         return {"filters": filters, "top": []}, []

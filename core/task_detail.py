@@ -78,13 +78,13 @@ class TaskDetail:
         prog = self.calculate_progress()
         self.progress = prog
         if self.blocked:
-            self.status = "FAIL"
+            self.status = "TODO"
         elif prog == 100:
-            self.status = "OK"
+            self.status = "DONE"
         elif prog > 0:
-            self.status = "WARN"
+            self.status = "ACTIVE"
         else:
-            self.status = "FAIL"
+            self.status = "TODO"
 
     def to_file_content(self) -> str:
         metadata = {
@@ -200,7 +200,7 @@ class TaskDetail:
 
 def subtask_to_task_detail(subtask: SubTask, parent_id: str, path: str) -> "TaskDetail":
     """Convert a SubTask to TaskDetail for unified navigation."""
-    status = "OK" if subtask.completed else ("WARN" if subtask.ready_for_completion() else "FAIL")
+    status = "DONE" if subtask.completed else ("ACTIVE" if subtask.ready_for_completion() else "TODO")
     return TaskDetail(
         id=f"{parent_id}/{path}",
         title=subtask.title,

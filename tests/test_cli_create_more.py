@@ -30,7 +30,7 @@ def test_cmd_create_requires_tests(monkeypatch, capsys):
     monkeypatch.setattr(cli_create, "TaskManager", lambda: DummyManager())
     args = SimpleNamespace(
         title="t",
-        status="FAIL",
+        status="TODO",
         priority="LOW",
         parent="TASK-1",
         description="desc",
@@ -61,7 +61,7 @@ def test_cmd_smart_create_uses_template(monkeypatch, capsys):
             task = type("T", (), {})()
             task.id = "TASK-1"
             task.title = "Title"
-            task.status = "FAIL"
+            task.status = "TODO"
             task.priority = "LOW"
             task.domain = ""
             task.phase = ""
@@ -92,7 +92,7 @@ def test_cmd_smart_create_uses_template(monkeypatch, capsys):
     monkeypatch.setattr(cli_create, "TaskManager", lambda: DummyManager())
     args = SimpleNamespace(
         title="Title #tag",
-        status="FAIL",
+        status="TODO",
         priority="LOW",
         parent="TASK-1",
         description="desc",
@@ -124,7 +124,7 @@ def test_cmd_create_validate_only_false(monkeypatch, capsys):
             task = SimpleNamespace(
                 id="TASK-1",
                 title="t",
-                status="FAIL",
+                status="TODO",
                 priority="LOW",
                 domain="",
                 phase="",
@@ -156,7 +156,7 @@ def test_cmd_create_validate_only_false(monkeypatch, capsys):
     monkeypatch.setattr(cli_create, "TaskManager", lambda: DummyManager())
     args = SimpleNamespace(
         title="t",
-        status="FAIL",
+        status="TODO",
         priority="LOW",
         parent="TASK-1",
         description="desc",

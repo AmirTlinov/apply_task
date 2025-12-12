@@ -33,7 +33,7 @@ def test_detail_view_resizes_for_various_widths(tmp_path, term_width, term_heigh
     detail = TaskDetail(
         id="TASK-MATRIX",
         title="Matrix sizing check",
-        status="WARN",
+        status="ACTIVE",
         description="\n".join(f"Line {i} content text" for i in range(8)),
         blockers=[f"blocker {i}" for i in range(3)],
         domain="devtools",
@@ -47,5 +47,4 @@ def test_detail_view_resizes_for_various_widths(tmp_path, term_width, term_heigh
 
     assert len(lines) <= tui.get_terminal_height()
     assert all(tui._display_width(line) <= tui.get_terminal_width() for line in lines if line)
-
 

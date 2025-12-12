@@ -12,7 +12,7 @@ def test_task_list_respects_width_on_small_terminal(tmp_path):
     tui.tasks = [
         Task(
             name="Extremely long task title that should be trimmed but not break borders",
-            status=Status.OK,
+            status=Status.DONE,
             description="",
             category="",
             progress=87,
@@ -21,7 +21,7 @@ def test_task_list_respects_width_on_small_terminal(tmp_path):
         ),
         Task(
             name="Secondary long title to verify wrapping",
-            status=Status.WARN,
+            status=Status.ACTIVE,
             description="",
             category="",
             progress=3,
@@ -45,7 +45,7 @@ def test_task_list_handles_wide_numbers_without_overflow(tmp_path):
     tui.tasks = [
         Task(
             name="Alpha release milestone",
-            status=Status.OK,
+            status=Status.DONE,
             description="",
             category="",
             progress=123,
@@ -54,7 +54,7 @@ def test_task_list_handles_wide_numbers_without_overflow(tmp_path):
         ),
         Task(
             name="Beta prep",
-            status=Status.FAIL,
+            status=Status.TODO,
             description="",
             category="",
             progress=99,
@@ -81,7 +81,7 @@ def test_task_list_clamps_ultra_narrow_width(tmp_path):
     tui.tasks = [
         Task(
             name="Tiny",
-            status=Status.OK,
+            status=Status.DONE,
             description="",
             category="",
             progress=12,
@@ -102,8 +102,8 @@ def test_task_list_shows_indices(tmp_path):
     tui.get_terminal_width = lambda: 90
     tui.get_terminal_height = lambda: 12
     tui.tasks = [
-        Task(name="Alpha", status=Status.OK, description="", category="", progress=10, subtasks_count=0, subtasks_completed=0),
-        Task(name="Beta", status=Status.WARN, description="", category="", progress=20, subtasks_count=0, subtasks_completed=0),
+        Task(name="Alpha", status=Status.DONE, description="", category="", progress=10, subtasks_count=0, subtasks_completed=0),
+        Task(name="Beta", status=Status.ACTIVE, description="", category="", progress=20, subtasks_count=0, subtasks_completed=0),
     ]
 
     text = "".join(part for _, part in tui.get_task_list_text())

@@ -89,9 +89,9 @@ from .tui_display import DisplayMixin
 
 class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin):
     SELECTION_STYLE_BY_STATUS: Dict[Status, str] = {
-        Status.OK: "selected.ok",
-        Status.WARN: "selected.warn",
-        Status.FAIL: "selected.fail",
+        Status.DONE: "selected.ok",
+        Status.ACTIVE: "selected.warn",
+        Status.TODO: "selected.fail",
         Status.UNKNOWN: "selected.unknown",
     }
     SPINNER_FRAMES: List[str] = ["⣿", "⡇", "⡏", "⡗", "⡟", "⡧", "⡯", "⡷", "⡿", "⢇", "⢏", "⢗", "⢟", "⢧", "⢯", "⢷", "⢿"]
@@ -269,17 +269,17 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
 
         @kb.add("2")
         def _(event):
-            self.current_filter = Status.WARN  # ACTIVE
+            self.current_filter = Status.ACTIVE  # ACTIVE
             self.selected_index = 0
 
         @kb.add("3")
         def _(event):
-            self.current_filter = Status.FAIL  # TODO
+            self.current_filter = Status.TODO  # TODO
             self.selected_index = 0
 
         @kb.add("4")
         def _(event):
-            self.current_filter = Status.OK  # DONE
+            self.current_filter = Status.DONE  # DONE
             self.selected_index = 0
 
         @kb.add("?")
@@ -811,14 +811,14 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
                 repo = FileTaskRepository(path)
                 tasks = repo.list("", skip_sync=True)
                 total = len(tasks)
-                ok_count = sum(1 for t in tasks if str(t.status).upper() == "OK")
-                warn_count = sum(1 for t in tasks if str(t.status).upper() == "WARN")
-                fail_count = total - ok_count - warn_count
+                done_count = sum(1 for t in tasks if str(t.status).upper() == "DONE")
+                active_count = sum(1 for t in tasks if str(t.status).upper() == "ACTIVE")
+                todo_count = total - done_count - active_count
                 avg_progress = int(sum(t.calculate_progress() for t in tasks) / total) if total else 0
                 if total == 0:
                     status = Status.UNKNOWN
                 else:
-                    status = Status.FAIL if fail_count else (Status.WARN if warn_count else Status.OK)
+                    status = Status.TODO if todo_count else (Status.ACTIVE if active_count else Status.DONE)
                 projects.append(
                     Task(
                         id=path.name,
@@ -826,11 +826,11 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
                         status=status,
                         description="",
                         category="project",
-                        completed=status == Status.OK,
+                        completed=status == Status.DONE,
                         task_file=str(path),
                         progress=avg_progress,
                         subtasks_count=total,
-                        subtasks_completed=ok_count,
+                        subtasks_completed=done_count,
                         parent=None,
                         detail=None,
                         domain="",
@@ -891,7 +891,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
         if isinstance(status, Status):
             return status
         if isinstance(status, bool):
-            return Status.OK if status else Status.FAIL
+            return Status.DONE if status else Status.TODO
         if isinstance(status, str):
             return Status.from_string(status)
         return Status.UNKNOWN
@@ -902,22 +902,22 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
 
     def _status_indicator(self, status: Union[Status, str, bool, None]) -> Tuple[str, str]:
         status_obj = self._normalize_status_value(status)
-        if status_obj == Status.OK:
+        if status_obj == Status.DONE:
             return '●', 'class:icon.check'
-        if status_obj == Status.WARN:
+        if status_obj == Status.ACTIVE:
             return '●', 'class:icon.warn'
-        if status_obj == Status.FAIL:
+        if status_obj == Status.TODO:
             return '○', 'class:icon.fail'
         return '○', 'class:status.unknown'
 
     @staticmethod
     def _status_short_label(status: Status) -> str:
-        if status == Status.OK:
-            return '[OK]'
-        if status == Status.WARN:
-            return '[~]'
-        if status == Status.FAIL:
-            return '[X]'
+        if status == Status.DONE:
+            return "[DONE]"
+        if status == Status.ACTIVE:
+            return "[ACTV]"
+        if status == Status.TODO:
+            return "[TODO]"
         return '?'
 
     def _spinner_frame(self) -> str:
@@ -1265,7 +1265,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
                 status=derived_status,
                 description=(det.description or det.context or "")[:80],
                 category=det.domain or det.priority,
-                completed=derived_status == Status.OK,
+                completed=derived_status == Status.DONE,
                 task_file=task_file,
                 progress=calc_progress,
                 subtasks_count=len(det.subtasks),
@@ -1312,7 +1312,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
                 status=derived_status,
                 description=(det.description or det.context or "")[:80],
                 category=det.domain or det.priority,
-                completed=derived_status == Status.OK,
+                completed=derived_status == Status.DONE,
                 task_file=task_file,
                 progress=calc_progress,
                 subtasks_count=len(det.subtasks),
@@ -1429,7 +1429,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
 
     def _task_done_value(self, task: Task) -> str:
         detail = self._get_task_detail(task)
-        if detail and detail.updated and detail.status == "OK":
+        if detail and detail.updated and detail.status == "DONE":
             return str(detail.updated)
         return "—"
 
@@ -1451,7 +1451,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
         if not detail:
             return "-"
         start = self._parse_task_datetime(detail.created)
-        end = self._parse_task_datetime(detail.updated) if detail.status == "OK" else None
+        end = self._parse_task_datetime(detail.updated) if detail.status == "DONE" else None
         if not start or not end:
             return "-"
         delta = end - start
@@ -1608,7 +1608,7 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
         domain = getattr(task, "domain", "")
         # Toggle: DONE -> ACTIVE, anything else -> DONE
         # task.status is Status enum, not string!
-        new_status = "ACTIVE" if task.status == Status.OK else "DONE"
+        new_status = "ACTIVE" if task.status == Status.DONE else "DONE"
         # force=True - пользователь может отметить без проверки подзадач
         ok, error = self.manager.update_task_status(task.id, new_status, domain, force=True)
         if not ok:

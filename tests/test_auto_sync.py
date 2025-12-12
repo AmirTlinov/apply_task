@@ -35,7 +35,7 @@ def _write_task(path: Path, task_id: str):
     content = f"""---
 id: {task_id}
 title: Demo {task_id}
-status: FAIL
+status: TODO
 domain:
 created: 2025-01-01 00:00
 updated: 2025-01-01 00:00

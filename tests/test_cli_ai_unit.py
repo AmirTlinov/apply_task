@@ -148,7 +148,7 @@ class TestBuildContext:
 
         ctx = build_context(manager)
         assert ctx["total_tasks"] == 0
-        assert ctx["by_status"] == {"OK": 0, "WARN": 0, "FAIL": 0}
+        assert ctx["by_status"] == {"DONE": 0, "ACTIVE": 0, "TODO": 0}
 
     def test_include_all_tasks(self, tmp_path):
         tasks_dir = tmp_path / ".tasks"
@@ -1138,7 +1138,7 @@ class TestAtomicBatch:
         manager = TaskManager(tasks_dir=tasks_dir)
 
         # Create task
-        task = manager.create_task(title="Test Task", status="FAIL")
+        task = manager.create_task(title="Test Task", status="TODO")
         manager.save_task(task)
         task_id = task.id
 
@@ -1173,7 +1173,7 @@ class TestAtomicBatch:
         manager = TaskManager(tasks_dir=tasks_dir)
 
         # Create task
-        task = manager.create_task(title="Test Task", status="FAIL")
+        task = manager.create_task(title="Test Task", status="TODO")
         manager.save_task(task)
         task_id = task.id
 
@@ -1208,7 +1208,7 @@ class TestAtomicBatch:
         manager = TaskManager(tasks_dir=tasks_dir)
 
         # Create task
-        task = manager.create_task(title="Test Task", status="FAIL")
+        task = manager.create_task(title="Test Task", status="TODO")
         manager.save_task(task)
         task_id = task.id
 
@@ -1247,14 +1247,14 @@ class TestMetaContext:
         manager = TaskManager(tasks_dir=tasks_dir)
 
         # Create task
-        task = manager.create_task(title="Test", status="FAIL")
+        task = manager.create_task(title="Test", status="TODO")
         manager.save_task(task)
 
         meta = build_meta(manager, task.id)
 
         assert meta.task_id == task.id
         assert meta.task_status == "TODO"
-        assert meta.task_status_code == "FAIL"
+        assert meta.task_status_code == "TODO"
         assert isinstance(meta, Meta)
 
     def test_meta_to_dict(self):
@@ -1263,7 +1263,7 @@ class TestMetaContext:
         meta = Meta(
             task_id="T-1",
             task_status="TODO",
-            task_status_code="FAIL",
+            task_status_code="TODO",
             task_progress=50,
             subtasks_total=4,
             subtasks_completed=2,
@@ -1285,7 +1285,7 @@ class TestMetaContext:
         manager = TaskManager(tasks_dir=tasks_dir)
 
         # Create task
-        task = manager.create_task(title="Test", status="FAIL")
+        task = manager.create_task(title="Test", status="TODO")
         manager.save_task(task)
 
         resp = process_intent(

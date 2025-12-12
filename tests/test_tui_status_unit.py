@@ -4,6 +4,7 @@ import time
 from prompt_toolkit.mouse_events import MouseButton, MouseEventType
 
 from core.desktop.devtools.interface.tui_status import build_status_text
+from core import Status
 
 
 def test_build_status_text_basic():
@@ -12,7 +13,7 @@ def test_build_status_text_basic():
     class DummyTUI(SimpleNamespace):
         def __init__(self):
             super().__init__(
-                filtered_tasks=[SimpleNamespace(status="OK"), SimpleNamespace(status="WARN"), SimpleNamespace(status="FAIL")],
+                filtered_tasks=[SimpleNamespace(status=Status.DONE), SimpleNamespace(status=Status.ACTIVE), SimpleNamespace(status=Status.TODO)],
                 domain_filter="",
                 phase_filter=None,
                 component_filter=None,
@@ -59,8 +60,8 @@ def test_build_status_text_filter_flash(monkeypatch):
         "BTN_SETTINGS": "[SETTINGS]",
         "FILTER_ALL": "ALL",
         "FILTER_DONE": "DONE",
-        "FILTER_IN_PROGRESS": "IN PROGRESS",
-        "FILTER_BACKLOG": "BACKLOG",
+        "FILTER_IN_PROGRESS": "ACTIVE",
+        "FILTER_BACKLOG": "TODO",
         "STATUS_TASKS_COUNT": "{count} tasks",
         "STATUS_LOADING": "Loading",
     }
@@ -72,7 +73,7 @@ def test_build_status_text_filter_flash(monkeypatch):
                 domain_filter="",
                 phase_filter=None,
                 component_filter=None,
-                current_filter=SimpleNamespace(value=["WARN"]),
+                current_filter=SimpleNamespace(value=["ACTIVE"]),
                 _filter_flash_until=0,
                 spinner_message="",
                 status_message="",
@@ -105,7 +106,7 @@ def test_build_status_text_filter_flash(monkeypatch):
     tui = DummyTUI()
     result = build_status_text(tui)
     text = "".join(fragment[1] for fragment in result)
-    assert "IN PROGRESS" in text
+    assert "ACTIVE" in text
     tui.exit_detail_view()
     tui.open_settings_dialog()
 
@@ -114,7 +115,7 @@ def test_build_status_text_spinner_and_status_message_clear():
     class DummyTUI(SimpleNamespace):
         def __init__(self):
             super().__init__(
-                filtered_tasks=[SimpleNamespace(status="OK")],
+                filtered_tasks=[SimpleNamespace(status=Status.DONE)],
                 domain_filter="",
                 phase_filter=None,
                 component_filter=None,
@@ -329,7 +330,7 @@ def test_status_filter_flash_changes_on_new_filter():
                 domain_filter="",
                 phase_filter=None,
                 component_filter=None,
-                current_filter=SimpleNamespace(value=["FAIL"]),
+                current_filter=SimpleNamespace(value=["TODO"]),
                 _filter_flash_until=0,
                 spinner_message="",
                 status_message="",
@@ -367,7 +368,7 @@ def test_status_message_shown_with_flash_and_spinner():
     class Dummy(SimpleNamespace):
         def __init__(self):
             super().__init__(
-                filtered_tasks=[SimpleNamespace(status=SimpleNamespace(name="OK", value=0))],
+                filtered_tasks=[SimpleNamespace(status=Status.DONE)],
                 domain_filter="",
                 phase_filter=None,
                 component_filter=None,
@@ -411,8 +412,8 @@ def test_status_filter_flash_sets_flag():
         "BTN_SETTINGS": "[SETTINGS]",
         "FILTER_ALL": "ALL",
         "FILTER_DONE": "DONE",
-        "FILTER_IN_PROGRESS": "IN PROGRESS",
-        "FILTER_BACKLOG": "BACKLOG",
+        "FILTER_IN_PROGRESS": "ACTIVE",
+        "FILTER_BACKLOG": "TODO",
         "STATUS_TASKS_COUNT": "{count} tasks",
         "STATUS_LOADING": "Loading",
     }
@@ -424,7 +425,7 @@ def test_status_filter_flash_sets_flag():
                 domain_filter="",
                 phase_filter=None,
                 component_filter=None,
-                current_filter=SimpleNamespace(value=["WARN"]),
+                current_filter=SimpleNamespace(value=["ACTIVE"]),
                 _filter_flash_until=0,
                 spinner_message="",
                 status_message="",

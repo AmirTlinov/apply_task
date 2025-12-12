@@ -75,7 +75,7 @@ Every non-interactive command prints structured JSON:
         "id": "TASK-022",
         "title": "Mixed policies runtime",
         "status": "ACTIVE",
-        "status_code": "WARN",
+        "status_code": "ACTIVE",
         "progress": 65,
         "subtasks": [
           {

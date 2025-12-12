@@ -4,6 +4,15 @@ import argparse
 from pathlib import Path
 from typing import Any, Mapping
 
+from core.status import task_status_code
+
+
+def _parse_task_status(value: str) -> str:
+    try:
+        return task_status_code(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
 
 def build_parser(commands: Any, themes: Mapping[str, Any], default_theme: str, automation_tmp: Path) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -36,7 +45,7 @@ def build_parser(commands: Any, themes: Mapping[str, Any], default_theme: str, a
 
     # list
     lp = sub.add_parser("list", help="Список задач")
-    lp.add_argument("--status", choices=["TODO", "ACTIVE", "DONE", "FAIL", "WARN", "OK"])
+    lp.add_argument("--status", type=_parse_task_status, choices=["TODO", "ACTIVE", "DONE"])
     lp.add_argument("--tag", help="Фильтр по тегу")
     lp.add_argument("--blocked", action="store_true", help="Только заблокированные зависимостями")
     lp.add_argument("--stale", type=int, metavar="DAYS", help="Без активности N дней")
@@ -53,7 +62,7 @@ def build_parser(commands: Any, themes: Mapping[str, Any], default_theme: str, a
     # create
     cp = sub.add_parser("create", help="Создать задачу")
     cp.add_argument("title")
-    cp.add_argument("--status", default="TODO", choices=["TODO", "ACTIVE", "DONE", "FAIL", "WARN", "OK"])
+    cp.add_argument("--status", default="TODO", type=_parse_task_status, choices=["TODO", "ACTIVE", "DONE"])
     cp.add_argument("--priority", default="MEDIUM", choices=["LOW", "MEDIUM", "HIGH"])
     cp.add_argument("--parent", required=True)
     cp.add_argument("--description", "-d", required=True)
@@ -85,7 +94,7 @@ def build_parser(commands: Any, themes: Mapping[str, Any], default_theme: str, a
         ),
     )
     tp.add_argument("title")
-    tp.add_argument("--status", default="TODO", choices=["TODO", "ACTIVE", "DONE", "FAIL", "WARN", "OK"])
+    tp.add_argument("--status", default="TODO", type=_parse_task_status, choices=["TODO", "ACTIVE", "DONE"])
     tp.add_argument("--priority", default="MEDIUM", choices=["LOW", "MEDIUM", "HIGH"])
     tp.add_argument("--parent", required=True)
     tp.add_argument("--description", "-d", required=True)
@@ -247,7 +256,7 @@ def build_parser(commands: Any, themes: Mapping[str, Any], default_theme: str, a
     status_cmd.set_defaults(func=commands.cmd_projects_status)
     status_set_cmd = proj_sub.add_parser("status-set", help="Установить статус задачи (TODO/ACTIVE/DONE; алиасы OK/WARN/FAIL) — единообразно с TUI")
     status_set_cmd.add_argument("task_id", help="TASK-xxx")
-    status_set_cmd.add_argument("status", choices=["TODO", "ACTIVE", "DONE", "FAIL", "WARN", "OK"])
+    status_set_cmd.add_argument("status", type=_parse_task_status, choices=["TODO", "ACTIVE", "DONE"])
     add_domain_arg(status_set_cmd)
     status_set_cmd.set_defaults(func=commands.cmd_status_set)
     autosync_cmd = proj_sub.add_parser("autosync", help="Включить или выключить auto_sync без редактирования конфигов")
@@ -328,7 +337,7 @@ def build_parser(commands: Any, themes: Mapping[str, Any], default_theme: str, a
     # clean
     cl = sub.add_parser("clean", help="Удалить задачи по фильтрам")
     cl.add_argument("--tag", help="тег без #")
-    cl.add_argument("--status", choices=["TODO", "ACTIVE", "DONE", "FAIL", "WARN", "OK"], help="фильтр по статусу")
+    cl.add_argument("--status", type=_parse_task_status, choices=["TODO", "ACTIVE", "DONE"], help="фильтр по статусу")
     cl.add_argument("--phase", help="фаза/итерация")
     cl.add_argument("--glob", help="glob-шаблон (.tasks relative), например 'phase1/*.task'")
     cl.add_argument("--dry-run", action="store_true", help="только показать задачи без удаления")
@@ -380,7 +389,7 @@ def build_parser(commands: Any, themes: Mapping[str, Any], default_theme: str, a
     auto_create.add_argument("--coverage", type=int, default=85)
     auto_create.add_argument("--sla", default="p95<=200ms")
     auto_create.add_argument("--subtasks", default=str(automation_tmp / "subtasks.template.json"))
-    auto_create.add_argument("--status", default="TODO", choices=["TODO", "ACTIVE", "DONE", "FAIL", "WARN", "OK"])
+    auto_create.add_argument("--status", default="TODO", type=_parse_task_status, choices=["TODO", "ACTIVE", "DONE"])
     auto_create.add_argument("--priority", default="MEDIUM", choices=["LOW", "MEDIUM", "HIGH"])
     auto_create.add_argument("--context")
     auto_create.add_argument("--tags")

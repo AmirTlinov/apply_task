@@ -221,5 +221,5 @@ Ruff errors:       0
 - Testing → нужно добавить 25+ тестов для 90% coverage
 - Performance → приемлемая, нужен rate limiting
 
-**Автор аудита:** Claude Sonnet 4.5
+**Автор аудита:** AI assistant
 **Дата:** 2025-11-25

@@ -72,7 +72,7 @@ class TestTaskTrackerTUIInstanceMethods:
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="OK",
+            status="DONE",
             description="Test description",
             context="",
             created="",
@@ -88,7 +88,7 @@ class TestTaskTrackerTUIInstanceMethods:
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="OK",
+            status="DONE",
             description="",
             context="Test context",
             created="",
@@ -112,7 +112,7 @@ class TestTaskTrackerTUIInstanceMethods:
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="OK",
+            status="DONE",
             description="Test   with\nmultiple   spaces",
             context="",
             created="",
@@ -233,7 +233,7 @@ class TestTaskTrackerTUIInstanceMethods:
         """Test _get_task_detail retrieves detail from task."""
         task = Task(
             name="Test",
-            status=Status.OK,
+            status=Status.DONE,
             description="",
             category="test",
             task_file=None,
@@ -241,7 +241,7 @@ class TestTaskTrackerTUIInstanceMethods:
         task.detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="OK",
+            status="DONE",
             description="Detail",
             context="",
             created="",
@@ -255,11 +255,11 @@ class TestTaskTrackerTUIInstanceMethods:
         task_file = tmp_path / ".tasks" / "test.task"
         task_file.parent.mkdir(parents=True, exist_ok=True)
         # Write proper YAML format
-        task_file.write_text("id: TASK-001\ntitle: Test task\ndescription: Test task\nstatus: OK\n", encoding="utf-8")
+        task_file.write_text("id: TASK-001\ntitle: Test task\ndescription: Test task\nstatus: DONE\n", encoding="utf-8")
         
         task = Task(
             name="Test",
-            status=Status.OK,
+            status=Status.DONE,
             description="",
             category="test",
             task_file=str(task_file),
@@ -273,7 +273,7 @@ class TestTaskTrackerTUIInstanceMethods:
         """Test _get_task_detail returns None when no detail available."""
         task = Task(
             name="Test",
-            status=Status.OK,
+            status=Status.DONE,
             description="",
             category="test",
             task_file=None,
@@ -286,7 +286,7 @@ class TestTaskTrackerTUIInstanceMethods:
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="OK",
+            status="DONE",
             description="Detail",
             context="",
             created="",
@@ -302,7 +302,7 @@ class TestTaskTrackerTUIInstanceMethods:
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="OK",
+            status="DONE",
             description="Detail",
             context="",
             created="",
@@ -310,7 +310,7 @@ class TestTaskTrackerTUIInstanceMethods:
         )
         task = Task(
             name="Test",
-            status=Status.OK,
+            status=Status.DONE,
             description="",
             category="test",
             detail=detail,
@@ -336,7 +336,7 @@ class TestTaskTrackerTUIInstanceMethods:
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="OK",
+            status="DONE",
             description="",
             context="",
             created="2025-01-01",
@@ -344,7 +344,7 @@ class TestTaskTrackerTUIInstanceMethods:
         )
         task = Task(
             name="Test",
-            status=Status.OK,
+            status=Status.DONE,
             description="",
             category="test",
             detail=detail,
@@ -356,7 +356,7 @@ class TestTaskTrackerTUIInstanceMethods:
         """Test _task_created_value returns dash when no created date."""
         task = Task(
             name="Test",
-            status=Status.OK,
+            status=Status.DONE,
             description="",
             category="test",
         )
@@ -364,11 +364,11 @@ class TestTaskTrackerTUIInstanceMethods:
         assert result == "—"
 
     def test_task_done_value_with_updated(self, tui):
-        """Test _task_done_value returns updated date when status is OK."""
+        """Test _task_done_value returns updated date when status is DONE."""
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="OK",
+            status="DONE",
             description="",
             context="",
             created="",
@@ -376,7 +376,7 @@ class TestTaskTrackerTUIInstanceMethods:
         )
         task = Task(
             name="Test",
-            status=Status.OK,
+            status=Status.DONE,
             description="",
             category="test",
             detail=detail,
@@ -385,11 +385,11 @@ class TestTaskTrackerTUIInstanceMethods:
         assert result == "2025-01-02"
 
     def test_task_done_value_not_ok(self, tui):
-        """Test _task_done_value returns dash when status is not OK."""
+        """Test _task_done_value returns dash when status is not DONE."""
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="WARN",
+            status="ACTIVE",
             description="",
             context="",
             created="",
@@ -397,7 +397,7 @@ class TestTaskTrackerTUIInstanceMethods:
         )
         task = Task(
             name="Test",
-            status=Status.WARN,
+            status=Status.ACTIVE,
             description="",
             category="test",
             detail=detail,
@@ -410,7 +410,7 @@ class TestTaskTrackerTUIInstanceMethods:
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="OK",
+            status="DONE",
             description="",
             context="",
             created="",
@@ -418,7 +418,7 @@ class TestTaskTrackerTUIInstanceMethods:
         )
         task = Task(
             name="Test",
-            status=Status.OK,
+            status=Status.DONE,
             description="",
             category="test",
             detail=detail,
@@ -468,7 +468,7 @@ class TestTaskTrackerTUIInstanceMethods:
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="OK",
+            status="DONE",
             description="",
             context="",
             created="2025-01-01",
@@ -483,7 +483,7 @@ class TestTaskTrackerTUIInstanceMethods:
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="OK",
+            status="DONE",
             description="",
             context="",
             created="",
@@ -497,14 +497,14 @@ class TestTaskTrackerTUIInstanceMethods:
         detail = TaskDetail(
             id="TASK-001",
             title="Test Task",
-            status="WARN",  # Not OK, so end date won't be parsed
+            status="ACTIVE",  # Not DONE, so end date won't be parsed
             description="",
             context="",
             created="2025-01-01",
             updated="",  # Empty updated
         )
         result = tui._task_duration_value(detail)
-        # Should return "-" because status is not "OK" or updated is empty
+        # Should return "-" because status is not "DONE" or updated is empty
         assert result == "-"
 
     def test_task_duration_value_none_detail(self, tui):

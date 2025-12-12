@@ -53,7 +53,6 @@ export function useTasks(params?: UseTasksParams): UseTasksResult {
           task_id: taskId,
           title: t.title,
           status: t.status || "TODO",
-          status_code: t.status_code,
           progress: t.progress || 0,
           subtask_count: t.subtask_count || t.subtasks?.length || 0,
           completed_count: t.completed_count || 0,

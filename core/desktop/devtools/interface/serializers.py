@@ -84,11 +84,12 @@ def task_to_dict(
     """
     if compact:
         raw_status = task.status
+        normalized_status = task_status_label(raw_status)
         data: Dict[str, Any] = {
             "id": task.id,
             "title": task.title,
-            "status": task_status_label(raw_status),
-            "status_code": raw_status,
+            "status": normalized_status,
+            "status_code": normalized_status,
             "progress": task.calculate_progress(),
         }
         # Include domain for GUI task disambiguation
@@ -105,11 +106,12 @@ def task_to_dict(
 
     # Full representation
     raw_status = task.status
+    normalized_status = task_status_label(raw_status)
     data = {
         "id": task.id,
         "title": task.title,
-        "status": task_status_label(raw_status),
-        "status_code": raw_status,
+        "status": normalized_status,
+        "status_code": normalized_status,
         "progress": task.calculate_progress(),
         "priority": task.priority,
         "domain": task.domain,

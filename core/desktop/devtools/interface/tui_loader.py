@@ -5,13 +5,48 @@ from typing import Callable, List, Tuple
 from core.desktop.devtools.application.task_manager import TaskManager
 from core.desktop.devtools.interface.i18n import translate
 from core import TaskDetail, Status
+from core.status import task_status_code, task_status_label
+
+
+_STATUS_SORT_ORDER = {"ACTIVE": 0, "TODO": 1, "DONE": 2}
+
+
+def _status_token(task: object) -> str:
+    raw = getattr(task, "status", "")
+    if isinstance(raw, Status):
+        return raw.value[0]
+    if isinstance(raw, str):
+        return raw.strip().upper()
+    if hasattr(raw, "name"):
+        return str(getattr(raw, "name")).strip().upper()
+    return str(raw).strip().upper()
+
+
+def _status_code_safe(raw: str) -> str:
+    try:
+        return task_status_code(raw)
+    except ValueError:
+        return raw
 
 
 def load_tasks_snapshot(manager: TaskManager, domain_filter: str, current_filter) -> List[TaskDetail]:
     items = manager.list_tasks(domain_filter)
     if current_filter:
-        items = [t for t in items if t.status.name == current_filter.value[0]]
-    items.sort(key=lambda t: (t.status.value, t.progress), reverse=False)
+        wanted_raw = current_filter.value[0] if hasattr(current_filter, "value") else str(current_filter)
+        wanted = _status_code_safe(str(wanted_raw).strip().upper())
+        items = [
+            t
+            for t in items
+            if _status_code_safe(task_status_label(_status_token(t))) == wanted
+        ]
+
+    def _key(task: TaskDetail) -> tuple[int, int]:
+        code = _status_code_safe(task_status_label(_status_token(task)))
+        order = _STATUS_SORT_ORDER.get(code, 99)
+        progress = int(getattr(task, "progress", 0) or 0)
+        return order, progress
+
+    items.sort(key=_key, reverse=False)
     return items
 
 
@@ -43,9 +78,11 @@ def apply_context_filters(details: List[TaskDetail], phase_filter: str, componen
 def build_task_models(details: List[TaskDetail], factory: Callable) -> List:
     tasks = []
     for det in details:
-        calc_progress = det.calculate_progress()
-        derived_status = Status.OK if calc_progress == 100 and not det.blocked else Status.from_string(det.status)
-        subtasks_completed = sum(1 for st in det.subtasks if st.completed)
+        calc_progress = det.calculate_progress() if hasattr(det, "calculate_progress") else int(getattr(det, "progress", 0) or 0)
+        blocked = bool(getattr(det, "blocked", False))
+        derived_status = Status.DONE if calc_progress == 100 and not blocked else Status.from_string(_status_token(det))
+        subtasks = getattr(det, "subtasks", []) or []
+        subtasks_completed = sum(1 for st in subtasks if getattr(st, "completed", False))
         tasks.append(factory(det, derived_status, calc_progress, subtasks_completed))
     return tasks
 

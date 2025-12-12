@@ -8,215 +8,114 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Link } from "@tanstack/react-router";
 
 interface NavItem {
-  id: string;
+  to: string;
   label: string;
-  icon: React.ComponentType<{ style?: React.CSSProperties; className?: string }>;
+  icon: React.ComponentType<{ className?: string }>;
   shortcut?: string;
 }
 
 const navItems: NavItem[] = [
-  { id: "list", label: "Tasks", icon: LayoutList, shortcut: "g l" },
-  { id: "board", label: "Board", icon: LayoutGrid, shortcut: "g b" },
-  { id: "timeline", label: "Timeline", icon: Clock, shortcut: "g t" },
-  { id: "dashboard", label: "Dashboard", icon: BarChart3, shortcut: "g d" },
+  { to: "/", label: "Tasks", icon: LayoutList, shortcut: "g l" },
+  { to: "/board", label: "Board", icon: LayoutGrid, shortcut: "g b" },
+  { to: "/timeline", label: "Timeline", icon: Clock, shortcut: "g t" },
+  { to: "/dashboard", label: "Dashboard", icon: BarChart3, shortcut: "g d" },
 ];
 
 interface SidebarProps {
-  currentView: string;
-  onViewChange: (view: string) => void;
   projectName?: string;
   collapsed?: boolean;
   onToggle?: () => void;
 }
 
 export function Sidebar({
-  currentView,
-  onViewChange,
   projectName,
   collapsed = false,
   onToggle,
 }: SidebarProps) {
   return (
     <aside
-      style={{
-        height: "100%",
-        width: collapsed ? "64px" : "240px",
-        flexShrink: 0,
-        display: "flex",
-        flexDirection: "column",
-        borderRight: "1px solid var(--color-border)",
-        backgroundColor: "var(--color-background-subtle)",
-        transition: "width 200ms cubic-bezier(0.32, 0.72, 0, 1)",
-        overflow: "hidden",
-      }}
+      className={cn(
+        "flex h-full flex-col shrink-0 border-r border-border bg-background-subtle transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] overflow-hidden",
+        collapsed ? "w-[64px]" : "w-[240px]"
+      )}
     >
       {/* Header */}
       <div
-        style={{
-          padding: collapsed ? "16px 12px" : "16px",
-          borderBottom: "1px solid var(--color-border)",
-          display: "flex",
-          alignItems: "center",
-          gap: "12px",
-          minHeight: "64px",
-        }}
+        className={cn(
+          "flex items-center gap-3 min-h-[64px] border-b border-border",
+          collapsed ? "px-3 justify-center" : "px-4"
+        )}
       >
         {/* Logo */}
-        <div
-          style={{
-            width: "36px",
-            height: "36px",
-            borderRadius: "10px",
-            background: "linear-gradient(135deg, var(--color-primary) 0%, #2563eb 100%)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-            boxShadow: "0 2px 8px -2px rgba(59, 130, 246, 0.4)",
-          }}
-        >
-          <span
-            style={{
-              color: "white",
-              fontWeight: 700,
-              fontSize: "13px",
-              letterSpacing: "-0.02em",
-            }}
-          >
-            AT
-          </span>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-blue-600 text-white shadow-sm shadow-blue-500/20">
+          <span className="font-bold text-[13px] tracking-tight">AT</span>
         </div>
 
         {!collapsed && (
-          <>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontWeight: 600,
-                  fontSize: "15px",
-                  color: "var(--color-foreground)",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  letterSpacing: "-0.01em",
-                }}
-              >
-                Apply Task
-              </div>
-              {projectName && (
-                <div
-                  style={{
-                    fontSize: "12px",
-                    color: "var(--color-foreground-muted)",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    marginTop: "1px",
-                  }}
-                >
-                  {projectName}
-                </div>
-              )}
-            </div>
-            {onToggle && (
-              <button
-                onClick={onToggle}
-                className="btn"
-                style={{
-                  padding: "8px",
-                  borderRadius: "8px",
-                  border: "none",
-                  backgroundColor: "transparent",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "var(--color-foreground-muted)",
-                }}
-                title="Collapse sidebar"
-              >
-                <PanelLeftClose
-                  style={{
-                    width: "18px",
-                    height: "18px",
-                  }}
-                />
-              </button>
+          <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
+            <span className="truncate font-semibold text-[15px] leading-tight text-foreground tracking-tight">
+              Apply Task
+            </span>
+            {projectName && (
+              <span className="truncate text-xs text-foreground-muted mt-0.5">
+                {projectName}
+              </span>
             )}
-          </>
+          </div>
+        )}
+
+        {!collapsed && onToggle && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggle}
+            className="h-8 w-8 text-foreground-muted hover:text-foreground"
+            title="Collapse sidebar"
+          >
+            <PanelLeftClose className="h-[18px] w-[18px]" />
+          </Button>
         )}
 
         {collapsed && onToggle && (
-          <button
-            onClick={onToggle}
-            className="btn"
-            style={{
-              position: "absolute",
-              right: "-12px",
-              top: "50%",
-              transform: "translateY(-50%)",
-              padding: "6px",
-              borderRadius: "6px",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "var(--color-background)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "var(--shadow-sm)",
-            }}
-            title="Expand sidebar"
-          >
-            <PanelLeftOpen
-              style={{
-                width: "14px",
-                height: "14px",
-                color: "var(--color-foreground-muted)",
-              }}
-            />
-          </button>
+          <div className="absolute left-[60px] top-[22px] z-50">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onToggle}
+              className="h-6 w-6 rounded-md border-border bg-background shadow-sm hover:bg-background-hover"
+              title="Expand sidebar"
+            >
+              <PanelLeftOpen className="h-3.5 w-3.5 text-foreground-muted" />
+            </Button>
+          </div>
         )}
       </div>
 
       {/* Navigation */}
-      <nav
-        style={{
-          flex: 1,
-          padding: "12px 8px",
-          overflowY: "auto",
-        }}
-      >
+      <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
         {navItems.map((item) => (
           <NavButton
-            key={item.id}
+            key={item.to}
             item={item}
-            isActive={currentView === item.id}
             collapsed={collapsed}
-            onClick={() => onViewChange(item.id)}
           />
         ))}
       </nav>
 
       {/* Footer */}
-      <div
-        style={{
-          padding: "8px",
-          borderTop: "1px solid var(--color-border)",
-        }}
-      >
+      <div className="p-2 border-t border-border space-y-0.5">
         <NavButton
-          item={{ id: "projects", label: "Projects", icon: FolderOpen }}
-          isActive={currentView === "projects"}
+          item={{ to: "/projects", label: "Projects", icon: FolderOpen }}
           collapsed={collapsed}
-          onClick={() => onViewChange("projects")}
         />
         <NavButton
-          item={{ id: "settings", label: "Settings", icon: Settings }}
-          isActive={currentView === "settings"}
+          item={{ to: "/settings", label: "Settings", icon: Settings }}
           collapsed={collapsed}
-          onClick={() => onViewChange("settings")}
         />
       </div>
     </aside>
@@ -225,109 +124,54 @@ export function Sidebar({
 
 interface NavButtonProps {
   item: NavItem;
-  isActive: boolean;
   collapsed: boolean;
-  onClick: () => void;
 }
 
-function NavButton({ item, isActive, collapsed, onClick }: NavButtonProps) {
+function NavButton({ item, collapsed }: NavButtonProps) {
   const Icon = item.icon;
 
   return (
-    <button
-      onClick={onClick}
-      className="sidebar-item"
-      aria-current={isActive ? "page" : undefined}
+    <Link
+      to={item.to}
       title={collapsed ? item.label : undefined}
-      style={{
-        width: "100%",
-        display: "flex",
-        alignItems: "center",
-        gap: "12px",
-        padding: collapsed ? "10px" : "10px 12px",
-        marginBottom: "2px",
-        borderRadius: "8px",
-        fontSize: "14px",
-        fontWeight: isActive ? 500 : 400,
-        color: isActive ? "var(--color-primary)" : "var(--color-foreground-muted)",
-        backgroundColor: isActive ? "var(--color-primary-subtle)" : "transparent",
-        border: "none",
-        cursor: "pointer",
-        transition: "all 150ms ease",
-        justifyContent: collapsed ? "center" : "flex-start",
-        position: "relative",
-        overflow: "hidden",
+      activeProps={{
+        className: "bg-primary-subtle text-primary"
       }}
-      onMouseEnter={(e) => {
-        if (!isActive) {
-          e.currentTarget.style.backgroundColor = "var(--color-background-hover)";
-          e.currentTarget.style.color = "var(--color-foreground)";
-        }
+      inactiveProps={{
+        className: "text-foreground-muted hover:bg-background-hover hover:text-foreground"
       }}
-      onMouseLeave={(e) => {
-        if (!isActive) {
-          e.currentTarget.style.backgroundColor = "transparent";
-          e.currentTarget.style.color = "var(--color-foreground-muted)";
-        }
-      }}
-    >
-      {/* Active indicator bar */}
-      {isActive && (
-        <span
-          style={{
-            position: "absolute",
-            left: 0,
-            top: "50%",
-            transform: "translateY(-50%)",
-            width: "3px",
-            height: "20px",
-            backgroundColor: "var(--color-primary)",
-            borderRadius: "0 2px 2px 0",
-          }}
-        />
+      className={cn(
+        "group relative flex w-full items-center gap-3 rounded-lg text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary",
+        collapsed ? "justify-center px-2 py-2.5" : "px-3 py-2.5"
       )}
-
-      <Icon
-        style={{
-          width: "18px",
-          height: "18px",
-          flexShrink: 0,
-          transition: "transform 150ms ease",
-        }}
-      />
-
-      {!collapsed && (
+    >
+      {({ isActive }) => (
         <>
-          <span
-            style={{
-              flex: 1,
-              textAlign: "left",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {item.label}
-          </span>
-          {item.shortcut && (
-            <kbd
-              style={{
-                fontSize: "10px",
-                fontFamily: "var(--font-mono)",
-                color: "var(--color-foreground-subtle)",
-                padding: "3px 6px",
-                backgroundColor: "var(--color-background)",
-                borderRadius: "4px",
-                border: "1px solid var(--color-border)",
-                letterSpacing: "0.02em",
-                opacity: 0.8,
-              }}
-            >
-              {item.shortcut}
-            </kbd>
+          {/* Active Indicator */}
+          {isActive && (
+            <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-sm bg-primary" />
+          )}
+
+          <Icon
+            className={cn(
+              "shrink-0 transition-transform duration-200",
+              isActive ? "text-primary" : "text-foreground-muted group-hover:text-foreground",
+              collapsed ? "h-5 w-5" : "h-[18px] w-[18px]"
+            )}
+          />
+
+          {!collapsed && (
+            <>
+              <span className="flex-1 truncate text-left">{item.label}</span>
+              {item.shortcut && (
+                <kbd className="inline-flex h-5 items-center rounded border border-border bg-background px-1.5 font-mono text-[10px] font-medium text-foreground-subtle opacity-100">
+                  {item.shortcut}
+                </kbd>
+              )}
+            </>
           )}
         </>
       )}
-    </button>
+    </Link>
   );
 }

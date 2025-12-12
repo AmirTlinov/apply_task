@@ -45,13 +45,7 @@ export function TaskList({
   // Skeleton loading state
   if (isLoading) {
     return (
-      <div
-        style={{
-          padding: "20px 24px",
-          flex: 1,
-          overflowY: "auto",
-        }}
-      >
+      <div className="flex-1 overflow-y-auto p-6">
         <TaskListSkeleton count={6} />
       </div>
     );
@@ -60,7 +54,7 @@ export function TaskList({
   // Empty state - no tasks at all
   if (tasks.length === 0 && !searchQuery) {
     return (
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="flex flex-1 items-center justify-center p-8">
         <EmptyState
           variant="tasks"
           onAction={onNewTask}
@@ -72,7 +66,7 @@ export function TaskList({
   // Empty state - search with no results
   if (tasks.length === 0 && searchQuery) {
     return (
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="flex flex-1 items-center justify-center p-8">
         <EmptyState
           variant="search"
           title="No matching tasks"
@@ -83,28 +77,20 @@ export function TaskList({
   }
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gap: "16px",
-        padding: "20px 24px",
-        gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-        alignContent: "start",
-        overflowY: "auto",
-        flex: 1,
-      }}
-    >
-      {tasks.map((task) => (
-        <div key={task.id} data-task-id={task.id}>
-          <TaskCard
-            task={task}
-            onClick={() => handleClick(task.id)}
-            onStatusChange={onStatusChange ? (status) => onStatusChange(task.id, status) : undefined}
-            onDelete={onDelete ? () => onDelete(task.id) : undefined}
-            isSelected={effectiveSelectedId === task.id}
-          />
-        </div>
-      ))}
+    <div className="flex-1 overflow-y-auto p-6">
+       <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-4 content-start">
+        {tasks.map((task) => (
+            <div key={task.id} data-task-id={task.id}>
+            <TaskCard
+                task={task}
+                onClick={() => handleClick(task.id)}
+                onStatusChange={onStatusChange ? (status) => onStatusChange(task.id, status) : undefined}
+                onDelete={onDelete ? () => onDelete(task.id) : undefined}
+                isSelected={effectiveSelectedId === task.id}
+            />
+            </div>
+        ))}
+      </div>
     </div>
   );
 }

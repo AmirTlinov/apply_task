@@ -19,9 +19,9 @@ def _empty_box(message: str) -> FormattedText:
 
 
 def _status_chunk(detail) -> List:
-    if detail.status == "OK":
+    if detail.status == "DONE":
         return [("class:icon.check", "DONE ")]
-    if detail.status == "WARN":
+    if detail.status == "ACTIVE":
         return [("class:icon.warn", "ACTV ")]
     return [("class:icon.fail", "TODO ")]
 

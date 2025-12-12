@@ -32,7 +32,7 @@ def _is_blocked_by_deps(task: TaskDetail, manager) -> bool:
         return False
     for dep_id in task.depends_on:
         dep = manager.load_task(dep_id)
-        if dep and dep.status != "OK":
+        if dep and dep.status != "DONE":
             return True
     return False
 
@@ -176,7 +176,7 @@ def cmd_next(args, deps: CliDeps) -> int:
         "component": getattr(args, "component", None) or "",
     }
     tasks = manager.list_tasks(domain, skip_sync=True)
-    candidates = [t for t in tasks if t.status != "OK" and t.calculate_progress() < 100]
+    candidates = [t for t in tasks if t.status != "DONE" and t.calculate_progress() < 100]
     filter_hint = f" (domain='{filters['domain'] or '-'}', phase='{filters['phase'] or '-'}', component='{filters['component'] or '-'}')"
     if not candidates:
         payload = {"filters": filters, "candidates": []}
@@ -211,7 +211,7 @@ def cmd_suggest(args, deps: CliDeps) -> int:
         "component": getattr(args, "component", None) or "",
     }
     tasks = manager.list_tasks(domain, skip_sync=True)
-    active = [t for t in tasks if t.status != "OK"]
+    active = [t for t in tasks if t.status != "DONE"]
     filter_hint = f" (folder='{folder or domain or '-'}', phase='{filters['phase'] or '-'}', component='{filters['component'] or '-'}')"
     if not active:
         payload = {"filters": filters, "suggestions": []}
@@ -244,7 +244,7 @@ def cmd_quick(args, deps: CliDeps) -> int:
         "phase": getattr(args, "phase", None) or "",
         "component": getattr(args, "component", None) or "",
     }
-    tasks = [t for t in manager.list_tasks(domain, skip_sync=True) if t.status != "OK"]
+    tasks = [t for t in manager.list_tasks(domain, skip_sync=True) if t.status != "DONE"]
     tasks.sort(key=lambda t: (t.priority, t.calculate_progress()))
     filter_hint = f" (folder='{folder or domain or '-'}', phase='{filters['phase'] or '-'}', component='{filters['component'] or '-'}')"
     if not tasks:

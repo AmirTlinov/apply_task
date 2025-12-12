@@ -3,7 +3,7 @@
 
 **Дата аудита:** 2025-11-25
 **Версия:** commit e79842d
-**Аудитор:** Claude Sonnet 4.5
+**Аудитор:** AI assistant
 **Файлы:** `core/desktop/devtools/interface/cli_ai.py`, `tests/test_cli_ai_unit.py`
 
 ---
@@ -1125,4 +1125,4 @@ def handle_batch(manager, data):
 
 **Дата:** 2025-11-25
 **Версия отчета:** 1.0
-**Аудитор:** Claude Sonnet 4.5
+**Аудитор:** AI assistant

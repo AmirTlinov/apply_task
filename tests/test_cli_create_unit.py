@@ -27,7 +27,7 @@ class DummyManager:
 def make_args(**kwargs):
     defaults = dict(
         title="Demo task title",
-        status="FAIL",
+        status="TODO",
         priority="MEDIUM",
         parent="",
         domain="",

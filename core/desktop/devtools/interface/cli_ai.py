@@ -268,7 +268,7 @@ def generate_summary(intent: str, result: Dict[str, Any], task_state: Optional[T
         "progress": lambda r: f"Marked path {r.get('path', '?')} {'complete' if r.get('completed') else 'incomplete'}.",
         "done": lambda r: _done_summary(r),
         "delete": lambda r: f"Deleted {r.get('deleted', {}).get('type', 'item')}.",
-        "complete": lambda r: f"Task {r.get('task_id', '?')} completed with status {r.get('status', 'OK')}.",
+        "complete": lambda r: f"Task {r.get('task_id', '?')} completed with status {r.get('status', 'DONE')}.",
         "batch": lambda r: f"Batch: {r.get('completed', 0)}/{r.get('total', 0)} operations.",
         "undo": lambda r: f"Undone: {r.get('undone_operation', {}).get('intent', '?')}.",
         "redo": lambda r: f"Redone: {r.get('redo_operation', {}).get('intent', '?')}.",
@@ -310,7 +310,7 @@ def generate_action_hints(manager: TaskManager, task_id: Optional[str] = None) -
     if not task_id:
         # No current task - suggest getting context
         tasks = manager.list_tasks()
-        fail_tasks = [t for t in tasks if t.status == "FAIL"]
+        fail_tasks = [t for t in tasks if t.status == "TODO"]
         if fail_tasks:
             hints.append(ActionHint(
                 tool="tasks_context",
@@ -421,7 +421,7 @@ class Meta:
 
     task_id: Optional[str] = None
     task_status: Optional[str] = None  # TODO / ACTIVE / DONE
-    task_status_code: Optional[str] = None  # FAIL / WARN / OK (internal)
+    task_status_code: Optional[str] = None  # legacy aliases: FAIL / WARN / OK
     task_progress: int = 0
     subtasks_total: int = 0
     subtasks_completed: int = 0
@@ -629,7 +629,7 @@ def build_context(
     ctx: Dict[str, Any] = {
         "tasks_dir": str(manager.tasks_dir) if manager.tasks_dir else None,
         "total_tasks": 0,
-        "by_status": {"OK": 0, "WARN": 0, "FAIL": 0},
+        "by_status": {"DONE": 0, "ACTIVE": 0, "TODO": 0},
     }
 
     # Check for external changes (created/modified/deleted by user via TUI/CLI)
@@ -641,7 +641,7 @@ def build_context(
     ctx["total_tasks"] = len(all_tasks)
 
     for t in all_tasks:
-        status = getattr(t, "status", "FAIL")
+        status = getattr(t, "status", "TODO")
         ctx["by_status"][status] = ctx["by_status"].get(status, 0) + 1
 
     if include_all_tasks:
@@ -727,7 +727,7 @@ def render_context_markdown(
                 blocked_deps = []
                 for dep_id in task.depends_on:
                     dep_task = manager.load_task(dep_id)
-                    if dep_task and dep_task.status != "OK":
+                    if dep_task and dep_task.status != "DONE":
                         blocked_deps.append(dep_id)
                 if blocked_deps:
                     lines.append(f"🔒 Blocked by: {', '.join(blocked_deps)}")
@@ -859,7 +859,7 @@ def generate_suggestions(
     if not task_id:
         # Нет текущей задачи - предложить выбрать или создать
         tasks = manager.list_tasks()
-        fail_tasks = [t for t in tasks if t.status == "FAIL"]
+        fail_tasks = [t for t in tasks if t.status == "TODO"]
         if fail_tasks:
             suggestions.append(
                 Suggestion(
@@ -961,7 +961,7 @@ def generate_suggestions(
             and (not st.blockers or st.blockers_resolved)
             for st in task.subtasks
         )
-        if all_verified and task.status != "OK":
+        if all_verified and task.status != "DONE":
             suggestions.append(
                 Suggestion(
                     action="complete",
@@ -2144,7 +2144,7 @@ def handle_complete(
 
     Input:
         {"intent": "complete", "task": "TASK-001"}
-        {"intent": "complete", "task": "TASK-001", "status": "OK"}
+        {"intent": "complete", "task": "TASK-001", "status": "DONE"}
     """
     task_id = data.get("task")
     status = data.get("status", "DONE")
@@ -2459,7 +2459,7 @@ def handle_create(
     # Создать задачу - create_task возвращает TaskDetail (без сохранения)
     task = manager.create_task(
         title=title,
-        status=data.get("status", "FAIL"),
+        status=data.get("status", "TODO"),
         priority=data.get("priority", "MEDIUM"),
         parent=data.get("parent"),
         domain=domain_path,

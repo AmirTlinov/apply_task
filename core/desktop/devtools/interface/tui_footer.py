@@ -46,7 +46,7 @@ def build_footer_text(tui) -> FormattedText:
     if detail:
         if getattr(detail, "created", None):
             start_time = str(detail.created)
-        if detail.status == "OK" and getattr(detail, "updated", None):
+        if detail.status == "DONE" and getattr(detail, "updated", None):
             finish_time = str(detail.updated)
     duration_value = tui._task_duration_value(detail)
     table_width = max(60, tui.get_terminal_width())
@@ -77,7 +77,7 @@ def build_footer_text(tui) -> FormattedText:
     add_block(rows, " Time: ", f"{start_time} → {finish_time}", max_lines=1)
     add_block(rows, " Duration: ", duration_value, max_lines=1)
     add_block(rows, f" {tui._t('DESCRIPTION')}: ", desc, max_lines=2)
-    legend_text = "◉=Done/In Progress | ◎=Backlog | %=progress | Σ=subtasks | ?=help" + scroll_info
+    legend_text = "◉=DONE/ACTIVE | ◎=TODO | %=progress | Σ=subtasks | ?=help" + scroll_info
     add_block(rows, " Legend: ", legend_text, max_lines=1)
     while len(rows) < 7:
         rows.append(" " * inner_width)

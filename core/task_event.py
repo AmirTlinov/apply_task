@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 # Event types
 EVENT_CREATED = "created"
 EVENT_CHECKPOINT = "checkpoint"  # criteria/tests/blockers confirmed
-EVENT_STATUS = "status"  # status changed (OK/WARN/FAIL)
+EVENT_STATUS = "status"  # status changed (TODO/ACTIVE/DONE)
 EVENT_BLOCKED = "blocked"  # task became blocked
 EVENT_UNBLOCKED = "unblocked"  # task became unblocked
 EVENT_SUBTASK_DONE = "subtask_done"  # subtask completed

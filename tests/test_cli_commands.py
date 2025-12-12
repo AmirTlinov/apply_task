@@ -20,7 +20,7 @@ class DummyManager:
         return self._tasks.get(task_id)
 
 
-def _task(task_id, status="FAIL", priority="MEDIUM", progress=0, blocked=False, deps=None, phase="", component="", domain=""):
+def _task(task_id, status="TODO", priority="MEDIUM", progress=0, blocked=False, deps=None, phase="", component="", domain=""):
     ns = SimpleNamespace(
         id=task_id,
         title=task_id,
@@ -51,8 +51,8 @@ def _deps(manager):
 
 def test_cmd_list_filters_and_summary():
     manager = DummyManager([
-        _task("TASK-1", status="OK", phase="p1"),
-        _task("TASK-2", status="FAIL", phase="p2"),
+        _task("TASK-1", status="DONE", phase="p1"),
+        _task("TASK-2", status="TODO", phase="p2"),
     ])
     args = SimpleNamespace(domain="", phase="p1", component="", status="OK", progress=False)
     rc = cmds.cmd_list(args, _deps(manager))
@@ -85,8 +85,8 @@ def test_cmd_analyze_errors_on_missing():
 
 def test_cmd_next_selects_and_remembers():
     manager = DummyManager([
-        _task("TASK-1", status="WARN", priority="HIGH", progress=10),
-        _task("TASK-2", status="FAIL", progress=50, blocked=True),
+        _task("TASK-1", status="ACTIVE", priority="HIGH", progress=10),
+        _task("TASK-2", status="TODO", progress=50, blocked=True),
     ])
     args = SimpleNamespace(domain="", phase="", component="")
     deps = _deps(manager)
@@ -97,8 +97,8 @@ def test_cmd_next_selects_and_remembers():
 
 def test_cmd_suggest_and_quick_use_filters():
     manager = DummyManager([
-        _task("TASK-1", status="FAIL", priority="HIGH"),
-        _task("TASK-2", status="FAIL", priority="LOW"),
+        _task("TASK-1", status="TODO", priority="HIGH"),
+        _task("TASK-2", status="TODO", priority="LOW"),
     ])
     deps = _deps(manager)
     args = SimpleNamespace(folder="", domain="", phase="", component="")

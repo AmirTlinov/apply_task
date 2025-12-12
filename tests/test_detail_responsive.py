@@ -10,7 +10,7 @@ def test_detail_view_clamped_to_terminal(tmp_path):
     detail = TaskDetail(
         id="TASK-DET",
         title="Very long detail title that would otherwise stretch the frame",
-        status="WARN",
+        status="ACTIVE",
         description="\n".join(f"Line {i} with more text to consume space" for i in range(12)),
         blockers=[f"blocker {i}" for i in range(5)],
         domain="devtools",
@@ -25,5 +25,4 @@ def test_detail_view_clamped_to_terminal(tmp_path):
 
     assert len(lines) <= tui.get_terminal_height()
     assert all(tui._display_width(line) <= tui.get_terminal_width() for line in lines if line)
-
 

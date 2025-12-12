@@ -11,7 +11,7 @@ def test_cmd_edit_updates_fields(monkeypatch, capsys):
             self.loaded = SimpleNamespace(
                 id="TASK-1",
                 title="Title",
-                status="FAIL",
+                status="TODO",
                 description="old",
                 context="",
                 tags=[],

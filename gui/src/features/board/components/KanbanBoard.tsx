@@ -2,18 +2,29 @@
  * Kanban Board view - tasks organized by status columns with drag-drop support
  */
 
-import { useState, useCallback } from "react";
-import { Plus, MoreHorizontal, GripVertical, SortAsc, SortDesc, Filter, Archive } from "lucide-react";
+import { useState, useCallback, useMemo } from "react";
+import { Plus, MoreHorizontal, SortAsc, SortDesc, Filter, Archive } from "lucide-react";
 import type { TaskListItem, TaskStatus } from "@/types/task";
 import { EmptyState } from "@/components/common/EmptyState";
-import { DropdownMenu } from "@/components/common/DropdownMenu";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { toast } from "@/components/common/Toast";
+import { cn } from "@/lib/utils";
+import { TaskCard } from "@/features/tasks/components/TaskCard";
 
 interface KanbanBoardProps {
   tasks: TaskListItem[];
   onTaskClick?: (taskId: string) => void;
   onNewTask?: () => void;
   onStatusChange?: (taskId: string, newStatus: TaskStatus) => void;
+  onDelete?: (taskId: string) => void;
   isLoading?: boolean;
 }
 
@@ -26,6 +37,7 @@ interface ColumnConfig {
   targetStatus: TaskStatus;
   color: string;
   bgColor: string;
+  borderColor: string;
 }
 
 const columns: ColumnConfig[] = [
@@ -34,24 +46,27 @@ const columns: ColumnConfig[] = [
     title: "TODO",
     statusFilter: ["TODO"],
     targetStatus: "TODO",
-    color: "var(--color-foreground-subtle)",
-    bgColor: "var(--color-background-muted)",
+    color: "hsl(var(--foreground-subtle))",
+    bgColor: "hsl(var(--background-muted))",
+    borderColor: "hsl(var(--border))",
   },
   {
     id: "ACTIVE",
     title: "ACTIVE",
     statusFilter: ["ACTIVE"],
     targetStatus: "ACTIVE",
-    color: "var(--color-primary)",
-    bgColor: "var(--color-primary-subtle)",
+    color: "hsl(var(--primary))",
+    bgColor: "hsl(var(--primary-subtle))",
+    borderColor: "hsl(var(--primary))",
   },
   {
     id: "DONE",
     title: "DONE",
     statusFilter: ["DONE"],
     targetStatus: "DONE",
-    color: "var(--color-status-ok)",
-    bgColor: "var(--color-status-ok-subtle)",
+    color: "hsl(var(--status-done))",
+    bgColor: "hsl(var(--status-done) / 0.1)",
+    borderColor: "hsl(var(--status-done))",
   },
 ];
 
@@ -60,24 +75,25 @@ export function KanbanBoard({
   onTaskClick,
   onNewTask,
   onStatusChange,
+  onDelete,
   isLoading = false,
 }: KanbanBoardProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<StatusColumn | null>(null);
-	  const [sortDirection, setSortDirection] = useState<"asc" | "desc" | null>(null);
-	  const [columnFilters, setColumnFilters] = useState<Record<StatusColumn, string>>({
-	    TODO: "",
-	    ACTIVE: "",
-	    DONE: "",
-	  });
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc" | null>(null);
+  const [columnFilters, setColumnFilters] = useState<Record<StatusColumn, string>>({
+    TODO: "",
+    ACTIVE: "",
+    DONE: "",
+  });
   const [editingFilterColumn, setEditingFilterColumn] = useState<StatusColumn | null>(null);
   const [hideDoneTasks, setHideDoneTasks] = useState(false);
 
-  const handleClick = (taskId: string) => {
+  const handleClick = useCallback((taskId: string) => {
     setSelectedId(taskId);
     onTaskClick?.(taskId);
-  };
+  }, [onTaskClick]);
 
   const handleDragStart = useCallback((taskId: string) => {
     setDraggedTaskId(taskId);
@@ -124,17 +140,40 @@ export function KanbanBoard({
     });
   };
 
+  const filteredColumns = useMemo(() => {
+    return columns.map(column => {
+      let columnTasks = tasks.filter((t) => column.statusFilter.includes(t.status));
+
+      const filterValue = columnFilters[column.id];
+      if (filterValue) {
+        const q = filterValue.toLowerCase();
+        columnTasks = columnTasks.filter(
+          (t) => t.title.toLowerCase().includes(q) || t.id.toLowerCase().includes(q)
+        );
+      }
+
+      if (column.id === "DONE" && hideDoneTasks) {
+        columnTasks = [];
+      }
+
+      if (sortDirection) {
+        columnTasks = [...columnTasks].sort((a, b) =>
+          sortDirection === "asc"
+            ? a.title.localeCompare(b.title)
+            : b.title.localeCompare(a.title)
+        );
+      }
+
+      return {
+        ...column,
+        tasks: columnTasks
+      };
+    });
+  }, [tasks, columnFilters, sortDirection, hideDoneTasks]);
+
   if (isLoading) {
     return (
-      <div
-        style={{
-          display: "flex",
-          gap: "20px",
-          padding: "20px 24px",
-          flex: 1,
-          overflowX: "auto",
-        }}
-      >
+      <div className="flex gap-5 p-6 flex-1 overflow-x-auto">
         {columns.map((col) => (
           <KanbanColumnSkeleton key={col.id} title={col.title} />
         ))}
@@ -144,70 +183,39 @@ export function KanbanBoard({
 
   if (tasks.length === 0) {
     return (
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="flex flex-1 items-center justify-center p-8">
         <EmptyState variant="tasks" onAction={onNewTask} />
       </div>
     );
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: "20px",
-        padding: "20px 24px",
-        flex: 1,
-        overflowX: "auto",
-        alignItems: "flex-start",
-      }}
-    >
-      {columns.map((column) => {
-        let columnTasks = tasks.filter((t) => column.statusFilter.includes(t.status));
-
-        const filterValue = columnFilters[column.id];
-        if (filterValue) {
-          const q = filterValue.toLowerCase();
-          columnTasks = columnTasks.filter(
-            (t) => t.title.toLowerCase().includes(q) || t.id.toLowerCase().includes(q)
-          );
-        }
-
-        if (column.id === "DONE" && hideDoneTasks) {
-          columnTasks = [];
-        }
-
-        if (sortDirection) {
-          columnTasks = [...columnTasks].sort((a, b) =>
-            sortDirection === "asc"
-              ? a.title.localeCompare(b.title)
-              : b.title.localeCompare(a.title)
-          );
-        }
-
-        return (
-          <KanbanColumn
-            key={column.id}
-            config={column}
-            tasks={columnTasks}
-            selectedId={selectedId}
-            draggedTaskId={draggedTaskId}
-            isDragOver={dragOverColumn === column.id}
-            onTaskClick={handleClick}
-	            onNewTask={column.id === "TODO" ? onNewTask : undefined}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-            onDragOver={() => handleDragOver(column.id)}
-            onDrop={() => handleDrop(column.targetStatus)}
-            onSort={handleSort}
-            onToggleFilter={() => toggleFilterForColumn(column.id)}
-            filterValue={columnFilters[column.id]}
-            isFilterEditing={editingFilterColumn === column.id}
-            onFilterChange={(v) => setFilterForColumn(column.id, v)}
-            hideDoneTasks={hideDoneTasks}
-            onToggleHideDone={toggleHideDone}
-          />
-        );
-      })}
+    <div className="flex gap-5 p-6 flex-1 overflow-x-auto items-start h-full">
+      {filteredColumns.map((column) => (
+        <KanbanColumn
+          key={column.id}
+          config={column}
+          tasks={column.tasks}
+          selectedId={selectedId}
+          draggedTaskId={draggedTaskId}
+          isDragOver={dragOverColumn === column.id}
+          onTaskClick={handleClick}
+          onNewTask={column.id === "TODO" ? onNewTask : undefined}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragOver={() => handleDragOver(column.id)}
+          onDrop={() => handleDrop(column.targetStatus)}
+          onSort={handleSort}
+          onToggleFilter={() => toggleFilterForColumn(column.id)}
+          filterValue={columnFilters[column.id]}
+          isFilterEditing={editingFilterColumn === column.id}
+          onFilterChange={(v) => setFilterForColumn(column.id, v)}
+          hideDoneTasks={hideDoneTasks}
+          onToggleHideDone={toggleHideDone}
+          onStatusChange={onStatusChange}
+          onDelete={onDelete}
+        />
+      ))}
     </div>
   );
 }
@@ -231,6 +239,8 @@ interface KanbanColumnProps {
   onFilterChange: (value: string) => void;
   hideDoneTasks: boolean;
   onToggleHideDone: () => void;
+  onStatusChange?: (taskId: string, newStatus: TaskStatus) => void;
+  onDelete?: (taskId: string) => void;
 }
 
 function KanbanColumn({
@@ -252,6 +262,8 @@ function KanbanColumn({
   onFilterChange,
   hideDoneTasks,
   onToggleHideDone,
+  onStatusChange,
+  onDelete,
 }: KanbanColumnProps) {
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -267,194 +279,98 @@ function KanbanColumn({
     <div
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      style={{
-        minWidth: "320px",
-        maxWidth: "320px",
-        display: "flex",
-        flexDirection: "column",
-        backgroundColor: isDragOver ? config.bgColor : "var(--color-background-subtle)",
-        borderRadius: "12px",
-        maxHeight: "calc(100vh - 180px)",
-        border: isDragOver ? `2px dashed ${config.color}` : "2px solid transparent",
-        transition: "all 150ms ease",
-      }}
+      className={cn(
+        "flex flex-col min-w-[320px] max-w-[320px] rounded-xl transition-all duration-200 h-full max-h-full",
+        isDragOver ? "bg-muted/80 border-2 border-dashed border-primary/50" : "bg-muted/30 border-2 border-transparent"
+      )}
     >
       {/* Column header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "14px 16px",
-          borderBottom: "1px solid var(--color-border)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+      <div className="flex items-center justify-between p-3.5 border-b border-border/50 bg-background/50 backdrop-blur-sm sticky top-0 rounded-t-xl z-10">
+        <div className="flex items-center gap-2.5">
           <span
-            style={{
-              width: "8px",
-              height: "8px",
-              borderRadius: "50%",
-              backgroundColor: config.color,
-            }}
+            className="w-2 h-2 rounded-full ring-2 ring-opacity-20"
+            style={{ backgroundColor: config.color, boxShadow: `0 0 0 2px ${config.color}20` }}
           />
-          <span
-            style={{
-              fontSize: "14px",
-              fontWeight: 600,
-              color: "var(--color-foreground)",
-            }}
-          >
+          <span className="text-sm font-semibold text-foreground tracking-tight">
             {config.title}
           </span>
-          <span
-            style={{
-              fontSize: "12px",
-              fontWeight: 500,
-              color: "var(--color-foreground-muted)",
-              backgroundColor: "var(--color-background-muted)",
-              padding: "2px 8px",
-              borderRadius: "999px",
-            }}
-          >
+          <span className="rounded-full bg-background-muted px-2 py-0.5 text-xs font-medium text-foreground-muted tabular-nums">
             {tasks.length}
           </span>
         </div>
-        <DropdownMenu
-          trigger={
-            <button
-              style={{
-                padding: "4px",
-                borderRadius: "4px",
-                border: "none",
-                backgroundColor: "transparent",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <MoreHorizontal
-                style={{
-                  width: "16px",
-                  height: "16px",
-                  color: "var(--color-foreground-subtle)",
-                }}
-              />
-            </button>
-          }
-	          items={[
-	            {
-	              label: "Sort A-Z",
-	              icon: <SortAsc style={{ width: "14px", height: "14px" }} />,
-	              onClick: () => onSort("asc"),
-	            },
-	            {
-	              label: "Sort Z-A",
-	              icon: <SortDesc style={{ width: "14px", height: "14px" }} />,
-	              onClick: () => onSort("desc"),
-	            },
-	            { type: "separator" as const },
-	            {
-	              label: filterValue ? "Edit filter" : "Filter tasks",
-	              icon: <Filter style={{ width: "14px", height: "14px" }} />,
-	              onClick: onToggleFilter,
-	            },
-	            {
-	              label: hideDoneTasks ? "Show done tasks" : "Hide done tasks",
-	              icon: <Archive style={{ width: "14px", height: "14px" }} />,
-	              onClick: onToggleHideDone,
-	              disabled: config.id !== "DONE",
-	            },
-	          ]}
-		        />
-	      </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-background-muted">
+              <MoreHorizontal className="h-4 w-4 text-foreground-subtle" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onClick={() => onSort("asc")}>
+              <SortAsc className="mr-2 h-3.5 w-3.5" /> Sort A-Z
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onSort("desc")}>
+              <SortDesc className="mr-2 h-3.5 w-3.5" /> Sort Z-A
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onToggleFilter}>
+              <Filter className="mr-2 h-3.5 w-3.5" /> {filterValue ? "Edit filter" : "Filter tasks"}
+            </DropdownMenuItem>
+            {config.id === "DONE" && (
+              <DropdownMenuItem onClick={onToggleHideDone}>
+                <Archive className="mr-2 h-3.5 w-3.5" /> {hideDoneTasks ? "Show done tasks" : "Hide done tasks"}
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
-	      {isFilterEditing && (
-	        <div
-	          style={{
-	            padding: "8px 12px",
-	            borderBottom: "1px solid var(--color-border)",
-	            backgroundColor: "var(--color-background)",
-	          }}
-	        >
-	          <input
-	            value={filterValue}
-	            onChange={(e) => onFilterChange(e.target.value)}
-	            placeholder="Filter tasks in this column..."
-	            autoFocus
-	            style={{
-	              width: "100%",
-	              fontSize: "12px",
-	              padding: "6px 8px",
-	              borderRadius: "6px",
-	              border: "1px solid var(--color-border)",
-	              backgroundColor: "var(--color-background)",
-	            }}
-	            onKeyDown={(e) => {
-	              if (e.key === "Escape") {
-	                onToggleFilter();
-	              }
-	            }}
-	          />
-	          {filterValue && (
-	            <button
-	              onClick={() => onFilterChange("")}
-	              style={{
-	                marginTop: "6px",
-	                fontSize: "11px",
-	                padding: "4px 6px",
-	                borderRadius: "6px",
-	                border: "none",
-	                backgroundColor: "transparent",
-	                color: "var(--color-foreground-muted)",
-	                cursor: "pointer",
-	              }}
-	            >
-	              Clear filter
-	            </button>
-	          )}
-	        </div>
-	      )}
-
-	      {/* Column content */}
-	      <div
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "12px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "10px",
-          minHeight: "100px",
-        }}
-      >
-        {tasks.map((task) => (
-          <KanbanCard
-            key={task.id}
-            task={task}
-            isSelected={selectedId === task.id}
-            isDragging={draggedTaskId === task.id}
-            onClick={() => onTaskClick(task.id)}
-            onDragStart={() => onDragStart(task.id)}
-            onDragEnd={onDragEnd}
+      {isFilterEditing && (
+        <div className="p-3 border-b border-border bg-background animate-accordion-down">
+          <Input
+            value={filterValue}
+            onChange={(e) => onFilterChange(e.target.value)}
+            placeholder="Filter tasks..."
+            autoFocus
+            className="h-8 text-xs"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                onToggleFilter();
+              }
+            }}
           />
+        </div>
+      )}
+
+      {/* Column content */}
+      <div className="flex-1 flex flex-col gap-3 overflow-y-auto p-3 min-h-[100px] scrollbar-thin">
+        {tasks.map((task) => (
+          <div
+            key={task.id}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", task.id);
+              onDragStart(task.id);
+            }}
+            onDragEnd={onDragEnd}
+            className={cn(
+              "cursor-grab active:cursor-grabbing",
+              draggedTaskId === task.id && "opacity-50 grayscale"
+            )}
+          >
+            <TaskCard
+              task={task}
+              isSelected={selectedId === task.id}
+              onClick={() => onTaskClick(task.id)}
+              onStatusChange={(status) => onStatusChange?.(task.id, status)}
+              onDelete={() => onDelete?.(task.id)}
+            />
+          </div>
         ))}
 
         {/* Drop zone indicator when empty */}
         {tasks.length === 0 && isDragOver && (
-          <div
-            style={{
-              flex: 1,
-              minHeight: "80px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: config.color,
-              fontSize: "13px",
-              fontWeight: 500,
-            }}
-          >
+          <div className="flex flex-1 min-h-[120px] rounded-xl border-2 border-dashed border-primary/20 bg-primary/5 items-center justify-center text-sm font-medium text-primary opacity-70 animate-pulse">
             Drop here
           </div>
         )}
@@ -463,30 +379,10 @@ function KanbanColumn({
         {onNewTask && (
           <button
             onClick={onNewTask}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "10px 12px",
-              borderRadius: "8px",
-              border: "1px dashed var(--color-border)",
-              backgroundColor: "transparent",
-              color: "var(--color-foreground-muted)",
-              fontSize: "13px",
-              cursor: "pointer",
-              transition: "all 150ms ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "var(--color-primary)";
-              e.currentTarget.style.color = "var(--color-primary)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = "var(--color-border)";
-              e.currentTarget.style.color = "var(--color-foreground-muted)";
-            }}
+            className="group flex w-full items-center gap-2 rounded-xl border border-dashed border-border p-3 text-[13px] text-foreground-muted transition-all hover:border-primary hover:bg-primary-subtle hover:text-primary mt-auto"
           >
-            <Plus style={{ width: "14px", height: "14px" }} />
-            Add task
+            <Plus className="h-4 w-4" />
+            Create new task
           </button>
         )}
       </div>
@@ -494,231 +390,12 @@ function KanbanColumn({
   );
 }
 
-interface KanbanCardProps {
-  task: TaskListItem;
-  isSelected: boolean;
-  isDragging: boolean;
-  onClick: () => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-}
-
-function KanbanCard({ task, isSelected, isDragging, onClick, onDragStart, onDragEnd }: KanbanCardProps) {
-  const progress = task.progress || 0;
-
-  const handleDragStart = (e: React.DragEvent) => {
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", task.id);
-    onDragStart();
-  };
-
-  return (
-    <div
-      className="task-card"
-      draggable
-      onDragStart={handleDragStart}
-      onDragEnd={onDragEnd}
-      onClick={onClick}
-      tabIndex={0}
-      role="button"
-      style={{
-        padding: "12px",
-        borderRadius: "12px",
-        backgroundColor: isSelected ? "var(--color-primary-subtle)" : "var(--color-background)",
-        border: "none",
-        cursor: isDragging ? "grabbing" : "grab",
-        boxShadow: isSelected
-          ? "0 0 0 2px var(--color-primary), var(--shadow-md)"
-          : isDragging
-            ? "var(--shadow-lg)"
-            : "var(--shadow-sm)",
-        opacity: isDragging ? 0.7 : 1,
-        transform: isDragging ? "rotate(2deg) scale(1.02)" : "none",
-        transition: "all 180ms cubic-bezier(0.32, 0.72, 0, 1)",
-      }}
-      onMouseEnter={(e) => {
-        if (!isSelected && !isDragging) {
-          e.currentTarget.style.boxShadow = "var(--shadow-md)";
-          e.currentTarget.style.transform = "translateY(-2px)";
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!isSelected && !isDragging) {
-          e.currentTarget.style.boxShadow = "var(--shadow-sm)";
-          e.currentTarget.style.transform = "none";
-        }
-      }}
-    >
-      {/* Task ID with drag handle */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: "8px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <GripVertical
-            style={{
-              width: "12px",
-              height: "12px",
-              color: "var(--color-foreground-subtle)",
-              opacity: 0.6,
-            }}
-          />
-          <span
-            style={{
-              fontSize: "11px",
-              fontFamily: "var(--font-mono)",
-              color: "var(--color-foreground-muted)",
-              backgroundColor: "var(--color-background-muted)",
-              padding: "2px 6px",
-              borderRadius: "4px",
-            }}
-          >
-            {task.id}
-          </span>
-        </div>
-      </div>
-
-      {/* Title */}
-      <h4
-        style={{
-          fontSize: "13px",
-          fontWeight: 500,
-          color: "var(--color-foreground)",
-          lineHeight: 1.4,
-          marginBottom: "10px",
-          display: "-webkit-box",
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical",
-          overflow: "hidden",
-        }}
-      >
-        {task.title}
-      </h4>
-
-      {/* Tags */}
-      {task.tags && task.tags.length > 0 && (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "4px",
-            marginBottom: "10px",
-          }}
-        >
-          {task.tags.slice(0, 2).map((tag) => (
-            <span
-              key={tag}
-              style={{
-                fontSize: "10px",
-                color: "var(--color-foreground-muted)",
-                backgroundColor: "var(--color-background-muted)",
-                padding: "2px 6px",
-                borderRadius: "4px",
-              }}
-            >
-              #{tag}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Progress */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-        }}
-      >
-        <div
-          style={{
-            flex: 1,
-            height: "4px",
-            backgroundColor: "var(--color-background-muted)",
-            borderRadius: "999px",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              width: `${progress}%`,
-              height: "100%",
-              backgroundColor:
-                progress === 100 ? "var(--color-status-ok)" : "var(--color-primary)",
-              borderRadius: "999px",
-              transition: "width 300ms ease",
-            }}
-          />
-        </div>
-        <span
-          style={{
-            fontSize: "11px",
-            fontWeight: 500,
-            color: "var(--color-foreground-muted)",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {progress}%
-        </span>
-      </div>
-    </div>
-  );
-}
-
 function KanbanColumnSkeleton({ title }: { title: string }) {
   return (
-    <div
-      style={{
-        minWidth: "320px",
-        maxWidth: "320px",
-        display: "flex",
-        flexDirection: "column",
-        backgroundColor: "var(--color-background-subtle)",
-        borderRadius: "12px",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-          padding: "14px 16px",
-          borderBottom: "1px solid var(--color-border)",
-        }}
-      >
-        <div
-          className="skeleton"
-          style={{ width: "8px", height: "8px", borderRadius: "50%" }}
-        />
-        <span
-          style={{
-            fontSize: "14px",
-            fontWeight: 600,
-            color: "var(--color-foreground)",
-          }}
-        >
-          {title}
-        </span>
-      </div>
-      <div
-        style={{
-          padding: "12px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "10px",
-        }}
-      >
-        {[1, 2].map((i) => (
-          <div
-            key={i}
-            className="skeleton"
-            style={{ height: "100px", borderRadius: "10px" }}
-          />
-        ))}
+    <div className="flex flex-col min-w-[320px] max-w-[320px] rounded-xl bg-background-subtle h-[500px] animate-pulse">
+      <div className="flex items-center gap-2.5 p-3.5 border-b border-border">
+        <div className="h-2 w-2 rounded-full bg-border" />
+        <span className="text-sm font-semibold text-foreground opacity-50">{title}</span>
       </div>
     </div>
   );

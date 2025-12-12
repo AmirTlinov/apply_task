@@ -159,9 +159,9 @@ def _default_config_data() -> Dict[str, Any]:
             "status": {
                 "name": "Status",
                 "options": {
-                    "OK": "Done",
-                    "WARN": "In progress",
-                    "FAIL": "Backlog",
+                    "DONE": "Done",
+                    "ACTIVE": "In progress",
+                    "TODO": "Backlog",
                 },
             },
             "progress": {"name": "Progress"},
@@ -1093,7 +1093,7 @@ class ProjectsSync:
             changed = True
         else:
             issue_url = f"{base_url}/{task.project_issue_number}"
-            payload["state"] = "closed" if task.status == "OK" else "open"
+            payload["state"] = "closed" if task.status == "DONE" else "open"
             resp = self._issue_request_with_retry("patch", issue_url, payload)
             if resp.status_code >= 400:
                 self._report_issue_error(task, resp)

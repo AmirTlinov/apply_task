@@ -3,14 +3,16 @@ import pytest
 from tasks import Status, SubTask, Task, TaskDetail, TaskTrackerTUI
 
 
-def build_tui(tmp_path):
+def build_tui(tmp_path, *, project_mode: bool = False):
     """Helper to construct TUI with an isolated tasks directory."""
     tasks_dir = tmp_path / ".tasks"
-    return TaskTrackerTUI(tasks_dir=tasks_dir)
+    tui = TaskTrackerTUI(tasks_dir=tasks_dir)
+    tui.project_mode = project_mode
+    return tui
 
 
 def open_subtask_detail(tui: TaskTrackerTUI, subtask: SubTask, *, task_id: str = "TASK-TEST"):
-    detail = TaskDetail(id=task_id, title="Detail", status="FAIL")
+    detail = TaskDetail(id=task_id, title="Detail", status="TODO")
     detail.subtasks = [subtask]
     tui.detail_mode = True
     tui.current_task_detail = detail
@@ -23,8 +25,8 @@ def open_subtask_detail(tui: TaskTrackerTUI, subtask: SubTask, *, task_id: str =
 def test_move_selection_clamps_task_list(tmp_path):
     tui = build_tui(tmp_path)
     tui.tasks = [
-        Task(name="Item A", status=Status.FAIL, description="", category="tests"),
-        Task(name="Item B", status=Status.OK, description="", category="tests"),
+        Task(name="Item A", status=Status.TODO, description="", category="tests"),
+        Task(name="Item B", status=Status.DONE, description="", category="tests"),
     ]
     tui.selected_index = 0
 
@@ -40,7 +42,7 @@ def test_move_selection_clamps_task_list(tmp_path):
 
 def test_move_selection_clamps_detail_mode(tmp_path):
     tui = build_tui(tmp_path)
-    detail = TaskDetail(id="TASK-999", title="Detail", status="FAIL")
+    detail = TaskDetail(id="TASK-999", title="Detail", status="TODO")
     detail.subtasks = [
         SubTask(False, "Subtask example long enough to be valid"),
         SubTask(False, "Second subtask example with details"),
@@ -68,7 +70,7 @@ def test_subtasks_view_stays_within_height(tmp_path):
     detail = TaskDetail(
         id="TASK-TEST",
         title="Detail",
-        status="WARN",
+        status="ACTIVE",
         description="\n".join(f"Line {i}" for i in range(12)),
     )
     detail.subtasks = [SubTask(False, f"Subtask {i} long text goes here {i}") for i in range(8)]
@@ -88,7 +90,7 @@ def test_subtasks_view_stays_within_height(tmp_path):
 
 def test_detail_renders_nested_subtasks_with_paths(tmp_path):
     tui = build_tui(tmp_path)
-    detail = TaskDetail(id="TASK-NEST", title="Detail", status="WARN")
+    detail = TaskDetail(id="TASK-NEST", title="Detail", status="ACTIVE")
     child = SubTask(False, "Child item", success_criteria=["c"], tests=["t"], blockers=["b"])
     parent = SubTask(False, "Parent item", success_criteria=["p"], tests=["t"], blockers=["b"], children=[child])
     detail.subtasks = [parent]
@@ -106,7 +108,7 @@ def test_detail_renders_nested_subtasks_with_paths(tmp_path):
 
 def test_collapse_expand_toggles_visibility(tmp_path):
     tui = build_tui(tmp_path)
-    detail = TaskDetail(id="TASK-NEST", title="Detail", status="WARN")
+    detail = TaskDetail(id="TASK-NEST", title="Detail", status="ACTIVE")
     child = SubTask(False, "Child item", success_criteria=["c"], tests=["t"], blockers=["b"])
     parent = SubTask(False, "Parent item", success_criteria=["p"], tests=["t"], blockers=["b"], children=[child])
     detail.subtasks = [parent]
@@ -127,13 +129,13 @@ def test_collapse_expand_toggles_visibility(tmp_path):
     assert "0.0" in expanded
 
 
-    def test_collapse_state_persists_per_task(tmp_path):
-        tui = build_tui(tmp_path, project_mode=False)
+def test_collapse_state_persists_per_task(tmp_path):
+    tui = build_tui(tmp_path)
     child = SubTask(False, "Child", success_criteria=["c"], tests=["t"], blockers=["b"])
     parent = SubTask(False, "Parent", success_criteria=["p"], tests=["t"], blockers=["b"], children=[child])
-    detail = TaskDetail(id="TASK-PERSIST", title="Demo", status="WARN")
+    detail = TaskDetail(id="TASK-PERSIST", title="Demo", status="ACTIVE")
     detail.subtasks = [parent]
-    task = Task(name="Demo", status=Status.FAIL, description="", category="", task_file="")
+    task = Task(name="Demo", status=Status.TODO, description="", category="", task_file="")
     task.detail = detail
 
     tui.show_task_details(task)
@@ -149,7 +151,7 @@ def test_collapse_expand_toggles_visibility(tmp_path):
 def test_selected_subtask_details_rendered(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 40
-    detail = TaskDetail(id="TASK-DETAIL", title="Detail", status="WARN")
+    detail = TaskDetail(id="TASK-DETAIL", title="Detail", status="ACTIVE")
     detail.subtasks = [
         SubTask(
             False,
@@ -178,7 +180,7 @@ def test_compact_summary_shows_blockers_when_room(tmp_path):
     detail = TaskDetail(
         id="TASK-SUMMARY",
         title="Detail",
-        status="WARN",
+        status="ACTIVE",
         description="Line one; Line two;",
     )
     detail.blockers = ["dep a", "dep b"]
@@ -195,7 +197,7 @@ def test_compact_summary_shows_blockers_when_room(tmp_path):
 def test_selection_stops_at_last_item(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 12
-    detail = TaskDetail(id="TASK-STOP", title="Detail", status="WARN")
+    detail = TaskDetail(id="TASK-STOP", title="Detail", status="ACTIVE")
     detail.subtasks = [SubTask(False, f"Subtask {i} long body text") for i in range(6)]
 
     tui.detail_mode = True
@@ -221,7 +223,7 @@ def test_last_subtask_visible_with_long_header(tmp_path):
     detail = TaskDetail(
         id="TASK-LONG",
         title="Detail",
-        status="WARN",
+        status="ACTIVE",
         description="\n".join(f"Line {i}" for i in range(8)),  # съедает место
     )
     detail.subtasks = [SubTask(False, f"Subtask {i} body text") for i in range(13)]
@@ -239,11 +241,11 @@ def test_last_subtask_visible_with_long_header(tmp_path):
 
 def test_maybe_reload_works_in_detail_mode(tmp_path, monkeypatch):
     tui = build_tui(tmp_path)
-    detail = TaskDetail(id="TASK-1", title="Detail", status="OK")
+    detail = TaskDetail(id="TASK-1", title="Detail", status="DONE")
     detail.subtasks = [SubTask(False, "A"), SubTask(False, "B")]
     tui.detail_mode = True
     tui.current_task_detail = detail
-    tui.tasks = [Task(id="TASK-1", name="Detail", status=Status.OK, description="", category="", detail=detail)]
+    tui.tasks = [Task(id="TASK-1", name="Detail", status=Status.DONE, description="", category="", detail=detail)]
     tui.selected_index = 0
     called = {}
 
@@ -277,4 +279,3 @@ def test_border_lines_not_focusable(tmp_path):
     assert 0 not in focusables
     assert 2 not in focusables
     assert 1 in focusables  # строка с текстом остаётся кликабельной
-

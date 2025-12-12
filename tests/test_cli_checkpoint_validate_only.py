@@ -26,7 +26,7 @@ def test_cli_checkpoint_validate_only(monkeypatch, capsys):
             return SimpleNamespace(
                 id="TASK-1",
                 title="t",
-                status="FAIL",
+                status="TODO",
                 priority="LOW",
                 domain="",
                 phase="",

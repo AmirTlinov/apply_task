@@ -374,7 +374,7 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                 "domain": {"type": "string", "description": "Domain for the task", "default": ""},
                 "status": {
                     "type": "string",
-                    "enum": ["TODO", "ACTIVE", "DONE", "FAIL", "WARN", "OK"],
+                    "enum": ["TODO", "ACTIVE", "DONE"],
                     "default": "DONE"
                 }
             },
@@ -513,7 +513,11 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                 "domain": {"type": "string", "description": "Domain filter", "default": ""},
                 "phase": {"type": "string", "description": "Phase filter", "default": ""},
                 "component": {"type": "string", "description": "Component filter", "default": ""},
-                "status": {"type": "string", "enum": ["TODO", "ACTIVE", "DONE", "FAIL", "WARN", "OK"], "description": "Status filter"},
+                "status": {
+                    "type": "string",
+                    "enum": ["TODO", "ACTIVE", "DONE"],
+                    "description": "Status filter (aliases OK/WARN/FAIL are accepted)"
+                },
                 "compact": {"type": "boolean", "description": "Return compact task objects", "default": True},
                 "namespace": {"type": "string", "description": "Storage namespace to list from"},
                 "all_namespaces": {"type": "boolean", "description": "Aggregate tasks from all namespaces", "default": False},
@@ -656,7 +660,7 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
             "type": "object",
             "properties": {
                 "task": {"type": "string"},
-                "status": {"type": "string", "enum": ["TODO", "ACTIVE", "DONE", "FAIL", "WARN", "OK"], "default": "ACTIVE"},
+                "status": {"type": "string", "enum": ["TODO", "ACTIVE", "DONE"], "default": "ACTIVE"},
                 "domain": {"type": "string", "default": ""},
                 "force": {"type": "boolean", "default": False}
             },

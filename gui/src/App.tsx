@@ -13,6 +13,7 @@ import { ToastContainer, toast } from "@/components/common/Toast";
 import { useTasks } from "@/features/tasks/hooks/useTasks";
 import { openProject } from "@/lib/tauri";
 import { useAIStatus } from "@/hooks/useAIStatus";
+import { Button } from "@/components/ui/button";
 import {
   LayoutList,
   LayoutGrid,
@@ -41,9 +42,6 @@ function App() {
   });
   const { data: aiStatus } = useAIStatus();
 
-  const handleViewChange = useCallback((view: string) => {
-    setCurrentView(view as ViewType);
-  }, []);
 
   const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
@@ -238,7 +236,7 @@ function App() {
         id: "new-task",
         label: "Create new task",
         description: "Create a task in the current project",
-        icon: <Plus style={{ width: "14px", height: "14px", color: "var(--color-primary)" }} />,
+        icon: <Plus className="h-3.5 w-3.5 text-primary" />,
         shortcut: "⌘ N",
         keywords: ["create", "new", "task"],
         onSelect: () => setShowNewTaskModal(true),
@@ -247,7 +245,7 @@ function App() {
         id: "go-list",
         label: "Go to Tasks",
         description: "Task list view",
-        icon: <LayoutList style={{ width: "14px", height: "14px", color: "var(--color-foreground-subtle)" }} />,
+        icon: <LayoutList className="h-3.5 w-3.5 text-foreground-subtle" />,
         shortcut: "g l",
         keywords: ["tasks", "list"],
         onSelect: () => setCurrentView("list"),
@@ -256,7 +254,7 @@ function App() {
         id: "go-board",
         label: "Go to Board",
         description: "Kanban view",
-        icon: <LayoutGrid style={{ width: "14px", height: "14px", color: "var(--color-foreground-subtle)" }} />,
+        icon: <LayoutGrid className="h-3.5 w-3.5 text-foreground-subtle" />,
         shortcut: "g b",
         keywords: ["board", "kanban"],
         onSelect: () => setCurrentView("board"),
@@ -265,7 +263,7 @@ function App() {
         id: "go-timeline",
         label: "Go to Timeline",
         description: "Activity feed",
-        icon: <Clock style={{ width: "14px", height: "14px", color: "var(--color-foreground-subtle)" }} />,
+        icon: <Clock className="h-3.5 w-3.5 text-foreground-subtle" />,
         shortcut: "g t",
         keywords: ["timeline", "activity"],
         onSelect: () => setCurrentView("timeline"),
@@ -274,7 +272,7 @@ function App() {
         id: "go-dashboard",
         label: "Go to Dashboard",
         description: "Summary & analytics",
-        icon: <BarChart3 style={{ width: "14px", height: "14px", color: "var(--color-foreground-subtle)" }} />,
+        icon: <BarChart3 className="h-3.5 w-3.5 text-foreground-subtle" />,
         shortcut: "g d",
         keywords: ["dashboard", "stats"],
         onSelect: () => setCurrentView("dashboard"),
@@ -283,7 +281,7 @@ function App() {
         id: "go-projects",
         label: "Go to Projects",
         description: "Switch active project",
-        icon: <FolderOpen style={{ width: "14px", height: "14px", color: "var(--color-foreground-subtle)" }} />,
+        icon: <FolderOpen className="h-3.5 w-3.5 text-foreground-subtle" />,
         keywords: ["projects", "namespace"],
         onSelect: () => setCurrentView("projects"),
       },
@@ -291,7 +289,7 @@ function App() {
         id: "go-settings",
         label: "Go to Settings",
         description: "Appearance & preferences",
-        icon: <SettingsIcon style={{ width: "14px", height: "14px", color: "var(--color-foreground-subtle)" }} />,
+        icon: <SettingsIcon className="h-3.5 w-3.5 text-foreground-subtle" />,
         keywords: ["settings", "preferences"],
         onSelect: () => setCurrentView("settings"),
       },
@@ -299,7 +297,7 @@ function App() {
         id: "refresh",
         label: "Refresh data",
         description: "Reload tasks and storage info",
-        icon: <RefreshCw style={{ width: "14px", height: "14px", color: "var(--color-foreground-subtle)" }} />,
+        icon: <RefreshCw className="h-3.5 w-3.5 text-foreground-subtle" />,
         keywords: ["refresh", "reload"],
         onSelect: () => {
           void refresh();
@@ -332,9 +330,7 @@ function App() {
   return (
     <>
       <MainLayout
-        currentView={currentView}
-        onViewChange={handleViewChange}
-        projectName={projectName ?? undefined}
+        projectName="Apply Task"
       >
         <Header
           title={getViewTitle()}
@@ -350,69 +346,31 @@ function App() {
           aiStatus={aiStatus}
         />
 
-        <div
-          style={{
-            flex: 1,
-            overflow: "auto",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
+        <div className="flex flex-1 flex-col overflow-auto">
           {error ? (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "32px",
-              }}
-            >
-              <div style={{ textAlign: "center" }}>
-                <div
-                  style={{
-                    color: "var(--color-status-fail)",
-                    marginBottom: "8px",
-                    fontWeight: 500,
-                  }}
-                >
+            <div className="flex flex-1 items-center justify-center p-8">
+              <div className="text-center">
+                <div className="mb-2 font-medium text-status-fail">
                   Error
                 </div>
-                <p
-                  style={{
-                    fontSize: "14px",
-                    color: "var(--color-foreground-muted)",
-                  }}
-                >
+                <p className="text-sm text-foreground-muted">
                   {error}
                 </p>
-                <button
-                  onClick={refresh}
-                  style={{
-                    marginTop: "16px",
-                    padding: "8px 16px",
-                    borderRadius: "8px",
-                    backgroundColor: "var(--color-primary)",
-                    color: "white",
-                    fontSize: "14px",
-                    border: "none",
-                    cursor: "pointer",
-                  }}
-                >
+                <Button onClick={refresh} className="mt-4">
                   Retry
-                </button>
+                </Button>
               </div>
             </div>
-	          ) : currentView === "list" ? (
-	            <TaskList
-	              tasks={filteredTasks}
-	              onTaskClick={handleTaskClick}
-	              focusedTaskId={focusedTaskId}
-	              onFocusChange={setFocusedTaskId}
-	              onNewTask={handleNewTask}
-	              onStatusChange={updateTaskStatus}
-	              onDelete={deleteTask}
-	              isLoading={isLoading}
+          ) : currentView === "list" ? (
+            <TaskList
+              tasks={filteredTasks}
+              onTaskClick={handleTaskClick}
+              focusedTaskId={focusedTaskId}
+              onFocusChange={setFocusedTaskId}
+              onNewTask={handleNewTask}
+              onStatusChange={updateTaskStatus}
+              onDelete={deleteTask}
+              isLoading={isLoading}
               searchQuery={searchQuery || undefined}
             />
           ) : currentView === "board" ? (
@@ -423,8 +381,8 @@ function App() {
               onStatusChange={updateTaskStatus}
               isLoading={isLoading}
             />
-	          ) : currentView === "timeline" ? (
-	            <TimelineView tasks={filteredTasks} isLoading={isLoading} onTaskClick={handleTaskClick} />
+          ) : currentView === "timeline" ? (
+            <TimelineView tasks={filteredTasks} isLoading={isLoading} onTaskClick={handleTaskClick} />
           ) : currentView === "dashboard" ? (
             <DashboardView
               tasks={filteredTasks}
@@ -448,16 +406,7 @@ function App() {
           ) : currentView === "settings" ? (
             <SettingsView isLoading={isLoading} />
           ) : (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "var(--color-foreground-muted)",
-                fontSize: "14px",
-              }}
-            >
+            <div className="flex flex-1 items-center justify-center text-sm text-foreground-muted">
               {getViewTitle()} view coming soon...
             </div>
           )}
@@ -486,29 +435,29 @@ function App() {
       })()}
 
       {/* New Task Modal */}
-	      <NewTaskModal
-	        isOpen={showNewTaskModal}
-	        onClose={() => setShowNewTaskModal(false)}
-	        onTaskCreated={refresh}
-	        namespaces={namespaces}
-	        selectedNamespace={selectedNamespace}
-	        defaultNamespace={projectName}
-	      />
+      <NewTaskModal
+        isOpen={showNewTaskModal}
+        onClose={() => setShowNewTaskModal(false)}
+        onTaskCreated={refresh}
+        namespaces={namespaces}
+        selectedNamespace={selectedNamespace}
+        defaultNamespace={projectName}
+      />
 
-	      <CommandPalette
-	        isOpen={isPaletteOpen}
-	        tasks={tasks}
-	        commands={paletteCommands()}
-	        onSelectTask={(id) => {
-	          setFocusedTaskId(id);
-	          setSelectedTaskId(id);
-	        }}
-	        onClose={() => setIsPaletteOpen(false)}
-	      />
+      <CommandPalette
+        isOpen={isPaletteOpen}
+        tasks={tasks}
+        commands={paletteCommands()}
+        onSelectTask={(id) => {
+          setFocusedTaskId(id);
+          setSelectedTaskId(id);
+        }}
+        onClose={() => setIsPaletteOpen(false)}
+      />
 
-	      {/* Toast Notifications */}
-	      <ToastContainer />
-	    </>
+      {/* Toast Notifications */}
+      <ToastContainer />
+    </>
   );
 }
 

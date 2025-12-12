@@ -13,6 +13,7 @@ import {
   Calendar,
 } from "lucide-react";
 import type { TaskListItem } from "@/types/task";
+import { cn } from "@/lib/utils";
 
 interface DashboardViewProps {
   tasks: TaskListItem[];
@@ -25,75 +26,36 @@ interface MetricCardProps {
   value: string | number;
   subtitle?: string;
   icon: typeof BarChart3;
-  color: string;
-  bgColor: string;
+  iconClassName?: string;
+  bgClassName?: string;
   trend?: { value: number; isUp: boolean };
 }
 
-function MetricCard({ title, value, subtitle, icon: Icon, color, bgColor, trend }: MetricCardProps) {
+function MetricCard({ title, value, subtitle, icon: Icon, iconClassName, bgClassName, trend }: MetricCardProps) {
   return (
-    <div
-      style={{
-        padding: "20px",
-        backgroundColor: "var(--color-background)",
-        borderRadius: "12px",
-        border: "1px solid var(--color-border)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "12px",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div
-          style={{
-            width: "40px",
-            height: "40px",
-            borderRadius: "10px",
-            backgroundColor: bgColor,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Icon style={{ width: "20px", height: "20px", color }} />
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-background p-5 hover:shadow-sm transition-shadow">
+      <div className="flex items-center justify-between">
+        <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg", bgClassName)}>
+          <Icon className={cn("h-5 w-5", iconClassName)} />
         </div>
         {trend && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              fontSize: "12px",
-              fontWeight: 500,
-              color: trend.isUp ? "var(--color-status-ok)" : "var(--color-status-fail)",
-            }}
-          >
-            <TrendingUp
-              style={{
-                width: "14px",
-                height: "14px",
-                transform: trend.isUp ? "none" : "rotate(180deg)",
-              }}
-            />
+          <div className={cn(
+            "flex items-center gap-1 text-xs font-medium",
+            trend.isUp ? "text-status-ok" : "text-status-fail"
+          )}>
+            <TrendingUp className={cn("h-3.5 w-3.5", !trend.isUp && "rotate-180")} />
             {trend.value}%
           </div>
         )}
       </div>
 
       <div>
-        <div
-          style={{
-            fontSize: "28px",
-            fontWeight: 700,
-            color: "var(--color-foreground)",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
+        <div className="text-2xl font-bold text-foreground tabular-nums tracking-tight">
           {value}
         </div>
-        <div style={{ fontSize: "13px", color: "var(--color-foreground-muted)" }}>{title}</div>
+        <div className="text-sm text-foreground-muted font-medium">{title}</div>
         {subtitle && (
-          <div style={{ fontSize: "11px", color: "var(--color-foreground-subtle)", marginTop: "4px" }}>
+          <div className="mt-1 text-[11px] text-foreground-subtle">
             {subtitle}
           </div>
         )}
@@ -106,36 +68,24 @@ interface ProgressBarProps {
   label: string;
   value: number;
   total: number;
-  color: string;
+  colorClass: string;
 }
 
-function ProgressBar({ label, value, total, color }: ProgressBarProps) {
+function ProgressBar({ label, value, total, colorClass }: ProgressBarProps) {
   const percentage = total > 0 ? (value / total) * 100 : 0;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: "13px", color: "var(--color-foreground-muted)" }}>{label}</span>
-        <span style={{ fontSize: "12px", fontWeight: 500, color: "var(--color-foreground)" }}>
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-foreground-muted">{label}</span>
+        <span className="text-xs font-medium text-foreground tabular-nums">
           {value} / {total}
         </span>
       </div>
-      <div
-        style={{
-          height: "6px",
-          backgroundColor: "var(--color-background-muted)",
-          borderRadius: "999px",
-          overflow: "hidden",
-        }}
-      >
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/50">
         <div
-          style={{
-            width: `${percentage}%`,
-            height: "100%",
-            backgroundColor: color,
-            borderRadius: "999px",
-            transition: "width 500ms ease",
-          }}
+          className={cn("h-full rounded-full transition-all duration-500", colorClass)}
+          style={{ width: `${percentage}%` }}
         />
       </div>
     </div>
@@ -154,10 +104,6 @@ export function DashboardView({ tasks, projectName, isLoading = false }: Dashboa
   const todo = tasks.filter((t) => t.status === "TODO").length;
 
   const overallProgress = total > 0 ? Math.round((done / total) * 100) : 0;
-  const _avgProgress = total > 0
-    ? Math.round(tasks.reduce((sum, t) => sum + (t.progress || 0), 0) / total)
-    : 0;
-  void _avgProgress; // Reserved for future use
 
   // Group by tags
   const tagCounts = new Map<string, number>();
@@ -171,231 +117,136 @@ export function DashboardView({ tasks, projectName, isLoading = false }: Dashboa
     .slice(0, 5);
 
   return (
-    <div
-      style={{
-        flex: 1,
-        overflowY: "auto",
-        padding: "24px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "24px",
-      }}
-    >
+    <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6 scrollbar-thin">
       {/* Header */}
-      <div style={{ marginBottom: "8px" }}>
-        <h2
-          style={{
-            fontSize: "20px",
-            fontWeight: 600,
-            color: "var(--color-foreground)",
-            marginBottom: "4px",
-          }}
-        >
+      <div>
+        <h2 className="mb-1 text-xl font-semibold text-foreground tracking-tight">
           {projectName || "Project"} Overview
         </h2>
-        <p style={{ fontSize: "14px", color: "var(--color-foreground-muted)" }}>
+        <p className="text-sm text-foreground-muted">
           Track your project progress and performance metrics
         </p>
       </div>
 
       {/* Metrics Grid */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "16px",
-        }}
-      >
-	        <MetricCard
-	          title="Total Tasks"
-	          value={total}
-	          subtitle="All project tasks"
-	          icon={Target}
-	          color="var(--color-primary)"
-	          bgColor="var(--color-primary-subtle)"
-	        />
-	        <MetricCard
-	          title="DONE"
-	          value={done}
-	          subtitle={`${overallProgress}% of total`}
-	          icon={CheckCircle2}
-	          color="var(--color-status-ok)"
-	          bgColor="var(--color-status-ok-subtle)"
-	        />
-	        <MetricCard
-	          title="ACTIVE"
-	          value={active}
-	          subtitle="Currently active"
-	          icon={Clock}
-	          color="var(--color-primary)"
-	          bgColor="var(--color-primary-subtle)"
-	        />
-	        <MetricCard
-	          title="TODO"
-	          value={todo}
-	          subtitle="Not started"
-	          icon={AlertCircle}
-	          color="var(--color-foreground-muted)"
-	          bgColor="var(--color-background-muted)"
-	        />
-	      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard
+          title="Total Tasks"
+          value={total}
+          subtitle="All project tasks"
+          icon={Target}
+          iconClassName="text-primary"
+          bgClassName="bg-primary/10"
+        />
+        <MetricCard
+          title="DONE"
+          value={done}
+          subtitle={`${overallProgress}% of total`}
+          icon={CheckCircle2}
+          iconClassName="text-status-ok"
+          bgClassName="bg-status-ok/10"
+        />
+        <MetricCard
+          title="ACTIVE"
+          value={active}
+          subtitle="Currently active"
+          icon={Clock}
+          iconClassName="text-primary"
+          bgClassName="bg-primary/10"
+        />
+        <MetricCard
+          title="TODO"
+          value={todo}
+          subtitle="Not started"
+          icon={AlertCircle}
+          iconClassName="text-foreground-muted"
+          bgClassName="bg-muted"
+        />
+      </div>
 
       {/* Charts Section */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: "20px",
-        }}
-      >
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Progress Overview */}
-        <div
-          style={{
-            padding: "20px",
-            backgroundColor: "var(--color-background)",
-            borderRadius: "12px",
-            border: "1px solid var(--color-border)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
-            <BarChart3 style={{ width: "16px", height: "16px", color: "var(--color-primary)" }} />
-            <h3 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-foreground)" }}>
+        <div className="rounded-xl border border-border bg-background p-5 hover:shadow-sm transition-shadow">
+          <div className="mb-5 flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">
               Progress Overview
             </h3>
           </div>
 
-	          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-	            <ProgressBar
-	              label="DONE"
-	              value={done}
-	              total={total}
-	              color="var(--color-status-ok)"
-	            />
-	            <ProgressBar
-	              label="ACTIVE"
-	              value={active}
-	              total={total}
-	              color="var(--color-primary)"
-	            />
-	            <ProgressBar
-	              label="TODO"
-	              value={todo}
-	              total={total}
-	              color="var(--color-foreground-subtle)"
-	            />
-	          </div>
+          <div className="flex flex-col gap-4">
+            <ProgressBar
+              label="DONE"
+              value={done}
+              total={total}
+              colorClass="bg-status-done"
+            />
+            <ProgressBar
+              label="ACTIVE"
+              value={active}
+              total={total}
+              colorClass="bg-primary"
+            />
+            <ProgressBar
+              label="TODO"
+              value={todo}
+              total={total}
+              colorClass="bg-foreground-subtle"
+            />
+          </div>
 
           {/* Overall progress ring */}
-          <div
-            style={{
-              marginTop: "24px",
-              display: "flex",
-              alignItems: "center",
-              gap: "16px",
-              padding: "16px",
-              backgroundColor: "var(--color-background-subtle)",
-              borderRadius: "10px",
-            }}
-          >
+          <div className="mt-6 flex items-center gap-4 rounded-lg bg-muted/30 p-4">
             <div
+              className="flex h-16 w-16 items-center justify-center rounded-full bg-background"
               style={{
-                width: "60px",
-                height: "60px",
-                borderRadius: "50%",
-                background: `conic-gradient(var(--color-primary) ${overallProgress * 3.6}deg, var(--color-background-muted) 0deg)`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+                background: `conic-gradient(hsl(var(--primary)) ${overallProgress * 3.6}deg, hsl(var(--background-muted)) 0deg)`
               }}
             >
-              <div
-                style={{
-                  width: "48px",
-                  height: "48px",
-                  borderRadius: "50%",
-                  backgroundColor: "var(--color-background-subtle)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "14px",
-                  fontWeight: 600,
-                  color: "var(--color-foreground)",
-                }}
-              >
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-background text-sm font-bold text-foreground">
                 {overallProgress}%
               </div>
             </div>
+
             <div>
-              <div style={{ fontSize: "14px", fontWeight: 500, color: "var(--color-foreground)" }}>
+              <div className="text-sm font-medium text-foreground">
                 Overall Progress
               </div>
-	              <div style={{ fontSize: "12px", color: "var(--color-foreground-muted)" }}>
-	                {done} of {total} tasks done
-	              </div>
-	            </div>
-	          </div>
-	        </div>
+              <div className="text-xs text-foreground-muted">
+                {done} of {total} tasks completed
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Tags Distribution */}
-        <div
-          style={{
-            padding: "20px",
-            backgroundColor: "var(--color-background)",
-            borderRadius: "12px",
-            border: "1px solid var(--color-border)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
-            <Zap style={{ width: "16px", height: "16px", color: "var(--color-status-warn)" }} />
-            <h3 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-foreground)" }}>
+        <div className="rounded-xl border border-border bg-background p-5 hover:shadow-sm transition-shadow">
+          <div className="mb-5 flex items-center gap-2">
+            <Zap className="h-4 w-4 text-status-warn" />
+            <h3 className="text-sm font-semibold text-foreground">
               Top Tags
             </h3>
           </div>
 
           {topTags.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <div className="flex flex-col gap-3">
               {topTags.map(([tag, count]) => (
                 <div
                   key={tag}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 12px",
-                    backgroundColor: "var(--color-background-subtle)",
-                    borderRadius: "8px",
-                  }}
+                  className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2.5 transition-colors hover:bg-muted/60"
                 >
-                  <span
-                    style={{
-                      fontSize: "13px",
-                      color: "var(--color-foreground-muted)",
-                    }}
-                  >
+                  <span className="text-sm font-medium text-foreground-muted">
                     #{tag}
                   </span>
-                  <span
-                    style={{
-                      fontSize: "13px",
-                      fontWeight: 500,
-                      color: "var(--color-foreground)",
-                      fontVariantNumeric: "tabular-nums",
-                    }}
-                  >
+                  <span className="text-sm font-medium text-foreground tabular-nums">
                     {count} tasks
                   </span>
                 </div>
               ))}
             </div>
           ) : (
-            <div
-              style={{
-                padding: "32px",
-                textAlign: "center",
-                color: "var(--color-foreground-muted)",
-                fontSize: "13px",
-              }}
-            >
+            <div className="flex h-40 items-center justify-center text-sm text-foreground-muted">
               No tags used yet
             </div>
           )}
@@ -445,71 +296,43 @@ function WeeklyActivityChart({ tasks }: WeeklyActivityChartProps) {
   const today = (new Date().getDay() + 6) % 7; // 0=Mon, 6=Sun
 
   return (
-    <div
-      style={{
-        padding: "20px",
-        backgroundColor: "var(--color-background)",
-        borderRadius: "12px",
-        border: "1px solid var(--color-border)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
-        <Calendar style={{ width: "16px", height: "16px", color: "var(--color-foreground-muted)" }} />
-        <h3 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-foreground)" }}>
-          This Week
+    <div className="rounded-xl border border-border bg-background p-5 hover:shadow-sm transition-shadow">
+      <div className="mb-4 flex items-center gap-2">
+        <Calendar className="h-4 w-4 text-foreground-muted" />
+        <h3 className="text-sm font-semibold text-foreground">
+          This Week's Activity
         </h3>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(7, 1fr)",
-          gap: "8px",
-        }}
-      >
+      <div className="grid grid-cols-7 gap-2">
         {days.map((day, i) => {
           const count = activity.get(i) || 0;
-          const intensity = count > 0 ? 0.2 + (count / maxActivity) * 0.5 : 0;
+          const intensity = count > 0 ? 0.2 + (count / maxActivity) * 0.6 : 0;
           const isToday = i === today;
 
           return (
             <div
               key={day}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "8px",
-              }}
+              className="flex flex-col items-center gap-2"
             >
-              <span
-                style={{
-                  fontSize: "11px",
-                  color: isToday ? "var(--color-primary)" : "var(--color-foreground-muted)",
-                  fontWeight: isToday ? 600 : 400,
-                }}
-              >
+              <span className={cn(
+                "text-[10px] font-medium uppercase tracking-wider",
+                isToday ? "text-primary" : "text-foreground-muted"
+              )}>
                 {day}
               </span>
               <div
+                className={cn(
+                  "flex h-9 w-full items-center justify-center rounded-md border text-xs font-semibold transition-all",
+                  isToday ? "border-primary shadow-sm" : "border-transparent",
+                  count > 0 ? "text-primary-foreground" : "bg-muted text-foreground-subtle"
+                )}
                 style={{
-                  width: "32px",
-                  height: "32px",
-                  borderRadius: "8px",
-                  backgroundColor:
-                    count > 0
-                      ? `rgba(59, 130, 246, ${intensity})`
-                      : "var(--color-background-muted)",
-                  border: isToday ? "2px solid var(--color-primary)" : "none",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "11px",
-                  fontWeight: 500,
-                  color: count > 0 ? "var(--color-primary)" : "var(--color-foreground-subtle)",
+                  backgroundColor: count > 0 ? `rgba(59, 130, 246, ${intensity})` : undefined,
+                  color: count > 0 ? 'white' : undefined
                 }}
               >
-                {count}
+                {count > 0 ? count : "-"}
               </div>
             </div>
           );
@@ -521,19 +344,19 @@ function WeeklyActivityChart({ tasks }: WeeklyActivityChartProps) {
 
 function DashboardSkeleton() {
   return (
-    <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "24px" }}>
+    <div className="flex flex-col gap-6 p-6 animate-pulse">
       <div>
-        <div className="skeleton" style={{ height: "24px", width: "200px", marginBottom: "8px", borderRadius: "4px" }} />
-        <div className="skeleton" style={{ height: "16px", width: "300px", borderRadius: "4px" }} />
+        <div className="mb-2 h-6 w-32 rounded bg-muted" />
+        <div className="h-4 w-64 rounded bg-muted/50" />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="skeleton" style={{ height: "120px", borderRadius: "12px" }} />
+          <div key={i} className="h-32 rounded-xl bg-muted/30" />
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "20px" }}>
-        <div className="skeleton" style={{ height: "280px", borderRadius: "12px" }} />
-        <div className="skeleton" style={{ height: "280px", borderRadius: "12px" }} />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="h-64 rounded-xl bg-muted/30" />
+        <div className="h-64 rounded-xl bg-muted/30" />
       </div>
     </div>
   );

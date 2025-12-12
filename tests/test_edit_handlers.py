@@ -58,7 +58,7 @@ class DummyTui:
 
 def make_detail_with_subtask():
     st = SubTask(False, "old", ["a"], ["b"], ["c"])
-    detail = TaskDetail(id="T-1", title="Main", status="FAIL")
+    detail = TaskDetail(id="T-1", title="Main", status="TODO")
     detail.subtasks = [st]
     return detail, st
 

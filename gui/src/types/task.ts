@@ -6,9 +6,6 @@
 /** Task status enum */
 export type TaskStatus = "TODO" | "ACTIVE" | "DONE";
 
-/** Internal backend status codes (legacy) */
-export type TaskStatusCode = "OK" | "WARN" | "FAIL";
-
 /** Phase 1: Subtask status enum */
 export type SubtaskStatus = "pending" | "in_progress" | "blocked" | "completed";
 
@@ -95,8 +92,6 @@ export interface Task {
 
   /** Current status */
   status: TaskStatus;
-  /** Internal status code (for debugging/compat) */
-  status_code?: TaskStatusCode;
 
   /** Parent task ID (or "ROOT") - may be null if no parent */
   parent: string | null;
@@ -149,7 +144,6 @@ export interface TaskListItem {
   task_id?: string;
   title: string;
   status: TaskStatus;
-  status_code?: TaskStatusCode;
   progress: number;
   subtask_count: number;
   completed_count: number;

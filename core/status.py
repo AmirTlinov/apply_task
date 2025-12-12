@@ -3,9 +3,9 @@ from typing import Final, Literal
 
 
 class Status(Enum):
-    OK = ("OK", "green", "+")
-    WARN = ("WARN", "yellow", "~")
-    FAIL = ("FAIL", "red", "x")
+    TODO = ("TODO", "red", "○")
+    ACTIVE = ("ACTIVE", "yellow", "●")
+    DONE = ("DONE", "green", "✓")
     UNKNOWN = ("?", "blue", "?")
 
     @classmethod
@@ -17,30 +17,30 @@ class Status(Enum):
         return cls.UNKNOWN
 
 
-TaskStatusCode = Literal["OK", "WARN", "FAIL"]
-TaskStatusLabel = Literal["DONE", "ACTIVE", "TODO"]
+TaskStatusCode = Literal["TODO", "ACTIVE", "DONE"]
 
-_CODE_TO_LABEL: Final[dict[TaskStatusCode, TaskStatusLabel]] = {
-    "OK": "DONE",
-    "WARN": "ACTIVE",
-    "FAIL": "TODO",
-}
+_CANONICAL_CODES: Final[frozenset[str]] = frozenset({"TODO", "ACTIVE", "DONE"})
 
 _ALIASES_TO_CODE: Final[dict[str, TaskStatusCode]] = {
-    "DONE": "OK",
-    "ACTIVE": "WARN",
-    "TODO": "FAIL",
-    # Backward-compatible UI labels (older TUI wording)
-    "IN_PROGRESS": "WARN",
-    "BACKLOG": "FAIL",
+    # Canonical task statuses
+    "TODO": "TODO",
+    "ACTIVE": "ACTIVE",
+    "DONE": "DONE",
+    # Legacy internal codes (backward compatible input)
+    "FAIL": "TODO",
+    "WARN": "ACTIVE",
+    "OK": "DONE",
+    # Older UI wording
+    "IN_PROGRESS": "ACTIVE",
+    "BACKLOG": "TODO",
 }
 
 
 def normalize_task_status(value: str, *, allow_unknown: bool = False) -> str:
     """Normalize task status input to internal status code.
 
-    Canonical internal codes: OK, WARN, FAIL.
-    Accepted aliases: DONE/ACTIVE/TODO (preferred), plus IN_PROGRESS/BACKLOG for compatibility.
+    Canonical task statuses: TODO, ACTIVE, DONE.
+    Accepted aliases: OK/WARN/FAIL (legacy), plus IN_PROGRESS/BACKLOG for compatibility.
 
     When allow_unknown=True, returns the normalized token (uppercased, spaces→underscores)
     even if it is not a known status.
@@ -49,7 +49,7 @@ def normalize_task_status(value: str, *, allow_unknown: bool = False) -> str:
     if not token:
         return token
     token = _ALIASES_TO_CODE.get(token, token)
-    if token in _CODE_TO_LABEL:
+    if token in _CANONICAL_CODES:
         return token
     if allow_unknown:
         return token
@@ -57,15 +57,14 @@ def normalize_task_status(value: str, *, allow_unknown: bool = False) -> str:
 
 
 def task_status_label(status: str) -> str:
-    """Return human-facing status label (TODO/ACTIVE/DONE) for any known status token."""
+    """Return canonical status token (TODO/ACTIVE/DONE) for any known status input."""
     try:
-        code = normalize_task_status(status)
+        return normalize_task_status(status)
     except ValueError:
         return (status or "").strip()
-    return _CODE_TO_LABEL.get(code, (status or "").strip())
 
 
 def task_status_code(status: str) -> TaskStatusCode:
-    """Normalize any accepted status token to internal status code (OK/WARN/FAIL)."""
+    """Normalize any accepted status token to canonical status code (TODO/ACTIVE/DONE)."""
     code = normalize_task_status(status)
     return code  # type: ignore[return-value]

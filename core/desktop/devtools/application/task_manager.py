@@ -134,7 +134,7 @@ def _build_subtask(title: str, criteria, tests, blockers) -> Optional[SubTask]:
 
 def _update_progress_for_status(task: TaskDetail, status: str) -> None:
     task.status = status
-    needs_progress = status in {"WARN", "FAIL"}
+    needs_progress = status in {"ACTIVE", "TODO"}
     if needs_progress and task.progress == 0 and task.subtasks:
         task.progress = task.calculate_progress()
 
@@ -377,7 +377,7 @@ class TaskManager:
     def create_task(
         self,
         title: str,
-        status: str = "FAIL",
+        status: str = "TODO",
         priority: str = "MEDIUM",
         parent: Optional[str] = None,
         domain: str = "",
@@ -386,9 +386,9 @@ class TaskManager:
         folder: Optional[str] = None,
     ) -> TaskDetail:
         try:
-            status = task_status_code(status or "FAIL")
+            status = task_status_code(status or "TODO")
         except ValueError:
-            status = "FAIL"
+            status = "TODO"
         domain = self.sanitize_domain(folder or domain or derive_domain_explicit("", phase, component))
         now_value = current_timestamp()
         task = TaskDetail(
@@ -411,7 +411,7 @@ class TaskManager:
         prog = task.calculate_progress()
         task.progress = prog
         if not getattr(task, "status_manual", False) and prog == 100 and not task.blocked:
-            task.status = "OK"
+            task.status = "DONE"
         task.domain = self.sanitize_domain(task.domain)
         self.repo.save(task)
         if not skip_sync:
@@ -430,8 +430,8 @@ class TaskManager:
             return None
         if task.subtasks:
             prog = task.calculate_progress()
-            if not getattr(task, "status_manual", False) and prog == 100 and not task.blocked and task.status != "OK":
-                task.status = "OK"
+            if not getattr(task, "status_manual", False) and prog == 100 and not task.blocked and task.status != "DONE":
+                task.status = "DONE"
                 self.save_task(task)
         if not skip_sync:
             sync = self.sync_service
@@ -448,8 +448,8 @@ class TaskManager:
         for parsed in tasks:
             if parsed.subtasks:
                 prog = parsed.calculate_progress()
-                if not getattr(parsed, "status_manual", False) and prog == 100 and not parsed.blocked and parsed.status != "OK":
-                    parsed.status = "OK"
+                if not getattr(parsed, "status_manual", False) and prog == 100 and not parsed.blocked and parsed.status != "DONE":
+                    parsed.status = "DONE"
                     self.save_task(parsed, skip_sync=skip_sync)
             if not skip_sync:
                 sync = self.sync_service
@@ -526,7 +526,7 @@ class TaskManager:
         except ValueError:
             return False, {"code": "invalid_status", "message": self._t("ERR_STATUS_REQUIRED")}
 
-        if status_code == "OK":
+        if status_code == "DONE":
             if not force:
                 ok, error = _validate_task_ready_for_ok(task, self._t)
                 if not ok:
@@ -701,6 +701,11 @@ class TaskManager:
         norm_tag = (tag or "").strip().lower()
         norm_status = (status or "").strip().upper()
         norm_phase = (phase or "").strip().lower()
+        if norm_status:
+            try:
+                norm_status = task_status_code(norm_status)
+            except ValueError:
+                pass
 
         if dry_run:
             matched = [d.id for d in self.repo.list("", skip_sync=True) if _matches_clean(d, norm_tag, norm_status, norm_phase)]

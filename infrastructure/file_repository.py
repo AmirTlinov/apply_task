@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from core import TaskDetail
+from core.status import task_status_code
 from application.ports import TaskRepository
 from infrastructure.task_file_parser import TaskFileParser
 
@@ -174,7 +175,7 @@ class FileTaskRepository(TaskRepository):
         matched: list[str] = []
         removed = 0
         norm_tag = tag.strip().lower() if tag else ""
-        norm_status = status.strip().upper() if status else ""
+        norm_status = task_status_code(status) if status else ""
         norm_phase = phase.strip().lower() if phase else ""
 
         for file in self.tasks_dir.rglob("TASK-*.task"):
@@ -186,8 +187,10 @@ class FileTaskRepository(TaskRepository):
             tags = [t.strip().lower() for t in (parsed.tags or [])]
             if norm_tag and norm_tag not in tags:
                 continue
-            if norm_status and (parsed.status or "").upper() != norm_status:
-                continue
+            if norm_status:
+                parsed_status = task_status_code(parsed.status) if parsed.status else ""
+                if parsed_status != norm_status:
+                    continue
             if norm_phase and (parsed.phase or "").strip().lower() != norm_phase:
                 continue
             matched.append(parsed.id)

@@ -6,7 +6,7 @@ apply_task — flagship CLI for deterministic .tasks workflows
   subtask:    apply_task subtask TASK-001 --add "..." --criteria "...;..." --tests "...;..." --blockers "...;..." |
               apply_task subtask TASK-001 --criteria-done N|--tests-done N|--blockers-done N [--note "..."] | --done N
   show/list:  apply_task show [ID]/list [filters]
-  stat:       apply_task start|done|fail [ID]                               # enforce WARN/OK/FAIL discipline
+  stat:       apply_task start|done|fail [ID]                               # enforce TODO/ACTIVE/DONE discipline
   guide:      apply_task next | quick | suggest|sg [context]
   lint:       apply_task lint [--fix]
 Rules:
@@ -172,7 +172,7 @@ FORWARD_COMMANDS = {
     "gui": "gui",
 }
 
-STATUS_COMMANDS = {"done": "OK", "start": "WARN", "fail": "FAIL"}
+STATUS_COMMANDS = {"done": "DONE", "start": "ACTIVE", "fail": "TODO"}
 
 KNOWN_COMMANDS = set(FORWARD_COMMANDS) | set(STATUS_COMMANDS) | {"show", "history", "replay", "which", "help"}
 
@@ -297,7 +297,7 @@ def main(argv=None):
                 "create|task --validate-only — прогоняет все проверки без записи .task, удобно для AI перед коммитом.",
                 "create|guided — создание задач; всегда передавай --parent/--description/--tests/--risks/--subtasks (JSON). --subtasks принимает строку, @файл или '-' для STDIN.",
                 "show|list — просмотр задач с учётом --domain/-F или --phase/--component.",
-                "start|done|fail — дисциплина WARN/OK/FAIL для текущей или указанной задачи.",
+                "start|done|fail — дисциплина TODO/ACTIVE/DONE для текущей или указанной задачи.",
                 "subtask TASK-ID --add/--criteria/--tests/--blockers — управление подзадачами, описания строго на русском.",
                 "clean [--tag/--status/--phase] [--dry-run] — безопасное удаление по фильтрам.",
                 "next|quick|suggest|sg — подсказки по приоритету.",

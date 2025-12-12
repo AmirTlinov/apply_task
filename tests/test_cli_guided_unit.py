@@ -65,7 +65,7 @@ def test_cmd_automation_checkpoint_ok(monkeypatch, tmp_path, capsys):
             return SimpleNamespace(
                 id="TASK-1",
                 title="T",
-                status="FAIL",
+                status="TODO",
                 priority="LOW",
                 domain="",
                 phase="",

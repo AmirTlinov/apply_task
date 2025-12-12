@@ -66,8 +66,8 @@ Detail View Width     ✓
 +----+----------------------------------+-----+
 |Stat|Title                             |Prog |
 +----+----------------------------------+-----+
-| OK |Implement authentication          |100% |
-|WARN|Add database migrations           | 45% |
+|DONE|Implement authentication          |100% |
+|ACTIVE|Add database migrations         | 45% |
 ```
 
 **120 chars**
@@ -75,8 +75,8 @@ Detail View Width     ✓
 +----+-------------------------------+-----+------+
 |Stat|Title                          |Prog |Subt  |
 +----+-------------------------------+-----+------+
-| OK |Implement authentication       |100% | 6/6  |
-|WARN|Add database migrations        | 45% | 3/8  |
+|DONE|Implement authentication       |100% | 6/6  |
+|ACTIVE|Add database migrations      | 45% | 3/8  |
 ```
 
 **180+ chars**
@@ -84,8 +84,8 @@ Detail View Width     ✓
 +----+--------------------------------------+-----+------+
 |Stat|Title                                 |Prog |Subt  |
 +----+--------------------------------------+-----+------+
-| OK |Implement auth                        |100% | 6/6  |
-|WARN|Add DB migrations                     | 45% | 3/8  |
+|DONE|Implement auth                        |100% | 6/6  |
+|ACTIVE|Add DB migrations                   | 45% | 3/8  |
 ```
 
 ## Metrics

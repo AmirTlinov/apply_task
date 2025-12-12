@@ -21,12 +21,12 @@ class TestTask:
         """Test creating task with minimal required fields."""
         task = Task(
             name="Test Task",
-            status=Status.OK,
+            status=Status.DONE,
             description="Test description",
             category="test",
         )
         assert task.name == "Test Task"
-        assert task.status == Status.OK
+        assert task.status == Status.DONE
         assert task.description == "Test description"
         assert task.category == "test"
         assert task.completed is False
@@ -38,7 +38,7 @@ class TestTask:
         """Test creating task with all fields."""
         task = Task(
             name="Full Task",
-            status=Status.WARN,
+            status=Status.ACTIVE,
             description="Full description",
             category="full",
             completed=True,
@@ -54,7 +54,7 @@ class TestTask:
             blocked=True,
         )
         assert task.name == "Full Task"
-        assert task.status == Status.WARN
+        assert task.status == Status.ACTIVE
         assert task.completed is True
         assert task.progress == 75
         assert task.id == "TASK-001"

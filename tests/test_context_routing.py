@@ -40,7 +40,7 @@ class ContextRoutingTests(unittest.TestCase):
         manager.save_task(task)
 
         loaded = manager.load_task(task.id, "phase1/api")
-        self.assertEqual(loaded.status, "OK")
+        self.assertEqual(loaded.status, "DONE")
 
         moved = manager.move_glob("phase1/**/*.task", "phase2/api")
         self.assertEqual(moved, 1)
