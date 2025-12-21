@@ -7,9 +7,9 @@ fields:
   status:
     name: Status
     options:
-      OK: Done
-      WARN: "In Progress"
-      FAIL: Backlog
+      DONE: Done
+      ACTIVE: "In Progress"
+      TODO: Backlog
   progress:
     name: Progress
   domain:
