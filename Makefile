@@ -7,7 +7,22 @@ build:
 
 zipapp:
 	rm -rf dist/pyz-src && mkdir -p dist/pyz-src
-	rsync -a --delete --exclude '.git' --exclude 'dist' --exclude '.tasks' --exclude '.tmp' --exclude '__pycache__' --exclude 'tests' ./ dist/pyz-src
+	rsync -a --delete \
+		--exclude '.git' \
+		--exclude 'dist' \
+		--exclude '.tasks' \
+		--exclude '.tmp' \
+		--exclude '.venv' \
+		--exclude '.pytest_cache' \
+		--exclude '.context-finder' \
+		--exclude '.serena' \
+		--exclude '__pycache__' \
+		--exclude '.coverage' \
+		--exclude 'tests' \
+		--exclude 'gui/node_modules' \
+		--exclude 'gui/dist' \
+		--exclude 'gui/src-tauri/target' \
+		./ dist/pyz-src
 	$(PYTHON) -m zipapp dist/pyz-src -m "apply_task:main" -o dist/apply_task-$(VERSION).pyz -p "/usr/bin/env python3" -c
 
 smoke:
