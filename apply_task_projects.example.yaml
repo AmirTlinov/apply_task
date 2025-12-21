@@ -1,7 +1,7 @@
 project:
   type: repository            # repository | organization | user
   owner: AmirTlinov
-  repo: apply_task            # required for repository projects
+  repo: apply_task-mcp        # required for repository projects
   number: 1                   # Project number from the URL
 fields:
   status:

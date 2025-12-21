@@ -156,7 +156,7 @@ apply_task tui
    project:
      type: repository
      owner: AmirTlinov
-     repo: apply_task
+     repo: apply_task-mcp
      number: 1
    fields:
      status:
