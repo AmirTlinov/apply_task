@@ -1330,7 +1330,12 @@ class ProjectsSync:
                 changed = True
             if changed:
                 metadata["project_remote_updated"] = remote_updated or metadata.get("project_remote_updated")
-                header = yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip()
+                header = yaml.safe_dump(
+                    metadata,
+                    allow_unicode=True,
+                    default_flow_style=False,
+                    sort_keys=False,
+                ).strip()
                 body = parts[2].lstrip("\n")
                 new_text = f"---\n{header}\n---\n{body}"
                 if self._local_is_newer(metadata.get("updated"), remote_updated):

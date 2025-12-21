@@ -272,7 +272,13 @@ class TaskDetail:
 
             metadata["steps"] = [dump_step(st) for st in self.steps]
 
-        lines = ["---", yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip(), "---", ""]
+        header = yaml.safe_dump(
+            metadata,
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
+        ).strip()
+        lines = ["---", header, "---", ""]
         lines.append(f"# {self.title}\n")
 
         def add_section(title: str, content: List[str]) -> None:
