@@ -4,7 +4,7 @@ import { ProjectsView } from '@/features/projects/components/ProjectsView'
 import { useTasks } from '@/features/tasks/hooks/useTasks'
 import { useUIStore } from '@/stores/uiStore'
 import { openProject } from '@/lib/tauri'
-import { toast } from '@/components/common/Toast'
+import { toast } from '@/components/common/toast'
 
 export const Route = createRoute({
     getParentRoute: () => rootRoute,
@@ -36,7 +36,7 @@ function Projects() {
     }
 
     return (
-        <div className="h-full w-full bg-background overflow-hidden relative">
+        <div className="flex flex-1 w-full min-h-0 flex-col bg-background overflow-hidden relative">
             <ProjectsView
                 tasks={tasks}
                 projectName={projectName || undefined}

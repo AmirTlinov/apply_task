@@ -4,14 +4,18 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { toast } from "@/components/common/Toast";
+import { toast } from "@/components/common/toast";
 
 export type ThemeMode = "light" | "dark" | "system";
+export type TasksViewMode = "cards" | "table";
+export type StorageMode = "global" | "local";
 
 interface SettingsState {
   // Appearance
   theme: ThemeMode;
   compactMode: boolean;
+  tasksViewMode: TasksViewMode;
+  subtasksViewMode: TasksViewMode;
 
   // Projects
   archivedNamespaces: string[];
@@ -23,6 +27,7 @@ interface SettingsState {
   // Data
   autoSave: boolean;
   vimMode: boolean;
+  storageMode: StorageMode;
 
   // Computed/cached
   cacheSize: number; // in bytes
@@ -30,10 +35,13 @@ interface SettingsState {
   // Actions
   setTheme: (theme: ThemeMode) => void;
   setCompactMode: (enabled: boolean) => void;
+  setTasksViewMode: (mode: TasksViewMode) => void;
+  setSubtasksViewMode: (mode: TasksViewMode) => void;
   setNotifications: (enabled: boolean) => void;
   setSoundEffects: (enabled: boolean) => void;
   setAutoSave: (enabled: boolean) => void;
   setVimMode: (enabled: boolean) => void;
+  setStorageMode: (mode: StorageMode) => void;
   archiveNamespace: (namespace: string) => void;
   restoreNamespace: (namespace: string) => void;
   setCacheSize: (size: number) => void;
@@ -43,26 +51,36 @@ interface SettingsState {
 }
 
 const DEFAULT_SETTINGS = {
-  theme: "light" as ThemeMode,
-  compactMode: false,
+  theme: "system" as ThemeMode,
+  compactMode: true,
+  tasksViewMode: "table" as TasksViewMode,
+  subtasksViewMode: "table" as TasksViewMode,
   archivedNamespaces: [] as string[],
   notifications: true,
   soundEffects: true,
   autoSave: true,
   vimMode: false,
+  storageMode: "global" as StorageMode,
   cacheSize: 0,
 };
 
-// Apply theme to document
-function applyTheme(theme: ThemeMode): void {
-  const root = document.documentElement;
+type ResolvedTheme = Exclude<ThemeMode, "system">;
 
-  if (theme === "system") {
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    root.setAttribute("data-theme", prefersDark ? "dark" : "light");
-  } else {
-    root.setAttribute("data-theme", theme);
+function resolveTheme(theme: ThemeMode): ResolvedTheme {
+  if (theme === "dark") return "dark";
+  if (theme === "light") return "light";
+
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return "light";
   }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function applyResolvedTheme(resolved: ResolvedTheme): void {
+  const root = document.documentElement;
+  root.classList.toggle("dark", resolved === "dark");
+  root.setAttribute("data-theme", resolved);
 }
 
 // Calculate localStorage cache size
@@ -82,8 +100,9 @@ export const useSettingsStore = create<SettingsState>()(
       ...DEFAULT_SETTINGS,
 
       setTheme: (theme) => {
-        applyTheme(theme);
         set({ theme });
+        const state = get();
+        applyResolvedTheme(resolveTheme(state.theme));
         const themeNames = { light: "Light", dark: "Dark", system: "System" };
         toast.success(`Theme changed to ${themeNames[theme]}`);
       },
@@ -95,6 +114,14 @@ export const useSettingsStore = create<SettingsState>()(
         );
         set({ compactMode });
         toast.info(compactMode ? "Compact mode enabled" : "Compact mode disabled");
+      },
+
+      setTasksViewMode: (tasksViewMode) => {
+        set({ tasksViewMode });
+      },
+
+      setSubtasksViewMode: (subtasksViewMode) => {
+        set({ subtasksViewMode });
       },
 
       setNotifications: (notifications) => {
@@ -112,6 +139,9 @@ export const useSettingsStore = create<SettingsState>()(
       setVimMode: (vimMode) => {
         set({ vimMode });
         toast.info(vimMode ? "Vim mode enabled" : "Vim mode disabled");
+      },
+      setStorageMode: (storageMode) => {
+        set({ storageMode });
       },
 
       archiveNamespace: (namespace) => {
@@ -182,12 +212,25 @@ export const useSettingsStore = create<SettingsState>()(
 
       resetSettings: () => {
         set(DEFAULT_SETTINGS);
-        applyTheme(DEFAULT_SETTINGS.theme);
+        const state = get();
+        applyResolvedTheme(resolveTheme(state.theme));
+        document.documentElement.setAttribute("data-compact", state.compactMode ? "true" : "false");
         toast.success("Settings reset to defaults");
       },
     }),
     {
       name: "apply-task-settings",
+      version: 1,
+      migrate: (persistedState) => {
+        if (!persistedState || typeof persistedState !== "object") return persistedState as SettingsState;
+        const migrated = { ...(persistedState as Record<string, unknown>) };
+        delete migrated.pajamaMode;
+        delete migrated.pajamaStartMinutes;
+        delete migrated.pajamaEndMinutes;
+        if (migrated.tasksViewMode === "tree") migrated.tasksViewMode = "table";
+        if (migrated.subtasksViewMode === "tree") migrated.subtasksViewMode = "table";
+        return migrated as unknown as SettingsState;
+      },
     }
   )
 );
@@ -197,20 +240,18 @@ if (typeof window !== "undefined") {
   // Use a small delay to ensure store is hydrated
   setTimeout(() => {
     const state = useSettingsStore.getState();
-    applyTheme(state.theme);
-    if (state.compactMode) {
-      document.documentElement.setAttribute("data-compact", "true");
-    }
+    applyResolvedTheme(resolveTheme(state.theme));
+    document.documentElement.setAttribute("data-compact", state.compactMode ? "true" : "false");
     state.setCacheSize(calculateCacheSize());
   }, 0);
 }
 
 // Subscribe to system theme changes
-if (typeof window !== "undefined") {
+if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    const { theme } = useSettingsStore.getState();
-    if (theme === "system") {
-      applyTheme("system");
+    const state = useSettingsStore.getState();
+    if (state.theme === "system") {
+      applyResolvedTheme(resolveTheme(state.theme));
     }
   });
 }

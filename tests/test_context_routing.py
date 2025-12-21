@@ -8,7 +8,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import tasks
-from tasks import TaskManager, SubTask, derive_folder_explicit, save_last_task, get_last_task
+from tasks import TaskManager, Step, derive_folder_explicit, save_last_task, get_last_task
 
 
 class ContextRoutingTests(unittest.TestCase):
@@ -34,9 +34,31 @@ class ContextRoutingTests(unittest.TestCase):
 
     def test_move_glob_and_auto_ok(self):
         manager = TaskManager(Path(".tasks"))
-        task = manager.create_task("X", parent="TASK-001", folder="phase1/api")
-        task.subtasks.append(SubTask(True, "Validate API latency target >=20 chars", ["criterium"], ["pytest -q"], ["perf env"], True, True, True))
-        task.subtasks.append(SubTask(True, "Roll out config safely >=20 chars", ["criterium"], ["pytest -m fast"], ["ops approval"], True, True, True))
+        plan = manager.create_plan("Plan")
+        manager.save_task(plan)
+        task = manager.create_task("X", parent=plan.id, folder="phase1/api")
+        task.steps.append(
+            Step(
+                completed=True,
+                title="Validate API latency target >=20 chars",
+                success_criteria=["criterium"],
+                tests=["pytest -q"],
+                blockers=["perf env"],
+                criteria_confirmed=True,
+                tests_confirmed=True,
+            )
+        )
+        task.steps.append(
+            Step(
+                completed=True,
+                title="Roll out config safely >=20 chars",
+                success_criteria=["criterium"],
+                tests=["pytest -m fast"],
+                blockers=["ops approval"],
+                criteria_confirmed=True,
+                tests_confirmed=True,
+            )
+        )
         manager.save_task(task)
 
         loaded = manager.load_task(task.id, "phase1/api")

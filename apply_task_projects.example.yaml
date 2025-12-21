@@ -14,5 +14,5 @@ fields:
     name: Progress
   domain:
     name: Domain
-  subtasks:
-    name: Subtasks
+  steps:
+    name: Steps

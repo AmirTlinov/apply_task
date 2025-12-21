@@ -2,68 +2,67 @@ import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from core import TaskDetail
-from core.status import task_status_code
 from application.ports import TaskRepository
+from core import TaskDetail
+from core.status import normalize_status_code
+from core.desktop.devtools.interface.tasks_dir_resolver import get_tasks_dir_for_project
 from infrastructure.task_file_parser import TaskFileParser
 
 
-class FileTaskRepository(TaskRepository):
-    def __init__(self, tasks_dir: Path | None):
-        if tasks_dir is None:
-            # Use global storage ~/.tasks/<namespace>/ (or APPLY_TASK_TASKS_DIR if set)
-            from core.desktop.devtools.interface.tasks_dir_resolver import get_tasks_dir_for_project
-            self.tasks_dir = get_tasks_dir_for_project(use_global=True)
-        else:
-            self.tasks_dir = tasks_dir
+def _is_reserved_dir(path: Path) -> bool:
+    return ".snapshots" in path.parts or ".trash" in path.parts
 
-    def _resolve_path(self, task_id: str, domain: str = "") -> Path:
+
+class FileTaskRepository(TaskRepository):
+    """File-backed repository for both Plans and Tasks.
+
+    Storage:
+    - Directory: resolved via tasks_dir_resolver (typically `~/.tasks/<namespace>`)
+    - Files: `PLAN-###.task` and `TASK-###.task`
+    """
+
+    def __init__(self, tasks_dir: Path | None):
+        self.tasks_dir = get_tasks_dir_for_project(use_global=True, create=False) if tasks_dir is None else tasks_dir
+
+    def _resolve_path(self, item_id: str, domain: str = "") -> Path:
         if self.tasks_dir is None:
             raise ValueError("tasks_dir is not set for FileTaskRepository")
-        # SEC: Validate task_id against path traversal
-        if ".." in task_id or "/" in task_id or "\\" in task_id:
-            raise ValueError(f"Invalid task_id: contains path traversal characters: {task_id}")
+        if ".." in item_id or "/" in item_id or "\\" in item_id:
+            raise ValueError(f"Invalid id: contains path traversal characters: {item_id}")
         if domain and (".." in domain or domain.startswith("/") or "\\" in domain):
             raise ValueError(f"Invalid domain: contains path traversal characters: {domain}")
         base = self.tasks_dir / domain if domain else self.tasks_dir
-        resolved = (base / f"{task_id}.task").resolve()
-        # SEC: Ensure resolved path is within tasks_dir
+        resolved = (base / f"{item_id}.task").resolve()
         if not resolved.is_relative_to(self.tasks_dir.resolve()):
             raise ValueError(f"Path traversal detected: {resolved} is outside {self.tasks_dir}")
         return resolved
 
-    def _assign_domain(self, task: TaskDetail, path: Path) -> None:
-        if not task.domain:
-            try:
-                rel = path.parent.relative_to(self.tasks_dir)
-                task.domain = "" if str(rel) == "." else rel.as_posix()
-            except Exception:
-                task.domain = ""
+    def _assign_domain(self, detail: TaskDetail, path: Path) -> None:
+        if detail.domain:
+            return
+        try:
+            rel = path.parent.relative_to(self.tasks_dir)
+            detail.domain = "" if str(rel) == "." else rel.as_posix()
+        except Exception:
+            detail.domain = ""
 
     def load(self, task_id: str, domain: str = "") -> Optional[TaskDetail]:
-        """Load a task by ID, optionally from a specific domain buffer."""
         path = self._resolve_path(task_id, domain)
         if path.exists():
-            task = TaskFileParser.parse(path)
-            if task:
-                self._assign_domain(task, path)
-            return task
+            detail = TaskFileParser.parse(path)
+            if detail:
+                self._assign_domain(detail, path)
+            return detail
 
-        # Fallback: search everywhere within this tasks_dir
-        candidates = list(self.tasks_dir.rglob(f"{task_id}.task"))
-        if not candidates:
-            return None
-
-        # Return the first parsable candidate
+        candidates = [f for f in self.tasks_dir.rglob(f"{task_id}.task") if not _is_reserved_dir(f)]
         for candidate in candidates:
             try:
-                task = TaskFileParser.parse(candidate)
-                if task:
-                    self._assign_domain(task, candidate)
-                    return task
+                detail = TaskFileParser.parse(candidate)
+                if detail:
+                    self._assign_domain(detail, candidate)
+                    return detail
             except Exception:
                 continue
-
         return None
 
     def save(self, task: TaskDetail) -> None:
@@ -73,21 +72,25 @@ class FileTaskRepository(TaskRepository):
 
     def list(self, domain_path: str = "", skip_sync: bool = False) -> List[TaskDetail]:
         root = self.tasks_dir / domain_path if domain_path else self.tasks_dir
-        tasks: List[TaskDetail] = []
-        for file in root.rglob("TASK-*.task"):
-            # Skip snapshots directory
-            if ".snapshots" in file.parts:
+        items: List[TaskDetail] = []
+        for file in root.rglob("*.task"):
+            if _is_reserved_dir(file):
+                continue
+            stem = file.stem
+            if not (stem.startswith("TASK-") or stem.startswith("PLAN-")):
                 continue
             parsed = TaskFileParser.parse(file)
             if parsed:
                 self._assign_domain(parsed, file)
-                tasks.append(parsed)
-        return tasks
+                items.append(parsed)
+        return items
 
     def compute_signature(self) -> int:
         sig = 0
-        for f in self.tasks_dir.rglob("TASK-*.task"):
-            if ".snapshots" in f.parts:
+        for f in self.tasks_dir.rglob("*.task"):
+            if _is_reserved_dir(f):
+                continue
+            if not (f.stem.startswith("TASK-") or f.stem.startswith("PLAN-")):
                 continue
             try:
                 st = f.stat()
@@ -96,23 +99,30 @@ class FileTaskRepository(TaskRepository):
                 continue
         return sig if sig else int(time.time_ns())
 
-    def next_id(self) -> str:
-        ids = []
-        for f in self.tasks_dir.rglob("TASK-*.task"):
-            if ".snapshots" in f.parts:
-                continue
+    def _next_id_for_prefix(self, prefix: str) -> str:
+        ids: list[int] = []
+        for f in self.tasks_dir.rglob(f"{prefix}-*.task"):
+            # Keep IDs monotonic: include `.trash` and `.snapshots` to avoid reusing IDs.
             try:
                 ids.append(int(f.stem.split("-")[1]))
             except (IndexError, ValueError):
                 continue
         next_num = (max(ids) + 1) if ids else 1
-        return f"TASK-{next_num:03d}"
+        return f"{prefix}-{next_num:03d}"
+
+    def next_id(self) -> str:
+        return self._next_id_for_prefix("TASK")
+
+    def next_plan_id(self) -> str:
+        return self._next_id_for_prefix("PLAN")
 
     def delete(self, task_id: str, domain: str = "") -> bool:
         path = self._resolve_path(task_id, domain)
-        candidates = [path]
-        if not path.exists():
-            candidates = [f for f in self.tasks_dir.rglob(f"{task_id}.task") if ".snapshots" not in f.parts]
+        candidates = (
+            [path]
+            if path.exists()
+            else [f for f in self.tasks_dir.rglob(f"{task_id}.task") if not _is_reserved_dir(f)]
+        )
         deleted = False
         for candidate in candidates:
             try:
@@ -123,15 +133,14 @@ class FileTaskRepository(TaskRepository):
         return deleted
 
     def move(self, task_id: str, new_domain: str, current_domain: str = "") -> bool:
-        task = self.load(task_id, current_domain)
-        if not task:
+        detail = self.load(task_id, current_domain)
+        if not detail:
             return False
-        old_path = Path(task.filepath)
-        task.domain = new_domain
+        old_path = Path(detail.filepath)
+        detail.domain = new_domain
         dest_path = self._resolve_path(task_id, new_domain)
         dest_path.parent.mkdir(parents=True, exist_ok=True)
-        # переписываем с обновленной метой
-        dest_path.write_text(task.to_file_content(), encoding="utf-8")
+        dest_path.write_text(detail.to_file_content(), encoding="utf-8")
         if old_path.exists() and old_path != dest_path:
             try:
                 old_path.unlink()
@@ -141,23 +150,23 @@ class FileTaskRepository(TaskRepository):
 
     def move_glob(self, pattern: str, new_domain: str) -> int:
         moved = 0
-        for file in self.tasks_dir.rglob("TASK-*.task"):
-            if ".snapshots" in file.parts:
+        for file in self.tasks_dir.rglob("*.task"):
+            if _is_reserved_dir(file):
                 continue
             try:
                 rel = file.relative_to(self.tasks_dir)
             except Exception:
                 rel = file
             if rel.match(pattern):
-                tid = file.stem
-                if self.move(tid, new_domain, current_domain=str(rel.parent)) or self.move(tid, new_domain):
+                item_id = file.stem
+                if self.move(item_id, new_domain, current_domain=str(rel.parent)) or self.move(item_id, new_domain):
                     moved += 1
         return moved
 
     def delete_glob(self, pattern: str) -> int:
         removed = 0
-        for file in self.tasks_dir.rglob("TASK-*.task"):
-            if ".snapshots" in file.parts:
+        for file in self.tasks_dir.rglob("*.task"):
+            if _is_reserved_dir(file):
                 continue
             try:
                 rel = file.relative_to(self.tasks_dir)
@@ -175,11 +184,13 @@ class FileTaskRepository(TaskRepository):
         matched: list[str] = []
         removed = 0
         norm_tag = tag.strip().lower() if tag else ""
-        norm_status = task_status_code(status) if status else ""
+        norm_status = normalize_status_code(status) if status else ""
         norm_phase = phase.strip().lower() if phase else ""
 
-        for file in self.tasks_dir.rglob("TASK-*.task"):
-            if ".snapshots" in file.parts:
+        for file in self.tasks_dir.rglob("*.task"):
+            if _is_reserved_dir(file):
+                continue
+            if not (file.stem.startswith("TASK-") or file.stem.startswith("PLAN-")):
                 continue
             parsed = TaskFileParser.parse(file)
             if not parsed:
@@ -188,7 +199,7 @@ class FileTaskRepository(TaskRepository):
             if norm_tag and norm_tag not in tags:
                 continue
             if norm_status:
-                parsed_status = task_status_code(parsed.status) if parsed.status else ""
+                parsed_status = normalize_status_code(parsed.status) if parsed.status else ""
                 if parsed_status != norm_status:
                     continue
             if norm_phase and (parsed.phase or "").strip().lower() != norm_phase:
@@ -200,3 +211,6 @@ class FileTaskRepository(TaskRepository):
             except OSError:
                 continue
         return matched, removed
+
+
+__all__ = ["FileTaskRepository"]

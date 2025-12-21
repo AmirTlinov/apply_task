@@ -14,10 +14,19 @@ import {
   Archive,
   Trash2,
 } from "lucide-react";
-import { DropdownMenu } from "@/components/common/DropdownMenu";
 import type { TaskListItem, Namespace } from "@/types/task";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import { ProgressBar } from "@/components/common/ProgressBar";
+import { cn } from "@/lib/utils";
 import { openPath } from "@/lib/tauri";
-import { toast } from "@/components/common/Toast";
+import { toast } from "@/components/common/toast";
 import { useSettingsStore } from "@/stores/settingsStore";
 
 interface ProjectsViewProps {
@@ -114,84 +123,35 @@ export function ProjectsView({
   const otherProjects = visibleProjects.filter((p) => !p.isActive);
 
   return (
-    <div
-      style={{
-        flex: 1,
-        overflowY: "auto",
-        padding: "24px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "32px",
-      }}
-    >
+    <div className="flex flex-1 flex-col gap-[var(--density-page-gap)] overflow-y-auto p-[var(--density-page-pad)]">
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h2
-            style={{
-              fontSize: "20px",
-              fontWeight: 600,
-              color: "var(--color-foreground)",
-              marginBottom: "4px",
-            }}
-          >
-            Projects
-          </h2>
-          <p style={{ fontSize: "14px", color: "var(--color-foreground-muted)" }}>
+          <h2 className="text-lg font-semibold text-foreground">Projects</h2>
+          <p className="mt-0.5 text-sm text-foreground-muted">
             Manage and switch between your projects ({allProjects.length} total)
           </p>
         </div>
 
-        <button
-          onClick={onOpenProject}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "10px 16px",
-            borderRadius: "8px",
-            border: "none",
-            backgroundColor: "var(--color-primary)",
-            color: "white",
-            fontSize: "13px",
-            fontWeight: 500,
-            cursor: "pointer",
-            transition: "opacity 150ms ease",
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
-          onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-        >
-          <Plus style={{ width: "16px", height: "16px" }} />
-          Open Project
-        </button>
+        {onOpenProject && (
+          <Button onClick={onOpenProject} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Open Project
+          </Button>
+        )}
       </div>
 
       {/* Current Project */}
       {currentProject && (
         <section>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              marginBottom: "16px",
-            }}
-          >
-            <Star
-              style={{ width: "14px", height: "14px", color: "var(--color-status-warn)", fill: "var(--color-status-warn)" }}
-            />
-            <h3 style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-foreground-muted)" }}>
+          <div className="mb-3 flex items-center gap-2">
+            <Star className="h-4 w-4 text-status-warn" />
+            <h3 className="text-sm font-semibold text-foreground-muted">
               Current Project
             </h3>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-              gap: "12px",
-            }}
-          >
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
             <ProjectCard
               project={currentProject}
               onRefresh={onRefresh}
@@ -206,27 +166,14 @@ export function ProjectsView({
       {/* All Projects */}
       {otherProjects.length > 0 && (
         <section>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              marginBottom: "16px",
-            }}
-          >
-            <Folder style={{ width: "14px", height: "14px", color: "var(--color-foreground-muted)" }} />
-            <h3 style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-foreground-muted)" }}>
+          <div className="mb-3 flex items-center gap-2">
+            <Folder className="h-4 w-4 text-foreground-muted" />
+            <h3 className="text-sm font-semibold text-foreground-muted">
               All Projects
             </h3>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-              gap: "12px",
-            }}
-          >
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
             {otherProjects.map((project) => (
               <ProjectCard
                 key={project.id}
@@ -244,26 +191,13 @@ export function ProjectsView({
       {/* Archived Projects */}
       {archivedProjects.length > 0 && (
         <section>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              marginBottom: "16px",
-            }}
-          >
-            <Archive style={{ width: "14px", height: "14px", color: "var(--color-foreground-muted)" }} />
-            <h3 style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-foreground-muted)" }}>
+          <div className="mb-3 flex items-center gap-2">
+            <Archive className="h-4 w-4 text-foreground-muted" />
+            <h3 className="text-sm font-semibold text-foreground-muted">
               Archived Projects
             </h3>
           </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-              gap: "12px",
-            }}
-          >
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
             {archivedProjects.map((project) => (
               <ProjectCard
                 key={project.id}
@@ -280,36 +214,20 @@ export function ProjectsView({
 
       {/* Empty state for no projects */}
       {allProjects.length === 0 && (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexDirection: "column",
-            gap: "16px",
-            color: "var(--color-foreground-muted)",
-          }}
-        >
-          <Folder style={{ width: "48px", height: "48px", opacity: 0.5 }} />
-          <div style={{ fontSize: "16px", fontWeight: 500 }}>No projects yet</div>
-          <div style={{ fontSize: "14px" }}>Open a folder to get started</div>
-          <button
-            onClick={onOpenProject}
-            style={{
-              marginTop: "8px",
-              padding: "10px 20px",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: "var(--color-primary)",
-              color: "white",
-              fontSize: "14px",
-              fontWeight: 500,
-              cursor: "pointer",
-            }}
-          >
-            Open Project
-          </button>
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 py-12 text-center">
+          <Folder className="h-12 w-12 text-foreground-subtle opacity-60" />
+          <div className="text-base font-semibold text-foreground">
+            No projects yet
+          </div>
+          <div className="text-sm text-foreground-muted">
+            Open a folder to get started
+          </div>
+          {onOpenProject && (
+            <Button onClick={onOpenProject} className="mt-2 gap-2">
+              <Plus className="h-4 w-4" />
+              Open Project
+            </Button>
+          )}
         </div>
       )}
     </div>
@@ -329,18 +247,20 @@ function ProjectCard({ project, onRefresh, onSelectNamespace, onArchive, onResto
     ? Math.round((project.completedCount / project.taskCount) * 100)
     : 0;
 
+  const isClickable = !project.isArchived;
+
   const menuItems = project.isArchived
     ? [
         {
           label: "Restore",
-          icon: <FolderOpen style={{ width: "14px", height: "14px" }} />,
+          icon: <FolderOpen className="h-4 w-4" />,
           onClick: () => onRestore(project.id),
         },
       ]
     : [
         {
           label: "Refresh",
-          icon: <RefreshCw style={{ width: "14px", height: "14px" }} />,
+          icon: <RefreshCw className="h-4 w-4" />,
           onClick: () => {
             onRefresh?.();
             toast.info("Projects refreshed");
@@ -348,7 +268,7 @@ function ProjectCard({ project, onRefresh, onSelectNamespace, onArchive, onResto
         },
         {
           label: "Open folder",
-          icon: <ExternalLink style={{ width: "14px", height: "14px" }} />,
+          icon: <ExternalLink className="h-4 w-4" />,
           onClick: async () => {
             const resp = await openPath(project.path);
             if (!resp.success) {
@@ -359,16 +279,16 @@ function ProjectCard({ project, onRefresh, onSelectNamespace, onArchive, onResto
         { type: "separator" as const },
         {
           label: "Archive",
-          icon: <Archive style={{ width: "14px", height: "14px" }} />,
+          icon: <Archive className="h-4 w-4" />,
           onClick: () => onArchive(project.id),
           disabled: project.isActive,
         },
         {
           label: "Remove from list",
-          icon: <Trash2 style={{ width: "14px", height: "14px" }} />,
+          icon: <Trash2 className="h-4 w-4" />,
           onClick: () => {
             onArchive(project.id);
-            toast.info("Project hidden. Delete folder manually to remove tasks.");
+            toast.info("Project hidden. Delete folder manually to remove steps.");
           },
           danger: true,
           disabled: project.isActive,
@@ -377,149 +297,114 @@ function ProjectCard({ project, onRefresh, onSelectNamespace, onArchive, onResto
 
   return (
     <div
-      style={{
-        padding: "16px",
-        backgroundColor: project.isActive
-          ? "var(--color-primary-subtle)"
-          : project.isArchived
-            ? "var(--color-background-muted)"
-            : "var(--color-background)",
-        borderRadius: "12px",
-        border: `1px solid ${project.isActive ? "var(--color-primary)" : "var(--color-border)"}`,
-        cursor: project.isArchived ? "default" : "pointer",
-        opacity: project.isArchived ? 0.75 : 1,
-        transition: "all 150ms ease",
+      role={isClickable ? "button" : undefined}
+      tabIndex={isClickable ? 0 : -1}
+      onKeyDown={(e) => {
+        if (!isClickable) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelectNamespace?.(project.id);
+          toast.success(`Switched to ${project.name}`);
+        }
       }}
       onClick={() => {
-        if (project.isArchived) return;
+        if (!isClickable) return;
         onSelectNamespace?.(project.id);
         toast.success(`Switched to ${project.name}`);
       }}
-      onMouseEnter={(e) => {
-        if (!project.isActive && !project.isArchived) {
-          e.currentTarget.style.borderColor = "var(--color-foreground-subtle)";
-          e.currentTarget.style.transform = "translateY(-2px)";
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!project.isActive && !project.isArchived) {
-          e.currentTarget.style.borderColor = "var(--color-border)";
-          e.currentTarget.style.transform = "translateY(0)";
-        }
-      }}
+      className={cn(
+        "group rounded-xl border p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors transition-shadow duration-200 motion-reduce:transition-none",
+        project.isActive
+          ? "border-primary/40 bg-primary/5"
+          : "border-border bg-background",
+        project.isArchived
+          ? "cursor-default opacity-75"
+          : "cursor-pointer hover:border-foreground/20 hover:shadow-md"
+      )}
     >
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "12px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
           <div
-            style={{
-              width: "36px",
-              height: "36px",
-              borderRadius: "8px",
-              backgroundColor: project.isActive ? "var(--color-primary)" : "var(--color-background-muted)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+              project.isActive
+                ? "bg-primary text-white"
+                : "bg-background-muted text-foreground-muted"
+            )}
           >
-            <FolderOpen
-              style={{
-                width: "18px",
-                height: "18px",
-                color: project.isActive ? "white" : "var(--color-foreground-muted)",
-              }}
-            />
+            <FolderOpen className="h-[18px] w-[18px]" />
           </div>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-foreground)" }}>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-semibold text-foreground">
                 {project.name}
               </span>
               {project.isActive && (
-                <span
-                  style={{
-                    fontSize: "10px",
-                    fontWeight: 500,
-                    color: "var(--color-primary)",
-                    backgroundColor: "var(--color-primary-subtle)",
-                    padding: "2px 6px",
-                    borderRadius: "999px",
-                  }}
-                >
+                <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
                   Active
                 </span>
               )}
             </div>
-            <div
-              style={{
-                fontSize: "11px",
-                color: "var(--color-foreground-muted)",
-                fontFamily: "var(--font-mono)",
-                marginTop: "2px",
-              }}
-            >
+            <div className="mt-1 truncate font-mono text-[11px] text-foreground-muted">
               {project.path}
             </div>
           </div>
         </div>
 
-        <DropdownMenu
-          trigger={
-            <button
-              style={{
-                padding: "4px",
-                borderRadius: "4px",
-                border: "none",
-                backgroundColor: "transparent",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-lg"
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
             >
-              <ExternalLink style={{ width: "14px", height: "14px", color: "var(--color-foreground-subtle)" }} />
-            </button>
-          }
-	          items={menuItems}
-	        />
+              <ExternalLink className="h-4 w-4 text-foreground-subtle" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            {menuItems.map((item, index) => {
+              if ("type" in item && item.type === "separator") {
+                return <DropdownMenuSeparator key={`sep-${index}`} />
+              }
+
+              return (
+                <DropdownMenuItem
+                  key={item.label}
+                  disabled={item.disabled}
+                  onSelect={() => item.onClick()}
+                  className={cn(
+                    "gap-2",
+                    item.danger && "text-status-fail focus:text-status-fail"
+                  )}
+                >
+                  <span className="flex h-4 w-4 items-center justify-center">
+                    {item.icon}
+                  </span>
+                  {item.label}
+                </DropdownMenuItem>
+              )
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
-      {/* Stats */}
-      <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "12px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-          <CheckCircle2 style={{ width: "12px", height: "12px", color: "var(--color-status-ok)" }} />
-          <span style={{ fontSize: "12px", color: "var(--color-foreground-muted)" }}>
+      <div className="mb-3 flex items-center gap-4 text-xs text-foreground-muted">
+        <div className="flex items-center gap-1.5">
+          <CheckCircle2 className="h-3.5 w-3.5 text-status-ok" />
+          <span className="tabular-nums">
             {project.completedCount} / {project.taskCount}
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-          <Clock style={{ width: "12px", height: "12px", color: "var(--color-foreground-subtle)" }} />
-          <span style={{ fontSize: "12px", color: "var(--color-foreground-muted)" }}>
-            {formatDate(project.lastOpened)}
-          </span>
+        <div className="flex items-center gap-1.5">
+          <Clock className="h-3.5 w-3.5 text-foreground-subtle" />
+          <span>{formatDate(project.lastOpened)}</span>
         </div>
       </div>
 
-      {/* Progress */}
-      <div
-        style={{
-          height: "4px",
-          backgroundColor: "var(--color-background-muted)",
-          borderRadius: "999px",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            width: `${progress}%`,
-            height: "100%",
-            backgroundColor: progress === 100 ? "var(--color-status-ok)" : "var(--color-primary)",
-            borderRadius: "999px",
-            transition: "width 300ms ease",
-          }}
-        />
-      </div>
+      <ProgressBar value={progress} max={100} size="sm" />
     </div>
   );
 }

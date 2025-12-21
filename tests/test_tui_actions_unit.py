@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from core.desktop.devtools.interface import tui_actions
+from core.desktop.devtools.interface.tui_detail_tree import DetailNodeEntry
 
 
 def test_activate_settings_option_disabled(monkeypatch):
@@ -87,6 +88,99 @@ def test_activate_settings_option_toggle_sync(monkeypatch):
     assert state["desired"] is True and state["render"]
 
 
+def test_delete_current_item_project_allows_deleting_active_project(tmp_path, monkeypatch):
+    root = tmp_path / "projects_root"
+    root.mkdir()
+    active = root / "Owner_repo"
+    active.mkdir()
+    (active / "TASK-001.task").write_text("id: TASK-001\n", encoding="utf-8")
+
+    # Avoid heavy TaskManager init in unit test.
+    monkeypatch.setattr(tui_actions, "TaskManager", lambda p: SimpleNamespace())
+
+    calls = {}
+
+    class TUI(SimpleNamespace):
+        def __init__(self):
+            proj = SimpleNamespace(id="Owner_repo", name="repo", task_file=str(active))
+            super().__init__(
+                project_mode=True,
+                detail_mode=False,
+                tasks=[proj],
+                filtered_tasks=[proj],
+                selected_index=0,
+                projects_root=root,
+                tasks_dir=active,
+                manager=SimpleNamespace(),
+                last_project_index=0,
+                last_project_id=None,
+                last_project_name=None,
+            )
+
+        def set_status_message(self, msg, ttl=0):
+            calls["status"] = msg
+
+        def load_projects(self):
+            # After deletion, projects list is empty in this unit test.
+            self.tasks = []
+            self.filtered_tasks = []
+
+        def _ensure_selection_visible(self):
+            return None
+
+        def force_render(self):
+            calls["render"] = True
+
+    tui = TUI()
+    tui_actions.delete_current_item(tui)
+    assert not active.exists()
+    assert "Проект удален" in calls.get("status", "")
+    assert calls.get("render") is True
+
+
+def test_delete_current_item_project_unlinks_symlink_only(tmp_path, monkeypatch):
+    root = tmp_path / "projects_root"
+    root.mkdir()
+    outside = tmp_path / "outside_target"
+    outside.mkdir()
+    link = root / "LinkProj"
+    link.symlink_to(outside, target_is_directory=True)
+
+    monkeypatch.setattr(tui_actions, "TaskManager", lambda p: SimpleNamespace())
+
+    class TUI(SimpleNamespace):
+        def __init__(self):
+            proj = SimpleNamespace(id="LinkProj", name="LinkProj", task_file=str(link))
+            super().__init__(
+                project_mode=True,
+                detail_mode=False,
+                tasks=[proj],
+                filtered_tasks=[proj],
+                selected_index=0,
+                projects_root=root,
+                tasks_dir=root / ".scratch",
+                manager=SimpleNamespace(),
+            )
+
+        def set_status_message(self, msg, ttl=0):
+            self.msg = msg
+
+        def load_projects(self):
+            self.tasks = []
+            self.filtered_tasks = []
+
+        def _ensure_selection_visible(self):
+            return None
+
+        def force_render(self):
+            return None
+
+    tui = TUI()
+    tui_actions.delete_current_item(tui)
+    assert not link.exists()
+    assert outside.exists(), "Deleting project symlink must not delete the target directory"
+
+
 def test_delete_current_item_list():
     calls = {}
 
@@ -143,29 +237,42 @@ def test_delete_current_item_list_fails():
 def test_delete_current_item_detail():
     class Manager:
         def __init__(self):
-            self.saved = None
+            self.deleted = None
 
-        def save_task(self, task):
-            self.saved = task
+        def delete_task_node(self, task_id, path, domain=""):
+            self.deleted = (task_id, path, domain)
+            return True, None, None
 
-    parent = SimpleNamespace(children=[], title="p")
-    child = SimpleNamespace(children=[], title="c")
-    parent.children.append(child)
-    detail = SimpleNamespace(id="T1", subtasks=[parent])
+        def load_task(self, task_id, domain="", skip_sync=False):
+            return detail
+
+    parent = SimpleNamespace(steps=[], title="p")
+    child = SimpleNamespace(steps=[], title="c")
+    parent.steps.append(child)
+    detail = SimpleNamespace(id="T1", steps=[parent])
 
     class TUI(SimpleNamespace):
         def __init__(self):
+            entry = DetailNodeEntry(
+                key="s:0.t:0",
+                kind="task",
+                node=child,
+                level=0,
+                collapsed=False,
+                has_children=False,
+                parent_key=None,
+            )
             super().__init__(
                 detail_mode=True,
                 current_task_detail=detail,
                 detail_selected_index=0,
-                detail_flat_subtasks=[("0.0", child)],
+                detail_flat_subtasks=[entry],
                 manager=Manager(),
                 task_details_cache={},
             )
 
         def _selected_subtask_entry(self):
-            return ("0.0", child, None, None, None)
+            return self.detail_flat_subtasks[0]
 
         def _rebuild_detail_flat(self):
             self.detail_flat_subtasks = []
@@ -175,7 +282,7 @@ def test_delete_current_item_detail():
 
     tui = TUI()
     tui_actions.delete_current_item(tui)
-    assert tui.manager.saved is detail
+    assert tui.manager.deleted == ("T1", "s:0.t:0", "")
     assert tui.loaded == (True, True)
 
 
@@ -183,25 +290,38 @@ def test_delete_current_item_detail_parent_none_updates_cache():
     cache = {}
 
     class Manager:
-        def save_task(self, task):
-            cache["saved"] = True
+        def delete_step_node(self, task_id, path, domain=""):
+            cache["deleted"] = (task_id, path, domain)
+            return True, None, None
 
-    sub = SimpleNamespace(children=[], title="solo")
-    detail = SimpleNamespace(id="T1", subtasks=[sub])
+        def load_task(self, task_id, domain="", skip_sync=False):
+            return detail
+
+    sub = SimpleNamespace(steps=[], title="solo")
+    detail = SimpleNamespace(id="T1", steps=[sub])
 
     class TUI(SimpleNamespace):
         def __init__(self):
+            entry = DetailNodeEntry(
+                key="s:0",
+                kind="step",
+                node=sub,
+                level=0,
+                collapsed=False,
+                has_children=False,
+                parent_key=None,
+            )
             super().__init__(
                 detail_mode=True,
                 current_task_detail=detail,
                 detail_selected_index=0,
-                detail_flat_subtasks=[("0", sub)],
+                detail_flat_subtasks=[entry],
                 manager=Manager(),
                 task_details_cache=cache,
             )
 
         def _selected_subtask_entry(self):
-            return ("0", sub, None, None, None)
+            return self.detail_flat_subtasks[0]
 
         def _rebuild_detail_flat(self):
             self.detail_flat_subtasks = []
@@ -210,16 +330,25 @@ def test_delete_current_item_detail_parent_none_updates_cache():
             cache["loaded"] = (preserve_selection, skip_sync)
 
     tui_actions.delete_current_item(TUI())
-    assert cache["saved"] and cache["loaded"] == (True, True)
+    assert cache["deleted"] == ("T1", "s:0", "")
+    assert cache["loaded"] == (True, True)
 
 
 def test_delete_current_item_detail_missing_target(monkeypatch):
     class TUI(SimpleNamespace):
         def __init__(self):
-            super().__init__(detail_mode=True, current_task_detail=SimpleNamespace(subtasks=[]))
+            super().__init__(detail_mode=True, current_task_detail=SimpleNamespace(steps=[]))
 
         def _selected_subtask_entry(self):
-            return ("bad", None, None, None, None)
+            return DetailNodeEntry(
+                key="bad",
+                kind="step",
+                node=None,
+                level=0,
+                collapsed=False,
+                has_children=False,
+                parent_key=None,
+            )
 
     assert tui_actions.delete_current_item(TUI()) is None
 
@@ -228,25 +357,37 @@ def test_delete_current_item_detail_updates_cache_entry():
     cache = {"ID": "old"}
 
     class Manager:
-        def save_task(self, task):
-            pass
+        def delete_step_node(self, task_id, path, domain=""):
+            return True, None, None
 
-    st = SimpleNamespace(children=[], title="solo")
-    detail = SimpleNamespace(id="ID", subtasks=[st])
+        def load_task(self, task_id, domain="", skip_sync=False):
+            return detail
+
+    st = SimpleNamespace(steps=[], title="solo")
+    detail = SimpleNamespace(id="ID", steps=[st])
 
     class TUI(SimpleNamespace):
         def __init__(self):
+            entry = DetailNodeEntry(
+                key="s:0",
+                kind="step",
+                node=st,
+                level=0,
+                collapsed=False,
+                has_children=False,
+                parent_key=None,
+            )
             super().__init__(
                 detail_mode=True,
                 current_task_detail=detail,
                 detail_selected_index=0,
-                detail_flat_subtasks=[("0", st)],
+                detail_flat_subtasks=[entry],
                 manager=Manager(),
                 task_details_cache=cache,
             )
 
         def _selected_subtask_entry(self):
-            return ("0", st, None, None, None)
+            return self.detail_flat_subtasks[0]
 
         def _rebuild_detail_flat(self):
             self.detail_flat_subtasks = []

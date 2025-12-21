@@ -18,6 +18,7 @@ THEMES: Dict[str, Dict[str, str]] = {
         "text.dimmer": "#6d717a",
         "text.cont": "#8d95a0",  # заметно темнее для продолжений
         "selected": "bg:#3b3b3b #d7dfe6 bold",  # мягкий серый селект для моно-режима
+        "selected.mark": "bg:#3b3b3b",
         "selected.ok": "bg:#3b3b3b #9ad974 bold",
         "selected.warn": "bg:#3b3b3b #f0c674 bold",
         "selected.fail": "bg:#3b3b3b #ff6b6b bold",
@@ -39,6 +40,7 @@ THEMES: Dict[str, Dict[str, str]] = {
         "text.dimmer": "#6f757d",
         "text.cont": "#939aa4",
         "selected": "bg:#3d4047 #e8eaec bold",  # мягкий серый селект для моно-режима
+        "selected.mark": "bg:#3d4047",
         "selected.ok": "bg:#3d4047 #b8f171 bold",
         "selected.warn": "bg:#3d4047 #f0c674 bold",
         "selected.fail": "bg:#3d4047 #ff6b6b bold",

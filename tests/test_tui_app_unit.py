@@ -9,7 +9,6 @@ from types import SimpleNamespace
 
 from core import Status, TaskDetail
 from core.desktop.devtools.interface.tui_app import TaskTrackerTUI
-from core.desktop.devtools.interface import cli_history
 from core.desktop.devtools.interface.tui_models import Task
 
 
@@ -65,7 +64,9 @@ class TestTaskTrackerTUIInstanceMethods:
         """Create a TaskTrackerTUI instance for testing."""
         tasks_dir = tmp_path / ".tasks"
         tasks_dir.mkdir()
-        return TaskTrackerTUI(tasks_dir=tasks_dir)
+        projects_root = tmp_path / "projects_root"
+        projects_root.mkdir()
+        return TaskTrackerTUI(tasks_dir=tasks_dir, projects_root=projects_root)
 
     def test_current_description_snippet_with_detail(self, tui):
         """Test _current_description_snippet with task detail."""
@@ -163,7 +164,9 @@ class TestTaskTrackerTUIInstanceMethods:
 
     def test_constructor_uses_injected_tasks_dir_if_given(self, tmp_path):
         custom = tmp_path / "custom_tasks"
-        tui = TaskTrackerTUI(tasks_dir=custom)
+        projects_root = tmp_path / "projects_root"
+        projects_root.mkdir()
+        tui = TaskTrackerTUI(tasks_dir=custom, projects_root=projects_root)
         assert tui.tasks_dir.resolve() == custom.resolve()
 
     def test_delete_project_removes_directory(self, tmp_path):
@@ -173,7 +176,15 @@ class TestTaskTrackerTUIInstanceMethods:
         proj1.mkdir(parents=True)
         proj2.mkdir(parents=True)
 
-        tui = TaskTrackerTUI(tasks_dir=tmp_path / "default_tasks", projects_root=projects_root)
+        for p in (proj1, proj2):
+            (p / "TASK-001.task").write_text(
+                TaskDetail(id="TASK-001", title="t", status="TODO", created="", updated="").to_file_content(),
+                encoding="utf-8",
+            )
+
+        tasks_dir = tmp_path / "default_tasks"
+        tasks_dir.mkdir(parents=True)
+        tui = TaskTrackerTUI(tasks_dir=tasks_dir, projects_root=projects_root)
 
         assert len(tui.tasks) == 2
         assert proj1.exists()
@@ -185,6 +196,39 @@ class TestTaskTrackerTUIInstanceMethods:
         assert len(tui.tasks) == 1
         assert tui.tasks[0].name == "proj2"
 
+    def test_confirm_delete_project_requires_confirmation(self, tmp_path):
+        projects_root = tmp_path / "projects"
+        proj1 = projects_root / "proj1"
+        proj2 = projects_root / "proj2"
+        proj1.mkdir(parents=True)
+        proj2.mkdir(parents=True)
+        for p in (proj1, proj2):
+            (p / "TASK-001.task").write_text(
+                TaskDetail(id="TASK-001", title="t", status="TODO", created="", updated="").to_file_content(),
+                encoding="utf-8",
+            )
+
+        tasks_dir = tmp_path / "default_tasks"
+        tasks_dir.mkdir(parents=True)
+
+        tui = TaskTrackerTUI(tasks_dir=tasks_dir, projects_root=projects_root)
+        assert tui.project_mode is True
+        assert [p.name for p in tui.tasks] == ["proj1", "proj2"]
+
+        tui.selected_index = 0
+        tui.confirm_delete_current_item()
+        assert tui.confirm_mode is True
+        assert "proj1" in " ".join(tui.confirm_lines)
+
+        tui._confirm_cancel()
+        assert tui.confirm_mode is False
+        assert proj1.exists()
+
+        tui.confirm_delete_current_item()
+        tui._confirm_accept()
+        assert not proj1.exists()
+        assert [p.name for p in tui.tasks] == ["proj2"]
+
     def test_return_to_projects_keeps_selection(self, tmp_path):
         projects_root = tmp_path / "projects"
         proj1 = projects_root / "proj1"
@@ -192,7 +236,15 @@ class TestTaskTrackerTUIInstanceMethods:
         proj1.mkdir(parents=True)
         proj2.mkdir(parents=True)
 
-        tui = TaskTrackerTUI(tasks_dir=tmp_path / "default_tasks", projects_root=projects_root)
+        for p in (proj1, proj2):
+            (p / "TASK-001.task").write_text(
+                TaskDetail(id="TASK-001", title="t", status="TODO", created="", updated="").to_file_content(),
+                encoding="utf-8",
+            )
+
+        tasks_dir = tmp_path / "default_tasks"
+        tasks_dir.mkdir(parents=True)
+        tui = TaskTrackerTUI(tasks_dir=tasks_dir, projects_root=projects_root)
         assert [p.name for p in tui.tasks] == ["proj1", "proj2"]
 
         tui.selected_index = 1
@@ -222,6 +274,165 @@ class TestTaskTrackerTUIInstanceMethods:
         result = tui._format_cell("test", 10, "center")
         assert result == "   test   "
         assert len(result) == 10
+
+    def test_filtered_tasks_search_filters_projects_by_name(self, tmp_path):
+        projects_root = tmp_path / "projects"
+        projects_root.mkdir()
+        tasks_dir = tmp_path / "default_tasks"
+        tasks_dir.mkdir(parents=True)
+        tui = TaskTrackerTUI(tasks_dir=tasks_dir, projects_root=projects_root)
+
+        tui.project_mode = True
+        tui.current_filter = None
+        tui.tasks = [
+            Task(id="proj-a", name="Alpha Project", status=Status.TODO, description="", category="project"),
+            Task(id="proj-b", name="Beta", status=Status.TODO, description="", category="project"),
+        ]
+
+        tui.search_query = "alp"
+        assert [t.name for t in tui.filtered_tasks] == ["Alpha Project"]
+
+    def test_filtered_tasks_search_filters_tasks_by_id_title_domain_and_tags(self, tmp_path):
+        projects_root = tmp_path / "projects"
+        projects_root.mkdir()
+        tasks_dir = tmp_path / "default_tasks"
+        tasks_dir.mkdir(parents=True)
+        tui = TaskTrackerTUI(tasks_dir=tasks_dir, projects_root=projects_root)
+
+        tui.project_mode = False
+        tui.current_filter = None
+        a = TaskDetail(id="TASK-001", title="Alpha", status="TODO", domain="dom/a", tags=["backend"], created="", updated="")
+        b = TaskDetail(id="TASK-002", title="Beta", status="TODO", domain="dom/b", tags=["frontend"], created="", updated="")
+        tui.tasks = [
+            Task(id="TASK-001", name="Alpha", status=Status.TODO, description="", category="", detail=a, domain=a.domain),
+            Task(id="TASK-002", name="Beta", status=Status.TODO, description="", category="", detail=b, domain=b.domain),
+        ]
+
+        tui.search_query = "TASK-002"
+        assert [t.id for t in tui.filtered_tasks] == ["TASK-002"]
+
+        tui.search_query = "dom/a"
+        assert [t.id for t in tui.filtered_tasks] == ["TASK-001"]
+
+        tui.search_query = "backend"
+        assert [t.id for t in tui.filtered_tasks] == ["TASK-001"]
+
+        tui.search_query = "alpha backend"
+        assert [t.id for t in tui.filtered_tasks] == ["TASK-001"]
+
+    def test_cycle_detail_tab_cycles_through_tabs(self, tui):
+        detail = TaskDetail(id="TASK-001", title="T", status="ACTIVE", domain="dom/a", created="", updated="")
+        tui.current_task_detail = detail
+        tui.detail_mode = True
+
+        tui.detail_tab = "overview"
+        tui.cycle_detail_tab(1)
+        assert tui.detail_tab == "plan"
+        tui.cycle_detail_tab(1)
+        assert tui.detail_tab == "contract"
+        tui.cycle_detail_tab(1)
+        assert tui.detail_tab == "notes"
+        tui.cycle_detail_tab(1)
+        assert tui.detail_tab == "meta"
+        tui.cycle_detail_tab(1)
+        assert tui.detail_tab == "overview"
+
+    def test_show_task_details_sets_overview_tab_for_plan(self, tmp_path):
+        tasks_dir = tmp_path / ".tasks"
+        tasks_dir.mkdir()
+        tui = TaskTrackerTUI(tasks_dir=tasks_dir)
+        tui.project_mode = False
+        tui.project_section = "plans"
+        plan_detail = TaskDetail(id="PLAN-001", title="Plan", status="TODO", kind="plan", created="", updated="")
+        task = Task(id="PLAN-001", name="Plan", status=Status.TODO, description="", category="plan", detail=plan_detail)
+
+        tui.show_task_details(task)
+        assert tui.detail_tab == "overview"
+
+    def test_move_vertical_selection_scrolls_in_non_overview_detail_tabs(self, tui):
+        detail = TaskDetail(id="TASK-001", title="T", status="ACTIVE", domain="dom/a", created="", updated="")
+        tui.current_task_detail = detail
+        tui.detail_mode = True
+        tui.detail_tab = "contract"
+        tui.detail_tab_scroll_offsets["contract"] = 0
+
+        tui.move_vertical_selection(2)
+        assert tui.detail_tab_scroll_offsets["contract"] == 2
+
+    def test_toggle_task_completion_cycles_without_force(self, tui, monkeypatch):
+        calls = {}
+
+        class Manager:
+            def update_task_status(self, task_id, status, domain="", force=False):
+                calls["args"] = (task_id, status, domain, force)
+                return True, None
+
+        tui.project_mode = False
+        tui.current_filter = None
+        tui.search_query = ""
+        tui.manager = Manager()
+        tui.tasks = [Task(id="TASK-001", name="Alpha", status=Status.TODO, description="", category="", domain="dom/a")]
+        tui.selected_index = 0
+        monkeypatch.setattr(tui, "load_tasks", lambda preserve_selection=False, skip_sync=False, **k: calls.setdefault("loaded", (preserve_selection, skip_sync)))
+        monkeypatch.setattr(tui, "set_status_message", lambda msg, ttl=0: calls.setdefault("status", msg))
+        monkeypatch.setattr(tui, "force_render", lambda: None)
+
+        tui.toggle_task_completion()
+        assert calls["args"] == ("TASK-001", "ACTIVE", "dom/a", False)
+
+        # ACTIVE -> DONE
+        calls.clear()
+        tui.tasks[0].status = Status.ACTIVE
+        tui.toggle_task_completion()
+        assert calls["args"] == ("TASK-001", "DONE", "dom/a", False)
+
+        # DONE -> ACTIVE
+        calls.clear()
+        tui.tasks[0].status = Status.DONE
+        tui.toggle_task_completion()
+        assert calls["args"] == ("TASK-001", "ACTIVE", "dom/a", False)
+
+    def test_toggle_task_completion_done_failure_opens_details(self, tui, monkeypatch):
+        calls = {"details": 0}
+
+        class Manager:
+            def update_task_status(self, task_id, status, domain="", force=False):
+                return False, {"message": "blocked"}
+
+        tui.project_mode = False
+        tui.current_filter = None
+        tui.search_query = ""
+        tui.manager = Manager()
+        tui.tasks = [Task(id="TASK-001", name="Alpha", status=Status.ACTIVE, description="", category="", domain="dom/a")]
+        tui.selected_index = 0
+        monkeypatch.setattr(tui, "set_status_message", lambda msg, ttl=0: calls.setdefault("status", msg))
+        monkeypatch.setattr(tui, "show_task_details", lambda task: calls.__setitem__("details", calls["details"] + 1))
+
+        tui.toggle_task_completion()
+        assert calls["status"] == "blocked"
+        assert calls["details"] == 1
+
+    def test_apply_subtask_completion_respects_checkpoints_by_default(self, tui, monkeypatch):
+        calls = {}
+
+        class Manager:
+            def set_step_completed(self, task_id, index, completed, domain="", path=None, force=False):
+                calls["args"] = (task_id, index, completed, domain, path, force)
+                return False, "needs checkpoints"
+
+        detail = TaskDetail(id="TASK-001", title="T", status="ACTIVE", domain="dom/a", created="", updated="")
+        tui.current_task_detail = detail
+        tui.detail_mode = True
+        tui.navigation_stack = []
+        tui.manager = Manager()
+        st = SimpleNamespace(criteria_confirmed=False, tests_confirmed=False, tests_auto_confirmed=False)
+
+        monkeypatch.setattr(tui, "set_status_message", lambda msg, ttl=0: calls.setdefault("status", msg))
+        tui._apply_subtask_completion(path="0", desired=True, force=False, subtask_hint=st)
+
+        assert calls["args"] == ("TASK-001", 0, True, "dom/a", "0", False)
+        assert calls["status"] == "needs checkpoints"
+        assert tui.checkpoint_mode is True
 
     def test_format_cell_truncates(self, tui):
         """Test _format_cell truncates long content."""

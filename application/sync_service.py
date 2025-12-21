@@ -6,10 +6,10 @@ class SyncService(Protocol):
     enabled: bool
     config: Any
 
-    def sync_task(self, task: TaskDetail) -> bool:
+    def sync_step(self, step: TaskDetail) -> bool:
         ...
 
-    def pull_task_fields(self, task: TaskDetail) -> None:
+    def pull_step_fields(self, step: TaskDetail) -> None:
         ...
 
     def clone(self) -> "SyncService":

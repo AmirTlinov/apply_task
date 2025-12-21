@@ -2,6 +2,8 @@
  * Skeleton loading components for perceived performance
  */
 
+import { cn } from "@/lib/utils";
+
 interface SkeletonProps {
   width?: string | number;
   height?: string | number;
@@ -17,7 +19,7 @@ export function Skeleton({
 }: SkeletonProps) {
   return (
     <div
-      className={`skeleton ${className}`}
+      className={cn("skeleton", className)}
       style={{
         width: width ?? "100%",
         height,
@@ -33,22 +35,10 @@ export function Skeleton({
 export function TaskCardSkeleton() {
   return (
     <div
-      style={{
-        padding: "16px",
-        border: "1px solid var(--color-border)",
-        borderRadius: "12px",
-        backgroundColor: "var(--color-background)",
-      }}
+      className="rounded-xl border border-border bg-background p-4"
     >
       {/* Header: ID, Status, Updated */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: "10px",
-        }}
-      >
+      <div className="mb-2.5 flex items-center justify-between">
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <Skeleton width={60} height={22} borderRadius={6} />
           <Skeleton width={50} height={22} borderRadius={999} />
@@ -61,26 +51,13 @@ export function TaskCardSkeleton() {
       <Skeleton width="70%" height={20} />
 
       {/* Tags */}
-      <div
-        style={{
-          display: "flex",
-          gap: "6px",
-          margin: "14px 0",
-        }}
-      >
+      <div className="my-3.5 flex gap-1.5">
         <Skeleton width={50} height={22} borderRadius={6} />
         <Skeleton width={60} height={22} borderRadius={6} />
       </div>
 
       {/* Footer */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingTop: "4px",
-        }}
-      >
+      <div className="flex items-center justify-between pt-1">
         <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
           <Skeleton width={140} height={5} borderRadius={999} />
           <Skeleton width={40} height={16} />
@@ -96,13 +73,7 @@ export function TaskCardSkeleton() {
  */
 export function TaskListSkeleton({ count = 3 }: { count?: number }) {
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-        gap: "16px",
-      }}
-    >
+    <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))]">
       {Array.from({ length: count }).map((_, i) => (
         <TaskCardSkeleton key={i} />
       ))}
@@ -115,14 +86,7 @@ export function TaskListSkeleton({ count = 3 }: { count?: number }) {
  */
 export function SidebarSkeleton() {
   return (
-    <div
-      style={{
-        padding: "12px 8px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "4px",
-      }}
-    >
+    <div className="flex flex-col gap-1 p-3">
       {Array.from({ length: 5 }).map((_, i) => (
         <Skeleton key={i} height={40} borderRadius={8} />
       ))}
@@ -135,15 +99,7 @@ export function SidebarSkeleton() {
  */
 export function HeaderSkeleton() {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "0 24px",
-        height: "64px",
-      }}
-    >
+    <div className="flex min-h-[var(--density-header-min-h)] items-center justify-between px-[var(--density-shell-px)]">
       <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
         <Skeleton width={100} height={28} />
         <Skeleton width={60} height={20} borderRadius={999} />

@@ -15,9 +15,9 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
         outline: "text-foreground",
-        status_ok: "border-transparent bg-status-ok-subtle text-status-ok hover:bg-status-ok-subtle/80",
-        status_warn: "border-transparent bg-status-warn-subtle text-status-warn hover:bg-status-warn-subtle/80",
-        status_fail: "border-transparent bg-status-fail-subtle text-status-fail hover:bg-status-fail-subtle/80",
+        status_ok: "border-transparent bg-status-ok/10 text-status-ok hover:bg-status-ok/15",
+        status_warn: "border-transparent bg-status-warn/10 text-status-warn hover:bg-status-warn/15",
+        status_fail: "border-transparent bg-status-fail/10 text-status-fail hover:bg-status-fail/15",
         mono: "border-transparent bg-background-muted text-foreground-muted",
       },
     },
@@ -37,4 +37,4 @@ function Badge({ className, variant, ...props }: BadgeProps) {
   )
 }
 
-export { Badge, badgeVariants }
+export { Badge }

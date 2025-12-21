@@ -6,7 +6,7 @@
 import sys
 sys.path.insert(0, '.')
 
-from util.responsive import ResponsiveLayoutManager, ColumnLayout
+from util.responsive import ResponsiveLayoutManager, ColumnLayout, detail_content_width
 
 
 def test_layout_selection():
@@ -25,13 +25,15 @@ def test_layout_selection():
         assert cols[0] == 'idx'
         assert len(cols) >= prev_len  # ширина растёт — колонок не становится меньше
         if width >= 72:
-            assert 'subtasks' in cols
+            assert 'children' in cols
             assert 'progress' in cols
+            assert 'marks' in cols
         elif width >= 56:
             assert 'progress' in cols
-            assert 'subtasks' not in cols
+            assert 'marks' in cols
+            assert 'children' not in cols
         else:
-            assert cols == ['idx', 'stat', 'title']
+            assert cols == ['idx', 'id', 'title']
         prev_len = len(cols)
         status = "✓ OK"
         print(f"{width:<10} | {str(cols):<60} | {status}")
@@ -76,19 +78,13 @@ def test_detail_view_width():
     test_widths = [50, 60, 80, 100, 120, 150, 200, 250]
 
     for term_width in test_widths:
-        # Повторяем логику из get_detail_text
-        if term_width < 60:
-            content_width = max(40, term_width - 4)
-        elif term_width < 100:
-            content_width = term_width - 8
-        else:
-            content_width = min(int(term_width * 0.92), 160)
+        content_width = detail_content_width(term_width)
 
         utilization = (content_width / term_width) * 100
         print(f"{term_width:<10} | {content_width:<15} | {utilization:.1f}%")
-        assert content_width >= 40
+        assert content_width == max(0, term_width - 2)
         assert content_width <= term_width
-        assert utilization > 0
+        assert utilization > 90
 
     print("\n" + "="*80)
 

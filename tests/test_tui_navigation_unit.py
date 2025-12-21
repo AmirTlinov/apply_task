@@ -50,12 +50,12 @@ def test_move_vertical_selection_detail_mode_rebuild(monkeypatch):
     class TUI:
         detail_mode = True
         detail_flat_subtasks = []
-        current_task_detail = SimpleNamespace(subtasks=[1])
+        current_task_detail = SimpleNamespace(steps=[1])
         detail_selected_path = ""
         detail_selected_index = 0
 
         def _rebuild_detail_flat(self, path):
-            self.detail_flat_subtasks = [(0, None)]
+            self.detail_flat_subtasks = [SimpleNamespace(key="s:0")]
             calls["rebuilt"] = True
 
         def get_detail_items_count(self):
@@ -72,6 +72,31 @@ def test_move_vertical_selection_detail_mode_rebuild(monkeypatch):
 
     tui_navigation.move_vertical_selection(TUI(), 0)
     assert calls["rebuilt"] and calls["selected"] and calls["render"]
+
+
+def test_move_vertical_selection_detail_mode_plan_tasks():
+    calls = {}
+
+    class TUI:
+        detail_mode = True
+        detail_tab = "overview"
+        detail_selected_index = 0
+        detail_selected_task_id = None
+
+        def __init__(self):
+            self.current_task_detail = SimpleNamespace(kind="plan")
+
+        def _plan_detail_tasks(self):
+            return [SimpleNamespace(id="TASK-1"), SimpleNamespace(id="TASK-2")]
+
+        def force_render(self):
+            calls["render"] = True
+
+    tui = TUI()
+    tui_navigation.move_vertical_selection(tui, 1)
+    assert tui.detail_selected_index == 1
+    assert tui.detail_selected_task_id == "TASK-2"
+    assert calls["render"]
 
 
 def test_move_vertical_selection_detail_mode_no_items():

@@ -2,9 +2,12 @@ import { useState } from "react";
 import { CheckCircle2, Circle, ChevronRight, Check, Clock, Trash2 } from "lucide-react";
 import type { TaskListItem, TaskStatus } from "@/types/task";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { CheckpointMarks } from "@/components/common/CheckpointMarks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { TASK_STATUS_UI } from "@/lib/taskStatus";
+import { countStepTree } from "@/features/tasks/lib/stepCounts";
 
 interface TaskCardProps {
   task: TaskListItem;
@@ -13,12 +16,6 @@ interface TaskCardProps {
   onDelete?: () => void;
   isSelected?: boolean;
 }
-
-const statusConfig: Record<TaskStatus, { badge: string; dot: string }> = {
-  DONE: { badge: "outline", dot: "bg-status-done" },
-  ACTIVE: { badge: "outline", dot: "bg-status-active" },
-  TODO: { badge: "outline", dot: "bg-foreground/20" },
-};
 
 function formatRelativeTime(date: string): string {
   const now = new Date();
@@ -37,10 +34,14 @@ function formatRelativeTime(date: string): string {
 
 export function TaskCard({ task, onClick, onStatusChange, onDelete, isSelected = false }: TaskCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const config = statusConfig[task.status] || statusConfig.TODO;
+  const statusUi = TASK_STATUS_UI[task.status];
   const progress = task.progress || 0;
-  const allCompleted =
-    task.completed_count === task.subtask_count && task.subtask_count > 0;
+  const stepCounts = countStepTree(task.steps);
+  const stepsCount = stepCounts.total;
+  const completedSteps = stepCounts.done;
+  const allCompleted = stepsCount > 0 && completedSteps === stepsCount;
+  const criteriaOk = !!task.criteria_confirmed || !!task.criteria_auto_confirmed;
+  const testsOk = !!task.tests_confirmed || !!task.tests_auto_confirmed;
 
   const handleStatusChange = (e: React.MouseEvent, newStatus: TaskStatus) => {
     e.stopPropagation();
@@ -53,11 +54,11 @@ export function TaskCard({ task, onClick, onStatusChange, onDelete, isSelected =
     <>
       <div
         className={cn(
-          "group relative flex flex-col rounded-xl border p-4 transition-all duration-200 outline-none",
+          "group relative flex select-none flex-col rounded-xl border p-[var(--density-card-pad)] outline-none transition-colors transition-shadow duration-200 motion-reduce:transition-none",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
           isSelected
             ? "border-primary bg-primary-subtle shadow-[0_0_0_2px] shadow-primary"
-            : "border-border bg-card hover:-translate-y-0.5 hover:shadow-md cursor-pointer"
+            : "border-border bg-card hover:border-foreground/20 hover:shadow-md cursor-pointer"
         )}
         onClick={onClick}
         tabIndex={0}
@@ -72,7 +73,7 @@ export function TaskCard({ task, onClick, onStatusChange, onDelete, isSelected =
       >
         {/* Quick Actions - appear on hover OR focus-within */}
         {(onStatusChange || onDelete) && (
-          <div className="absolute top-3 right-3 z-10 hidden gap-1 rounded-lg bg-background/95 p-1.5 shadow-md backdrop-blur-sm group-hover:flex group-focus-within:flex animate-in fade-in zoom-in-95 duration-200">
+          <div className="absolute top-2 right-2 z-10 hidden gap-1 rounded-lg bg-background/95 p-1 shadow-md backdrop-blur-sm group-hover:flex group-focus-within:flex animate-in fade-in zoom-in-95 duration-200">
             {onStatusChange && (
               <>
                 <Button
@@ -113,12 +114,12 @@ export function TaskCard({ task, onClick, onStatusChange, onDelete, isSelected =
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-status-fail hover:bg-status-fail-subtle hover:text-status-fail"
+                  className="h-7 w-7 text-status-fail hover:bg-status-fail/10 hover:text-status-fail"
                   onClick={(e) => {
                     e.stopPropagation();
                     setShowDeleteConfirm(true);
                   }}
-                  title="Delete task"
+                  title="Delete step"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -128,55 +129,70 @@ export function TaskCard({ task, onClick, onStatusChange, onDelete, isSelected =
         )}
 
         {/* Header: ID, Status, Updated */}
-        <div className="mb-2.5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             {/* Task ID badge */}
-            <span className="rounded-md bg-background-muted px-2 py-0.5 font-mono text-[11px] font-medium text-foreground-muted tracking-wide">
+            <span
+              title={task.id}
+              className="max-w-[140px] truncate rounded-md bg-background-muted px-2 py-0.5 font-mono text-[11px] font-medium text-foreground-muted tracking-wide"
+            >
               {task.id}
             </span>
 
             {/* Status badge */}
-            <Badge variant={config.badge as any} className="gap-1.5 px-2.5 py-0.5 text-[10px] uppercase tracking-wider">
-              <span className={cn("h-1.5 w-1.5 rounded-full", config.dot)} />
+            <Badge
+              variant="outline"
+              className={cn(
+                "gap-1.5 border-transparent px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                statusUi.classes.bg,
+                statusUi.classes.text
+              )}
+            >
+              <span className={cn("h-1.5 w-1.5 rounded-full", statusUi.classes.dot)} />
               {task.status}
             </Badge>
           </div>
 
           {/* Timestamp */}
           {task.updated_at && (
-            <span className="text-[11px] text-foreground-subtle group-hover:opacity-0 transition-opacity duration-200">
+            <span className="shrink-0 text-[11px] text-foreground-subtle transition-opacity duration-200 group-hover:opacity-0">
               {formatRelativeTime(task.updated_at)}
             </span>
           )}
         </div>
 
         {/* Title */}
-        <h3 className="mb-2.5 text-[15px] font-medium leading-relaxed text-foreground line-clamp-2 tracking-tight">
+        <h3 className="mb-1.5 text-[14px] font-medium leading-snug text-foreground line-clamp-2 tracking-tight">
           {task.title}
         </h3>
 
         {/* Tags */}
         {task.tags && task.tags.length > 0 && (
-          <div className="mb-3.5 flex flex-wrap gap-1.5">
-            {task.tags.slice(0, 3).map((tag) => (
-              <Badge key={tag} variant="mono" className="font-normal px-2 py-0.5 text-[11px]">
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {task.tags.slice(0, 2).map((tag) => (
+              <Badge
+                key={tag}
+                variant="mono"
+                title={`#${tag}`}
+                className="max-w-[140px] truncate px-2 py-0.5 text-[11px] font-normal"
+              >
                 #{tag}
               </Badge>
             ))}
-            {task.tags.length > 3 && (
+            {task.tags.length > 2 && (
               <span className="px-1 text-[11px] text-foreground-subtle">
-                +{task.tags.length - 3}
+                +{task.tags.length - 2}
               </span>
             )}
           </div>
         )}
 
         {/* Footer: Progress & Subtasks */}
-        <div className="mt-auto flex items-center justify-between pt-1">
+        <div className="mt-auto flex items-center justify-between pt-0.5">
           <div className="flex flex-1 items-center gap-4">
             {/* Progress bar */}
-            <div className="flex flex-1 max-w-[140px] items-center gap-2.5">
-              <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-background-muted">
+            <div className="flex flex-1 max-w-[120px] items-center gap-2">
+              <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-background-muted">
                 <div
                   className={cn(
                     "h-full w-full flex-1 rounded-full transition-all duration-500 ease-out",
@@ -193,6 +209,9 @@ export function TaskCard({ task, onClick, onStatusChange, onDelete, isSelected =
               </span>
             </div>
 
+            {/* Checkpoint marks */}
+            <CheckpointMarks criteriaOk={criteriaOk} testsOk={testsOk} />
+
             {/* Subtask count */}
             <div className={cn(
               "flex items-center gap-1.5 text-xs font-medium tabular-nums",
@@ -204,14 +223,14 @@ export function TaskCard({ task, onClick, onStatusChange, onDelete, isSelected =
                 <Circle className="h-3.5 w-3.5 opacity-60" />
               )}
               <span>
-                {task.completed_count}/{task.subtask_count}
+                {completedSteps}/{stepsCount}
               </span>
             </div>
           </div>
 
           {/* Domain badge */}
           {task.domain && (
-            <span className="ml-3 max-w-[90px] truncate text-[11px] text-foreground-subtle">
+            <span className="ml-3 max-w-[90px] truncate text-[11px] text-foreground-subtle opacity-0 transition-opacity duration-150 group-hover:opacity-100">
               {task.domain}
             </span>
           )}
@@ -225,7 +244,7 @@ export function TaskCard({ task, onClick, onStatusChange, onDelete, isSelected =
         <ConfirmDialog
           isOpen={showDeleteConfirm}
           title={`Delete task "${task.title}"?`}
-          description="This will permanently remove the task and all its subtasks."
+          description="This will permanently remove the task and all its steps."
           confirmLabel="Delete"
           cancelLabel="Cancel"
           danger

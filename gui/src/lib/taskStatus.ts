@@ -11,40 +11,40 @@ export const TASK_STATUS_UI: Record<
   DONE: {
     label: "DONE",
     colors: {
-      text: "var(--color-status-ok)",
-      bg: "var(--color-status-ok-subtle)",
-      dot: "var(--color-status-ok)",
+      text: "hsl(var(--status-ok))",
+      bg: "hsl(var(--status-ok) / 0.12)",
+      dot: "hsl(var(--status-ok))",
     },
     classes: {
-      bg: "bg-[var(--color-status-ok-subtle)]",
-      text: "text-[var(--color-status-ok)]",
-      dot: "bg-[var(--color-status-ok)]",
+      bg: "bg-status-ok/10",
+      text: "text-status-ok",
+      dot: "bg-status-ok",
     },
   },
   ACTIVE: {
     label: "ACTIVE",
     colors: {
-      text: "var(--color-primary)",
-      bg: "var(--color-primary-subtle)",
-      dot: "var(--color-primary)",
+      text: "hsl(var(--status-active))",
+      bg: "hsl(var(--status-active) / 0.12)",
+      dot: "hsl(var(--status-active))",
     },
     classes: {
-      bg: "bg-[var(--color-primary-subtle)]",
-      text: "text-[var(--color-primary)]",
-      dot: "bg-[var(--color-primary)]",
+      bg: "bg-status-active/10",
+      text: "text-status-active",
+      dot: "bg-status-active",
     },
   },
   TODO: {
     label: "TODO",
     colors: {
-      text: "var(--color-foreground-muted)",
-      bg: "var(--color-background-muted)",
-      dot: "var(--color-foreground-subtle)",
+      text: "hsl(var(--foreground))",
+      bg: "hsl(var(--background-muted))",
+      dot: "hsl(var(--foreground) / 0.35)",
     },
     classes: {
-      bg: "bg-[var(--color-background-muted)]",
-      text: "text-[var(--color-foreground-muted)]",
-      dot: "bg-[var(--color-foreground-subtle)]",
+      bg: "bg-background-muted",
+      text: "text-foreground",
+      dot: "bg-foreground/30",
     },
   },
 };

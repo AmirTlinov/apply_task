@@ -32,7 +32,7 @@ cfg=configparser.ConfigParser(); cfg.read('setup.cfg'); print(cfg['metadata']['v
 PY
           )
           /usr/bin/python -m pipx install --force dist/*.whl
-          PATH=/tmp/pipxbin:$PATH apply_task help
+          PATH=/tmp/pipxbin:$PATH apply_task --help
           PATH=/tmp/pipxbin:$PATH apply_task --version
           PATH=/tmp/pipxbin:$PATH apply_task tui --help || true
       - name: Zipapp

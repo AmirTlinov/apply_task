@@ -51,3 +51,42 @@ def set_user_lang(value: str) -> None:
     else:
         data.pop("lang", None)
     _save_config(data)
+
+
+def get_cleanup_done_tasks_ttl_seconds() -> int:
+    """Return retention window for auto-cleaning DONE tasks (0 = disabled)."""
+    data = _load_config()
+    cleanup = data.get("cleanup")
+    if not isinstance(cleanup, dict):
+        return 0
+    raw = cleanup.get("done_tasks_ttl_seconds", 0)
+    try:
+        value = int(raw)
+    except Exception:
+        return 0
+    return value if value > 0 else 0
+
+
+def set_cleanup_done_tasks_ttl_seconds(value: int) -> None:
+    """Set retention window for auto-cleaning DONE tasks (0/negative = disabled)."""
+    data = _load_config()
+    cleanup = data.get("cleanup")
+    if not isinstance(cleanup, dict):
+        cleanup = {}
+
+    try:
+        value_int = int(value)
+    except Exception:
+        value_int = 0
+
+    if value_int > 0:
+        cleanup["done_tasks_ttl_seconds"] = value_int
+        data["cleanup"] = cleanup
+    else:
+        cleanup.pop("done_tasks_ttl_seconds", None)
+        if cleanup:
+            data["cleanup"] = cleanup
+        else:
+            data.pop("cleanup", None)
+
+    _save_config(data)

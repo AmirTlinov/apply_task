@@ -8,11 +8,11 @@ build:
 zipapp:
 	rm -rf dist/pyz-src && mkdir -p dist/pyz-src
 	rsync -a --delete --exclude '.git' --exclude 'dist' --exclude '.tasks' --exclude '.tmp' --exclude '__pycache__' --exclude 'tests' ./ dist/pyz-src
-	$(PYTHON) -m zipapp dist/pyz-src -m "tasks:main" -o dist/apply_task-$(VERSION).pyz -p "/usr/bin/env python3" -c
+	$(PYTHON) -m zipapp dist/pyz-src -m "apply_task:main" -o dist/apply_task-$(VERSION).pyz -p "/usr/bin/env python3" -c
 
 smoke:
 	PIPX_HOME=/tmp/pipxhome PIPX_BIN_DIR=/tmp/pipxbin $(PIPX_BIN) install --force dist/apply_task-$(VERSION)-py3-none-any.whl
-	PATH=/tmp/pipxbin:$$PATH apply_task help
+	PATH=/tmp/pipxbin:$$PATH apply_task --help
 
 test:
 	pytest -q

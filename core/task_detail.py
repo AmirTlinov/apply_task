@@ -1,11 +1,13 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, TYPE_CHECKING
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional
+
 import yaml
 
-from .subtask import SubTask
-from .task_event import TaskEvent
+from .step import Step, _flatten_step_tree
+from .evidence import Attachment, VerificationCheck
+from .step_event import StepEvent
 
 
 @dataclass
@@ -13,12 +15,19 @@ class TaskDetail:
     id: str
     title: str
     status: str
+    kind: Literal["plan", "task"] = "task"
+    schema_version: int = 7
     status_manual: bool = False  # True when status was explicitly set by user and should not be auto-recalculated
     description: str = ""
     domain: str = ""
     phase: str = ""
     component: str = ""
-    parent: Optional[str] = None
+    parent: Optional[str] = None  # Parent id (PLAN-###) or None/ROOT for top-level plans
+    contract: str = ""
+    contract_versions: List[Dict[str, Any]] = field(default_factory=list)
+    plan_doc: str = ""
+    plan_steps: List[str] = field(default_factory=list)
+    plan_current: int = 0
     priority: str = "MEDIUM"
     created: str = ""
     updated: str = ""
@@ -29,11 +38,18 @@ class TaskDetail:
     blockers: List[str] = field(default_factory=list)
     context: str = ""
     success_criteria: List[str] = field(default_factory=list)
+    tests: List[str] = field(default_factory=list)
+    criteria_confirmed: bool = False
+    tests_confirmed: bool = False
+    criteria_auto_confirmed: bool = False  # Never auto - criteria always required
+    tests_auto_confirmed: bool = False     # Auto-OK if tests[] was empty
+    criteria_notes: List[str] = field(default_factory=list)
+    tests_notes: List[str] = field(default_factory=list)
     dependencies: List[str] = field(default_factory=list)
     next_steps: List[str] = field(default_factory=list)
     problems: List[str] = field(default_factory=list)
     risks: List[str] = field(default_factory=list)
-    subtasks: List[SubTask] = field(default_factory=list)
+    steps: List[Step] = field(default_factory=list)
     project_item_id: Optional[str] = None
     project_draft_id: Optional[str] = None
     project_remote_updated: Optional[str] = None
@@ -41,17 +57,20 @@ class TaskDetail:
     _source_path: Optional[str] = None
     _source_mtime: float = 0.0
     history: List[str] = field(default_factory=list)  # Legacy text history
-    events: List[TaskEvent] = field(default_factory=list)  # Structured event log
+    events: List[StepEvent] = field(default_factory=list)  # Structured event log
     depends_on: List[str] = field(default_factory=list)  # Task IDs this task depends on
+    attachments: List[Attachment] = field(default_factory=list)
 
     def calculate_progress(self) -> int:
-        def flatten(nodes):
-            out = []
-            for st in nodes:
-                out.append(st)
-                out.extend(flatten(st.children))
-            return out
-        flat = flatten(self.subtasks)
+        if getattr(self, "kind", "task") == "plan":
+            steps = list(getattr(self, "plan_steps", []) or [])
+            if not steps:
+                return int(self.progress or 0)
+            current = int(getattr(self, "plan_current", 0) or 0)
+            current = max(0, min(current, len(steps)))
+            return int((current / len(steps)) * 100)
+
+        flat = _flatten_step_tree(list(self.steps or []))
         if not flat:
             return self.progress
         completed = sum(1 for st in flat if st.completed)
@@ -88,13 +107,15 @@ class TaskDetail:
 
     def to_file_content(self) -> str:
         metadata = {
+            "schema_version": int(getattr(self, "schema_version", 6) or 6),
             "id": self.id,
+            "kind": getattr(self, "kind", "task"),
             "title": self.title,
             "status": self.status,
             "domain": self.domain or None,
             "phase": self.phase or None,
             "component": self.component or None,
-            "parent": self.parent,
+            "parent": (self.parent or None),
             "priority": self.priority,
             "created": self.created or self._now_iso(),
             "updated": self.updated or self._now_iso(),
@@ -104,7 +125,24 @@ class TaskDetail:
         }
         if self.blocked:
             metadata["blocked"] = True
+        if self.blockers:
             metadata["blockers"] = self.blockers
+        if self.success_criteria:
+            metadata["success_criteria"] = list(self.success_criteria)
+        if self.tests:
+            metadata["tests"] = list(self.tests)
+        if self.criteria_confirmed:
+            metadata["criteria_confirmed"] = True
+        if self.tests_confirmed:
+            metadata["tests_confirmed"] = True
+        if self.criteria_auto_confirmed:
+            metadata["criteria_auto_confirmed"] = True
+        if self.tests_auto_confirmed:
+            metadata["tests_auto_confirmed"] = True
+        if self.criteria_notes:
+            metadata["criteria_notes"] = list(self.criteria_notes)
+        if self.tests_notes:
+            metadata["tests_notes"] = list(self.tests_notes)
         if self.project_item_id:
             metadata["project_item_id"] = self.project_item_id
         if self.project_draft_id:
@@ -113,15 +151,126 @@ class TaskDetail:
             metadata["project_remote_updated"] = self.project_remote_updated
         if self.project_issue_number:
             metadata["project_issue_number"] = self.project_issue_number
-        subtask_ids = [st.project_item_id for st in self.subtasks]
-        if any(subtask_ids):
-            metadata["subtask_project_ids"] = subtask_ids
+        step_project_ids = [st.project_item_id for st in self.steps]
+        if any(step_project_ids):
+            metadata["step_project_ids"] = step_project_ids
         if self.status_manual:
             metadata["status_manual"] = True
         if self.depends_on:
             metadata["depends_on"] = self.depends_on
         if self.events:
             metadata["events"] = [e.to_dict() for e in self.events]
+        if self.attachments:
+            metadata["attachments"] = [a.to_dict() for a in list(self.attachments or [])]
+        if self.contract_versions:
+            metadata["contract_versions"] = self.contract_versions
+        if self.plan_steps:
+            metadata["plan_steps"] = self.plan_steps
+            metadata["plan_current"] = int(getattr(self, "plan_current", 0) or 0)
+        if self.steps:
+            def dump_plan(plan) -> Dict[str, Any]:
+                return {
+                    "title": getattr(plan, "title", "") or "",
+                    "doc": getattr(plan, "doc", "") or "",
+                    "attachments": [a.to_dict() for a in list(getattr(plan, "attachments", []) or [])],
+                    "success_criteria": list(getattr(plan, "success_criteria", []) or []),
+                    "tests": list(getattr(plan, "tests", []) or []),
+                    "blockers": list(getattr(plan, "blockers", []) or []),
+                    "criteria_confirmed": bool(getattr(plan, "criteria_confirmed", False)),
+                    "tests_confirmed": bool(getattr(plan, "tests_confirmed", False)),
+                    "criteria_auto_confirmed": bool(getattr(plan, "criteria_auto_confirmed", False)),
+                    "tests_auto_confirmed": bool(getattr(plan, "tests_auto_confirmed", False)),
+                    "criteria_notes": list(getattr(plan, "criteria_notes", []) or []),
+                    "tests_notes": list(getattr(plan, "tests_notes", []) or []),
+                    "steps": list(getattr(plan, "steps", []) or []),
+                    "current": int(getattr(plan, "current", 0) or 0),
+                    "tasks": [dump_task(t) for t in list(getattr(plan, "tasks", []) or [])],
+                }
+
+            def plan_has_content(plan) -> bool:
+                if plan is None:
+                    return False
+                if list(getattr(plan, "tasks", []) or []):
+                    return True
+                if str(getattr(plan, "title", "") or "").strip():
+                    return True
+                if str(getattr(plan, "doc", "") or "").strip():
+                    return True
+                if list(getattr(plan, "success_criteria", []) or []):
+                    return True
+                if list(getattr(plan, "tests", []) or []):
+                    return True
+                if list(getattr(plan, "blockers", []) or []):
+                    return True
+                if bool(getattr(plan, "criteria_confirmed", False)) or bool(getattr(plan, "tests_confirmed", False)):
+                    return True
+                if list(getattr(plan, "criteria_notes", []) or []):
+                    return True
+                if list(getattr(plan, "tests_notes", []) or []):
+                    return True
+                if list(getattr(plan, "steps", []) or []):
+                    return True
+                if int(getattr(plan, "current", 0) or 0) != 0:
+                    return True
+                return False
+
+            def dump_task(task) -> Dict[str, Any]:
+                return {
+                    "id": getattr(task, "id", "") or "",
+                    "title": getattr(task, "title", "") or "",
+                    "status": getattr(task, "status", "TODO") or "TODO",
+                    "priority": getattr(task, "priority", "MEDIUM") or "MEDIUM",
+                    "description": getattr(task, "description", "") or "",
+                    "context": getattr(task, "context", "") or "",
+                    "attachments": [a.to_dict() for a in list(getattr(task, "attachments", []) or [])],
+                    "success_criteria": list(getattr(task, "success_criteria", []) or []),
+                    "tests": list(getattr(task, "tests", []) or []),
+                    "criteria_confirmed": bool(getattr(task, "criteria_confirmed", False)),
+                    "tests_confirmed": bool(getattr(task, "tests_confirmed", False)),
+                    "criteria_auto_confirmed": bool(getattr(task, "criteria_auto_confirmed", False)),
+                    "tests_auto_confirmed": bool(getattr(task, "tests_auto_confirmed", False)),
+                    "criteria_notes": list(getattr(task, "criteria_notes", []) or []),
+                    "tests_notes": list(getattr(task, "tests_notes", []) or []),
+                    "dependencies": list(getattr(task, "dependencies", []) or []),
+                    "next_steps": list(getattr(task, "next_steps", []) or []),
+                    "problems": list(getattr(task, "problems", []) or []),
+                    "risks": list(getattr(task, "risks", []) or []),
+                    "blocked": bool(getattr(task, "blocked", False)),
+                    "blockers": list(getattr(task, "blockers", []) or []),
+                    "steps": [dump_step(st) for st in list(getattr(task, "steps", []) or [])],
+                    "status_manual": bool(getattr(task, "status_manual", False)),
+                }
+
+            def dump_step(st: Step) -> Dict[str, Any]:
+                data: Dict[str, Any] = {
+                    "id": getattr(st, "id", "") or "",
+                    "title": st.title,
+                    "completed": st.completed,
+                    "success_criteria": list(st.success_criteria),
+                    "tests": list(st.tests),
+                    "blockers": list(st.blockers),
+                    "attachments": [a.to_dict() for a in list(getattr(st, "attachments", []) or [])],
+                    "verification_checks": [c.to_dict() for c in list(getattr(st, "verification_checks", []) or [])],
+                    "verification_outcome": str(getattr(st, "verification_outcome", "") or ""),
+                    "criteria_confirmed": st.criteria_confirmed,
+                    "tests_confirmed": st.tests_confirmed,
+                    "criteria_auto_confirmed": getattr(st, "criteria_auto_confirmed", False),
+                    "tests_auto_confirmed": getattr(st, "tests_auto_confirmed", False),
+                    "criteria_notes": list(st.criteria_notes),
+                    "tests_notes": list(st.tests_notes),
+                    "created_at": getattr(st, "created_at", None),
+                    "completed_at": getattr(st, "completed_at", None),
+                    "progress_notes": list(getattr(st, "progress_notes", [])),
+                    "started_at": getattr(st, "started_at", None),
+                    "blocked": getattr(st, "blocked", False),
+                    "block_reason": getattr(st, "block_reason", ""),
+                }
+                plan = getattr(st, "plan", None)
+                if plan_has_content(plan):
+                    data["plan"] = dump_plan(plan)
+                return data
+
+            metadata["steps"] = [dump_step(st) for st in self.steps]
 
         lines = ["---", yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip(), "---", ""]
         lines.append(f"# {self.title}\n")
@@ -132,6 +281,14 @@ class TaskDetail:
                 lines.extend(content)
                 lines.append("")
 
+        if self.contract:
+            lines.append("## Контракт")
+            lines.append(self.contract)
+            lines.append("")
+        if self.plan_doc:
+            lines.append("## План")
+            lines.append(self.plan_doc)
+            lines.append("")
         if self.description:
             lines.append("## Описание")
             lines.append(self.description)
@@ -140,9 +297,10 @@ class TaskDetail:
             lines.append("## Контекст")
             lines.append(self.context)
             lines.append("")
-        if self.subtasks:
-            lines.append("## Подзадачи")
-            def dump_subtask(st: SubTask, indent: int = 0):
+        if self.steps:
+            lines.append("## Шаги")
+
+            def dump_step(st: Step, indent: int = 0):
                 pad = "  " * indent
                 lines.append(f"{pad}- [{'x' if st.completed else ' '}] {st.title}")
                 pad_detail = pad + "  "
@@ -152,18 +310,13 @@ class TaskDetail:
                     lines.append(f"{pad_detail}- Тесты: " + "; ".join(st.tests))
                 if st.blockers:
                     lines.append(f"{pad_detail}- Блокеры: " + "; ".join(st.blockers))
-                status_tokens = [
-                    f"Критерии={'OK' if st.criteria_confirmed else 'TODO'}",
-                    f"Тесты={'OK' if st.tests_confirmed else 'TODO'}",
-                    f"Блокеры={'OK' if st.blockers_resolved else 'TODO'}",
-                ]
+                tests_value = "OK" if st.tests_confirmed else ("AUTO" if st.tests_auto_confirmed else "TODO")
+                status_tokens = [f"Критерии={'OK' if st.criteria_confirmed else 'TODO'}", f"Тесты={tests_value}"]
                 lines.append(f"{pad_detail}- Чекпоинты: " + "; ".join(status_tokens))
                 if st.criteria_notes:
                     lines.append(f"{pad_detail}- Отметки критериев: " + "; ".join(st.criteria_notes))
                 if st.tests_notes:
                     lines.append(f"{pad_detail}- Отметки тестов: " + "; ".join(st.tests_notes))
-                if st.blockers_notes:
-                    lines.append(f"{pad_detail}- Отметки блокеров: " + "; ".join(st.blockers_notes))
                 # Phase 1 fields
                 if st.created_at:
                     lines.append(f"{pad_detail}- Создано: {st.created_at}")
@@ -179,14 +332,34 @@ class TaskDetail:
                         lines.append(f"{pad_detail}- Заблокировано: {block_value}; {st.block_reason}")
                     else:
                         lines.append(f"{pad_detail}- Заблокировано: {block_value}")
-                for child in st.children:
-                    dump_subtask(child, indent + 1)
-            for st in self.subtasks:
-                dump_subtask(st, 0)
+
+                plan = getattr(st, "plan", None)
+                if plan and getattr(plan, "tasks", None):
+                    lines.append(f"{pad_detail}- План:")
+                    for task in plan.tasks:
+                        task_label = f"{task.title}".strip() or "Untitled task"
+                        lines.append(f"{pad_detail}  - [TASK] {task_label} ({getattr(task, 'status', 'TODO')})")
+                        for child in list(getattr(task, "steps", []) or []):
+                            dump_step(child, indent + 2)
+
+            for st in self.steps:
+                dump_step(st, 0)
             lines.append("")
         add_section("Текущие проблемы", [f"{i + 1}. {p}" for i, p in enumerate(self.problems)])
         add_section("Следующие шаги", [f"- {s}" for s in self.next_steps])
         add_section("Критерии успеха", [f"- {c}" for c in self.success_criteria])
+        add_section("Тесты", [f"- {t}" for t in getattr(self, "tests", []) or []])
+        add_section("Блокеры", [f"- {b}" for b in self.blockers])
+        checkpoint_lines: List[str] = []
+        if self.success_criteria or getattr(self, "tests", None) is not None:
+            tests_value = "OK" if self.tests_confirmed else ("AUTO" if self.tests_auto_confirmed else "TODO")
+            checkpoint_lines.append(f"- Критерии={'OK' if self.criteria_confirmed else 'TODO'}")
+            checkpoint_lines.append(f"- Тесты={tests_value}")
+            if self.criteria_notes:
+                checkpoint_lines.append("- Отметки критериев: " + "; ".join(self.criteria_notes))
+            if self.tests_notes:
+                checkpoint_lines.append("- Отметки тестов: " + "; ".join(self.tests_notes))
+        add_section("Чекпоинты", checkpoint_lines)
         add_section("Зависимости", [f"- {d}" for d in self.dependencies])
         add_section("Риски", [f"- {r}" for r in self.risks])
         add_section("История", [f"- {h}" for h in self.history])
@@ -196,18 +369,3 @@ class TaskDetail:
     @staticmethod
     def _now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
-
-
-def subtask_to_task_detail(subtask: SubTask, parent_id: str, path: str) -> "TaskDetail":
-    """Convert a SubTask to TaskDetail for unified navigation."""
-    status = "DONE" if subtask.completed else ("ACTIVE" if subtask.ready_for_completion() else "TODO")
-    return TaskDetail(
-        id=f"{parent_id}/{path}",
-        title=subtask.title,
-        status=status,
-        description="",
-        parent=parent_id,
-        subtasks=subtask.children,
-        success_criteria=subtask.success_criteria,
-        blockers=subtask.blockers,
-    )

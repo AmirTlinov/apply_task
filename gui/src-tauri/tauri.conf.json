@@ -38,6 +38,6 @@
       "icons/icon.ico"
     ],
     "shortDescription": "AI-first task management with deterministic workflows",
-    "longDescription": "Apply Task is an AI-first CLI/TUI/GUI for tracking tasks with hexagonal DDD architecture. All operations return structured JSON, perfect for AI agents and automation."
+    "longDescription": "Apply Task is an AI-first TUI/MCP/GUI for tracking tasks with hexagonal DDD architecture. MCP provides a deterministic tool surface for AI agents and automation."
   }
 }

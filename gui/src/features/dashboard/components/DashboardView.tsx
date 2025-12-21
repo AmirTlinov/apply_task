@@ -33,9 +33,9 @@ interface MetricCardProps {
 
 function MetricCard({ title, value, subtitle, icon: Icon, iconClassName, bgClassName, trend }: MetricCardProps) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-background p-5 hover:shadow-sm transition-shadow">
+    <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-background p-[var(--density-card-pad)] hover:shadow-sm transition-shadow">
       <div className="flex items-center justify-between">
-        <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg", bgClassName)}>
+        <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg", bgClassName)}>
           <Icon className={cn("h-5 w-5", iconClassName)} />
         </div>
         {trend && (
@@ -117,10 +117,10 @@ export function DashboardView({ tasks, projectName, isLoading = false }: Dashboa
     .slice(0, 5);
 
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6 scrollbar-thin">
+    <div className="flex flex-1 flex-col gap-[var(--density-page-gap)] overflow-y-auto p-[var(--density-page-pad)] scrollbar-thin">
       {/* Header */}
       <div>
-        <h2 className="mb-1 text-xl font-semibold text-foreground tracking-tight">
+        <h2 className="mb-0.5 text-lg font-semibold text-foreground tracking-tight">
           {projectName || "Project"} Overview
         </h2>
         <p className="text-sm text-foreground-muted">
@@ -129,11 +129,11 @@ export function DashboardView({ tasks, projectName, isLoading = false }: Dashboa
       </div>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-[var(--density-page-gap)] sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
-          title="Total Tasks"
+          title="Total Steps"
           value={total}
-          subtitle="All project tasks"
+          subtitle="All project steps"
           icon={Target}
           iconClassName="text-primary"
           bgClassName="bg-primary/10"
@@ -165,10 +165,10 @@ export function DashboardView({ tasks, projectName, isLoading = false }: Dashboa
       </div>
 
       {/* Charts Section */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-[var(--density-page-gap)] lg:grid-cols-2">
         {/* Progress Overview */}
-        <div className="rounded-xl border border-border bg-background p-5 hover:shadow-sm transition-shadow">
-          <div className="mb-5 flex items-center gap-2">
+        <div className="rounded-xl border border-border bg-background p-[var(--density-card-pad)] hover:shadow-sm transition-shadow">
+          <div className="mb-4 flex items-center gap-2">
             <BarChart3 className="h-4 w-4 text-primary" />
             <h3 className="text-sm font-semibold text-foreground">
               Progress Overview
@@ -197,7 +197,7 @@ export function DashboardView({ tasks, projectName, isLoading = false }: Dashboa
           </div>
 
           {/* Overall progress ring */}
-          <div className="mt-6 flex items-center gap-4 rounded-lg bg-muted/30 p-4">
+          <div className="mt-5 flex items-center gap-4 rounded-lg bg-muted/30 p-[var(--density-card-pad)]">
             <div
               className="flex h-16 w-16 items-center justify-center rounded-full bg-background"
               style={{
@@ -221,8 +221,8 @@ export function DashboardView({ tasks, projectName, isLoading = false }: Dashboa
         </div>
 
         {/* Tags Distribution */}
-        <div className="rounded-xl border border-border bg-background p-5 hover:shadow-sm transition-shadow">
-          <div className="mb-5 flex items-center gap-2">
+        <div className="rounded-xl border border-border bg-background p-[var(--density-card-pad)] hover:shadow-sm transition-shadow">
+          <div className="mb-4 flex items-center gap-2">
             <Zap className="h-4 w-4 text-status-warn" />
             <h3 className="text-sm font-semibold text-foreground">
               Top Tags
@@ -296,7 +296,7 @@ function WeeklyActivityChart({ tasks }: WeeklyActivityChartProps) {
   const today = (new Date().getDay() + 6) % 7; // 0=Mon, 6=Sun
 
   return (
-    <div className="rounded-xl border border-border bg-background p-5 hover:shadow-sm transition-shadow">
+    <div className="rounded-xl border border-border bg-background p-4 hover:shadow-sm transition-shadow">
       <div className="mb-4 flex items-center gap-2">
         <Calendar className="h-4 w-4 text-foreground-muted" />
         <h3 className="text-sm font-semibold text-foreground">
@@ -344,17 +344,17 @@ function WeeklyActivityChart({ tasks }: WeeklyActivityChartProps) {
 
 function DashboardSkeleton() {
   return (
-    <div className="flex flex-col gap-6 p-6 animate-pulse">
+    <div className="flex flex-col gap-[var(--density-page-gap)] p-[var(--density-page-pad)] animate-pulse">
       <div>
         <div className="mb-2 h-6 w-32 rounded bg-muted" />
         <div className="h-4 w-64 rounded bg-muted/50" />
       </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-[var(--density-page-gap)] sm:grid-cols-2 lg:grid-cols-4">
         {[1, 2, 3, 4].map((i) => (
           <div key={i} className="h-32 rounded-xl bg-muted/30" />
         ))}
       </div>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-[var(--density-page-gap)] lg:grid-cols-2">
         <div className="h-64 rounded-xl bg-muted/30" />
         <div className="h-64 rounded-xl bg-muted/30" />
       </div>

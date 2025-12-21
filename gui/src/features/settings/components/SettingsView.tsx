@@ -20,9 +20,18 @@ import {
   Download,
   Trash2,
   RefreshCw,
-  X,
 } from "lucide-react";
-import { useSettingsStore, formatBytes, type ThemeMode } from "@/stores/settingsStore";
+import { useSettingsStore, formatBytes, type ThemeMode, type StorageMode } from "@/stores/settingsStore";
+import { setBackendStorageMode } from "@/lib/tauri";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import { toast } from "@/components/common/toast";
 
 interface SettingsViewProps {
   isLoading?: boolean;
@@ -42,36 +51,15 @@ interface SettingsSectionProps {
 
 function SettingsSection({ title, description, icon: Icon, children }: SettingsSectionProps) {
   return (
-    <div
-      style={{
-        padding: "20px",
-        backgroundColor: "var(--color-background)",
-        borderRadius: "12px",
-        border: "1px solid var(--color-border)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
-        <div
-          style={{
-            width: "36px",
-            height: "36px",
-            borderRadius: "8px",
-            backgroundColor: "var(--color-primary-subtle)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Icon style={{ width: "18px", height: "18px", color: "var(--color-primary)" }} />
+    <div className="rounded-xl border border-border bg-background p-[var(--density-card-pad)]">
+      <div className="mb-3 flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Icon className="h-[18px] w-[18px]" />
         </div>
-        <div>
-          <h3 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-foreground)" }}>
-            {title}
-          </h3>
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           {description && (
-            <p style={{ fontSize: "12px", color: "var(--color-foreground-muted)", marginTop: "2px" }}>
-              {description}
-            </p>
+            <p className="mt-0.5 text-xs text-foreground-muted">{description}</p>
           )}
         </div>
       </div>
@@ -89,50 +77,27 @@ interface ToggleProps {
 
 function Toggle({ label, description, checked, onChange }: ToggleProps) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "12px 0",
-        borderBottom: "1px solid var(--color-border)",
-      }}
-    >
-      <div>
-        <div style={{ fontSize: "13px", fontWeight: 500, color: "var(--color-foreground)" }}>
-          {label}
-        </div>
+    <div className="flex items-center justify-between gap-4 border-b border-border/60 py-2.5 last:border-b-0">
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-foreground">{label}</div>
         {description && (
-          <div style={{ fontSize: "12px", color: "var(--color-foreground-muted)", marginTop: "2px" }}>
-            {description}
-          </div>
+          <div className="mt-0.5 text-xs text-foreground-muted">{description}</div>
         )}
       </div>
       <button
+        type="button"
         onClick={() => onChange(!checked)}
-        style={{
-          width: "40px",
-          height: "22px",
-          borderRadius: "999px",
-          border: "none",
-          backgroundColor: checked ? "var(--color-primary)" : "var(--color-background-muted)",
-          cursor: "pointer",
-          position: "relative",
-          transition: "background-color 150ms ease",
-        }}
+        aria-pressed={checked}
+        className={cn(
+          "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          checked ? "bg-primary" : "bg-background-muted"
+        )}
       >
-        <div
-          style={{
-            position: "absolute",
-            top: "2px",
-            left: checked ? "20px" : "2px",
-            width: "18px",
-            height: "18px",
-            borderRadius: "50%",
-            backgroundColor: "white",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-            transition: "left 150ms ease",
-          }}
+        <span
+          className={cn(
+            "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform",
+            checked ? "translate-x-5" : "translate-x-0"
+          )}
         />
       </button>
     </div>
@@ -148,41 +113,44 @@ interface SettingsRowProps {
 }
 
 function SettingsRow({ label, value, icon: Icon = ChevronRight, onClick, danger }: SettingsRowProps) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "12px 0",
-        borderBottom: "1px solid var(--color-border)",
-        cursor: onClick ? "pointer" : "default",
-      }}
-    >
+  const content = (
+    <>
       <span
-        style={{
-          fontSize: "13px",
-          fontWeight: 500,
-          color: danger ? "var(--color-status-fail)" : "var(--color-foreground)",
-        }}
+        className={cn(
+          "text-sm font-medium",
+          danger ? "text-status-fail" : "text-foreground"
+        )}
       >
         {label}
       </span>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        {value && (
-          <span style={{ fontSize: "13px", color: "var(--color-foreground-muted)" }}>{value}</span>
-        )}
+      <div className="flex items-center gap-2">
+        {value && <span className="text-sm text-foreground-muted">{value}</span>}
         {onClick && (
           <Icon
-            style={{
-              width: "16px",
-              height: "16px",
-              color: danger ? "var(--color-status-fail)" : "var(--color-foreground-subtle)",
-            }}
+            className={cn(
+              "h-4 w-4",
+              danger ? "text-status-fail" : "text-foreground-subtle"
+            )}
           />
         )}
       </div>
+    </>
+  );
+
+  return onClick ? (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "-mx-2 flex w-full items-center justify-between gap-3 rounded-lg px-2 py-3 text-left transition-colors hover:bg-background-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "border-b border-border/60 last:border-b-0"
+      )}
+    >
+      {content}
+    </button>
+  ) : (
+    <div className="flex items-center justify-between gap-3 border-b border-border/60 py-3 last:border-b-0">
+      {content}
     </div>
   );
 }
@@ -194,89 +162,44 @@ interface ShortcutsModalProps {
 }
 
 function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
-  if (!isOpen) return null;
-
-  const shortcuts = [
-    { key: "⌘ K", action: "Open command palette" },
-    { key: "⌘ N", action: "Create new task" },
-    { key: "j / k", action: "Navigate tasks (List)" },
-    { key: "Enter", action: "Open selected task (List)" },
-    { key: "Esc", action: "Close modal" },
-    { key: "g b", action: "Go to Board" },
-    { key: "g l", action: "Go to List" },
+	  const shortcuts = [
+	    { key: "⌘ K", action: "Open command palette" },
+	    { key: "⌘ N", action: "Create new step" },
+	    { key: "j / k", action: "Navigate steps (List)" },
+	    { key: "Enter", action: "Open selected step (List)" },
+	    { key: "Esc", action: "Close modal" },
+	    { key: "g b", action: "Go to Board" },
+	    { key: "g l", action: "Go to List" },
     { key: "g t", action: "Go to Timeline" },
     { key: "g d", action: "Go to Dashboard" },
   ];
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          backgroundColor: "var(--color-background)",
-          borderRadius: "12px",
-          padding: "24px",
-          width: "400px",
-          maxHeight: "80vh",
-          overflowY: "auto",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "20px" }}>
-          <h3 style={{ fontSize: "16px", fontWeight: 600 }}>Keyboard Shortcuts</h3>
-          <button
-            onClick={onClose}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px",
-            }}
-          >
-            <X style={{ width: "18px", height: "18px", color: "var(--color-foreground-muted)" }} />
-          </button>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          {shortcuts.map(({ key, action }) => (
-            <div
-              key={key}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "8px 0",
-                borderBottom: "1px solid var(--color-border)",
-              }}
-            >
-              <span style={{ fontSize: "13px", color: "var(--color-foreground-muted)" }}>
-                {action}
-              </span>
-              <kbd
-                style={{
-                  fontSize: "12px",
-                  fontFamily: "var(--font-mono)",
-                  backgroundColor: "var(--color-background-muted)",
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  color: "var(--color-foreground)",
-                }}
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Keyboard shortcuts</DialogTitle>
+            <DialogDescription>
+              Fast navigation without leaving the keyboard.
+            </DialogDescription>
+          </DialogHeader>
+        <div className="max-h-[60vh] overflow-y-auto px-[var(--density-page-pad)] pb-[var(--density-page-pad)]">
+          <div className="flex flex-col">
+            {shortcuts.map(({ key, action }) => (
+              <div
+                key={key}
+                className="flex items-center justify-between gap-4 border-b border-border/60 py-2 last:border-b-0"
               >
-                {key}
-              </kbd>
-            </div>
-          ))}
+                <span className="text-sm text-foreground-muted">{action}</span>
+                <kbd className="shrink-0 rounded-md border border-border bg-background-muted px-2 py-1 font-mono text-xs font-medium text-foreground">
+                  {key}
+                </kbd>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -284,6 +207,7 @@ export function SettingsView({ isLoading = false }: SettingsViewProps) {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [storageModeSaving, setStorageModeSaving] = useState(false);
 
   // Get settings from store
   const {
@@ -293,6 +217,7 @@ export function SettingsView({ isLoading = false }: SettingsViewProps) {
     soundEffects,
     autoSave,
     vimMode,
+    storageMode,
     cacheSize,
     setTheme,
     setCompactMode,
@@ -300,6 +225,7 @@ export function SettingsView({ isLoading = false }: SettingsViewProps) {
     setSoundEffects,
     setAutoSave,
     setVimMode,
+    setStorageMode,
     setCacheSize,
     clearCache,
     exportData,
@@ -315,6 +241,25 @@ export function SettingsView({ isLoading = false }: SettingsViewProps) {
     }
     setCacheSize(total);
   }, [setCacheSize]);
+
+  const handleStorageModeChange = useCallback(async (nextMode: StorageMode) => {
+    const previous = storageMode;
+    setStorageMode(nextMode);
+
+    setStorageModeSaving(true);
+    try {
+      const resp = await setBackendStorageMode(nextMode);
+      if (!resp.success) {
+        setStorageMode(previous);
+        toast.error(resp.error || "Failed to apply storage mode");
+        return;
+      }
+      const label = nextMode === "local" ? "Local (.tasks)" : "Global (~/.tasks)";
+      toast.success(`Storage mode set to ${label}${resp.restarted ? " (backend restarted)" : ""}`);
+    } finally {
+      setStorageModeSaving(false);
+    }
+  }, [storageMode, setStorageMode]);
 
   const handleClearCache = useCallback(async () => {
     setIsClearing(true);
@@ -350,182 +295,173 @@ export function SettingsView({ isLoading = false }: SettingsViewProps) {
 
   return (
     <>
-      <div
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "24px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "20px",
-          maxWidth: "640px",
-        }}
-      >
+      <div className="mx-auto flex w-full max-w-[920px] flex-1 flex-col gap-[var(--density-page-gap)] overflow-y-auto p-[var(--density-page-pad)]">
         {/* Header */}
-        <div style={{ marginBottom: "8px" }}>
-          <h2
-            style={{
-              fontSize: "20px",
-              fontWeight: 600,
-              color: "var(--color-foreground)",
-              marginBottom: "4px",
-            }}
-          >
-            Settings
-          </h2>
-          <p style={{ fontSize: "14px", color: "var(--color-foreground-muted)" }}>
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Settings</h2>
+          <p className="mt-0.5 text-sm text-foreground-muted">
             Manage your preferences and app configuration
           </p>
         </div>
 
-        {/* Appearance */}
-        <SettingsSection
-          title="Appearance"
-          description="Customize how the app looks"
-          icon={Palette}
-        >
-          <div style={{ marginBottom: "16px" }}>
-            <div
-              style={{
-                fontSize: "12px",
-                fontWeight: 500,
-                color: "var(--color-foreground-muted)",
-                marginBottom: "10px",
-              }}
-            >
-              Theme
-            </div>
-            <div style={{ display: "flex", gap: "8px" }}>
-              {themeOptions.map(({ mode, icon: Icon, label }) => (
-                <button
-                  key={mode}
-                  onClick={() => setTheme(mode)}
-                  style={{
-                    flex: 1,
-                    padding: "12px",
-                    borderRadius: "8px",
-                    border: `2px solid ${theme === mode ? "var(--color-primary)" : "var(--color-border)"}`,
-                    backgroundColor: theme === mode ? "var(--color-primary-subtle)" : "transparent",
-                    cursor: "pointer",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: "8px",
-                    transition: "all 150ms ease",
-                  }}
-                >
-                  <Icon
-                    style={{
-                      width: "20px",
-                      height: "20px",
-                      color: theme === mode ? "var(--color-primary)" : "var(--color-foreground-muted)",
-                    }}
-                  />
-                  <span
-                    style={{
-                      fontSize: "12px",
-                      fontWeight: 500,
-                      color: theme === mode ? "var(--color-primary)" : "var(--color-foreground-muted)",
-                    }}
+        <div className="grid grid-cols-1 gap-[var(--density-page-gap)] lg:grid-cols-2">
+          {/* Appearance */}
+          <SettingsSection
+            title="Appearance"
+            description="Customize how the app looks"
+            icon={Palette}
+          >
+            <div className="mb-4">
+              <div className="mb-2.5 text-xs font-medium text-foreground-muted">
+                Theme
+              </div>
+              <div className="flex gap-2">
+                {themeOptions.map(({ mode, icon: Icon, label }) => (
+                  <button
+                    key={mode}
+                    onClick={() => setTheme(mode)}
+                    type="button"
+                    className={cn(
+                      "flex flex-1 flex-col items-center gap-2 rounded-lg border-2 p-2.5 transition-colors",
+                      theme === mode
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:bg-background-muted/60"
+                    )}
                   >
-                    {label}
-                  </span>
-                  {theme === mode && (
-                    <Check style={{ width: "14px", height: "14px", color: "var(--color-primary)" }} />
-                  )}
-                </button>
-              ))}
+                    <Icon
+                      className={cn(
+                        "h-5 w-5",
+                        theme === mode ? "text-primary" : "text-foreground-muted"
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        "text-xs font-medium",
+                        theme === mode ? "text-primary" : "text-foreground-muted"
+                      )}
+                    >
+                      {label}
+                    </span>
+                    {theme === mode && (
+                      <Check className="h-4 w-4 text-primary" />
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            <Toggle
+              label="Compact mode"
+              description="Reduce spacing and show more content"
+              checked={compactMode}
+              onChange={setCompactMode}
+            />
+          </SettingsSection>
+
+          {/* Notifications */}
+          <SettingsSection
+            title="Notifications"
+            description="Manage notification preferences"
+            icon={Bell}
+          >
+              <Toggle
+                label="Enable notifications"
+              description="Get notified about step updates"
+                checked={notifications}
+                onChange={setNotifications}
+              />
+            <Toggle
+              label="Sound effects"
+              description="Play sounds for actions"
+              checked={soundEffects}
+              onChange={setSoundEffects}
+            />
+          </SettingsSection>
+
+          {/* Keyboard */}
+          <SettingsSection
+            title="Keyboard Shortcuts"
+            description="Customize keyboard navigation"
+            icon={Keyboard}
+          >
+            <SettingsRow
+              label="View all shortcuts"
+              value="⌘ /"
+              onClick={() => setShowShortcuts(true)}
+            />
+            <Toggle
+              label="Vim mode"
+              description="Enable vim-style navigation (h/j/k/l)"
+              checked={vimMode}
+              onChange={setVimMode}
+            />
+          </SettingsSection>
+
+          {/* Data */}
+          <SettingsSection title="Data & Storage" description="Manage your data" icon={Database}>
+            <div className="flex items-center justify-between gap-4 border-b border-border/60 py-2.5 last:border-b-0">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-foreground">Storage mode</div>
+                <div className="mt-0.5 text-xs text-foreground-muted">
+                  Global keeps steps in your home folder; Local uses this project's <code>.tasks</code>
+                </div>
+              </div>
+              <select
+                value={storageMode}
+                onChange={(e) => {
+                  const next = e.target.value as StorageMode;
+                  if (next !== "global" && next !== "local") return;
+                  void handleStorageModeChange(next);
+                }}
+                disabled={storageModeSaving}
+                className="flex h-8 w-[160px] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="global">Global</option>
+                <option value="local">Local</option>
+              </select>
+            </div>
+            <Toggle
+              label="Auto-save"
+              description="Automatically save changes"
+              checked={autoSave}
+              onChange={setAutoSave}
+            />
+            <SettingsRow
+              label="Export data"
+              icon={Download}
+              value={isExporting ? "Exporting..." : undefined}
+              onClick={handleExportData}
+            />
+            <SettingsRow
+              label="Clear cache"
+              icon={isClearing ? RefreshCw : Trash2}
+              value={formatBytes(cacheSize)}
+              onClick={handleClearCache}
+            />
+          </SettingsSection>
+
+          {/* About */}
+          <div className="lg:col-span-2">
+            <SettingsSection title="About" description="Application information" icon={Info}>
+              <SettingsRow label="Version" value={APP_VERSION} />
+              <SettingsRow
+                label="View on GitHub"
+                icon={ExternalLink}
+                onClick={() => handleOpenLink(GITHUB_URL)}
+              />
+              <SettingsRow
+                label="View license"
+                icon={ExternalLink}
+                onClick={() => handleOpenLink(LICENSE_URL)}
+              />
+              <SettingsRow
+                label="Report an issue"
+                icon={ExternalLink}
+                onClick={() => handleOpenLink(`${GITHUB_URL}/issues/new`)}
+              />
+            </SettingsSection>
           </div>
-
-          <Toggle
-            label="Compact mode"
-            description="Reduce spacing and show more content"
-            checked={compactMode}
-            onChange={setCompactMode}
-          />
-        </SettingsSection>
-
-        {/* Notifications */}
-        <SettingsSection
-          title="Notifications"
-          description="Manage notification preferences"
-          icon={Bell}
-        >
-          <Toggle
-            label="Enable notifications"
-            description="Get notified about task updates"
-            checked={notifications}
-            onChange={setNotifications}
-          />
-          <Toggle
-            label="Sound effects"
-            description="Play sounds for actions"
-            checked={soundEffects}
-            onChange={setSoundEffects}
-          />
-        </SettingsSection>
-
-        {/* Keyboard */}
-        <SettingsSection
-          title="Keyboard Shortcuts"
-          description="Customize keyboard navigation"
-          icon={Keyboard}
-        >
-          <SettingsRow
-            label="View all shortcuts"
-            value="⌘ /"
-            onClick={() => setShowShortcuts(true)}
-          />
-          <Toggle
-            label="Vim mode"
-            description="Enable vim-style navigation (h/j/k/l)"
-            checked={vimMode}
-            onChange={setVimMode}
-          />
-        </SettingsSection>
-
-        {/* Data */}
-        <SettingsSection title="Data & Storage" description="Manage your data" icon={Database}>
-          <Toggle
-            label="Auto-save"
-            description="Automatically save changes"
-            checked={autoSave}
-            onChange={setAutoSave}
-          />
-          <SettingsRow
-            label="Export data"
-            icon={Download}
-            value={isExporting ? "Exporting..." : undefined}
-            onClick={handleExportData}
-          />
-          <SettingsRow
-            label="Clear cache"
-            icon={isClearing ? RefreshCw : Trash2}
-            value={formatBytes(cacheSize)}
-            onClick={handleClearCache}
-          />
-        </SettingsSection>
-
-        {/* About */}
-        <SettingsSection title="About" description="Application information" icon={Info}>
-          <SettingsRow label="Version" value={APP_VERSION} />
-          <SettingsRow
-            label="View on GitHub"
-            icon={ExternalLink}
-            onClick={() => handleOpenLink(GITHUB_URL)}
-          />
-          <SettingsRow
-            label="View license"
-            icon={ExternalLink}
-            onClick={() => handleOpenLink(LICENSE_URL)}
-          />
-          <SettingsRow
-            label="Report an issue"
-            icon={ExternalLink}
-            onClick={() => handleOpenLink(`${GITHUB_URL}/issues/new`)}
-          />
-        </SettingsSection>
+        </div>
       </div>
 
       {/* Shortcuts Modal */}
@@ -538,7 +474,7 @@ function SettingsSkeleton() {
   return (
     <div
       style={{
-        padding: "24px",
+        padding: "16px",
         display: "flex",
         flexDirection: "column",
         gap: "20px",

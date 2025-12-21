@@ -11,38 +11,21 @@
 
 Tasks live in `~/.tasks/<namespace>` derived from git remote (or folder name). Local `.tasks` inside the repo is ignored. TUI starts with project picker from global store.
 
-## Key commands
+## Launchers
 
 ```bash
-# Task lifecycle
-apply_task create "..." --parent ROOT --description "..." --tests "..." --risks "..." --subtasks @file.json
-apply_task task "Title #tag @TASK-001"  # smart create (auto-parses tags & deps)
-apply_task edit TASK-001 --description "..." --priority HIGH --depends-on TASK-002
-apply_task update TASK-001 TODO|ACTIVE|DONE
+# TUI
+apply_task tui
+apply_task tui --local   # <project>/.tasks (portable)
 
-# Checkpoints
-apply_task ok TASK-001 0 --criteria-note "..." --tests-note "..." --blockers-note "..."
-apply_task ok TASK-001 0,1,2       # batch
-apply_task ok TASK-001 --all       # all incomplete
-apply_task checkpoint TASK-001 --auto  # wizard
-
-# Navigation
-apply_task list --blocked --stale 7 --progress
-apply_task analyze TASK-001
-apply_task suggest | quick | next
+# MCP server (AI tool integration)
+apply_task mcp
+apply_task mcp --local
 ```
 
-## AI interface
+## MCP tools
 
-For AI agents, use the JSON API:
-
-```bash
-apply_task ai '{"intent": "context", "compact": true}'
-apply_task ai '{"intent": "resume"}'
-apply_task ai '{"intent": "history", "format": "markdown"}'
-```
-
-**Intents**: `context`, `resume`, `create`, `decompose`, `define`, `verify`, `done`, `progress`, `delete`, `complete`, `batch`, `undo`, `redo`, `history`, `storage`, `migrate`.
+The canonical automation surface is MCP: tools are exposed as `tasks_<intent>` (1:1 with the intent API). See `AI_INTENTS.md` for schemas and examples.
 
 ## MCP server
 
@@ -52,22 +35,11 @@ apply_task mcp  # Start MCP stdio server for Claude Code
 
 ## GitHub Projects
 
-Config `.apply_task_projects.yaml`, token `APPLY_TASK_GITHUB_TOKEN|GITHUB_TOKEN`; without token sync is off, CLI works offline.
-
-## Devtools automation
-
-```bash
-apply_task automation task-template  # → .tmp/subtasks.template.json
-apply_task automation task-create    # validate-only default, auto-template
-apply_task automation checkpoint     # notes/ok from log
-apply_task automation health         # pytest → .tmp/health.log
-apply_task automation projects-health  # short sync status
-```
+Config `.apply_task_projects.yaml`, token `APPLY_TASK_GITHUB_TOKEN|GITHUB_TOKEN`; without token sync is off.
 
 ## File aliases
 
 - `README.md` — what the tool is and how to start.
 - `DOMAIN_STRUCTURE.md` — domain/layer layout.
-- `SYNTAX.md` — CLI/JSON formats, required fields.
+- `AI_INTENTS.md` — MCP tools / intent schemas and examples.
 - `CHANGES.md` — UX/features history.
-- `apply_task help` — mandatory CLI rules (for AI agents).

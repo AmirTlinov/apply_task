@@ -1,6 +1,6 @@
-"""Unit tests for Phase 1 fields parsing in task_file_parser.py
+"""Unit tests for step fields parsing in task_file_parser.py
 
-Tests parsing of new SubTask fields:
+Tests parsing of step fields:
 - progress_notes: List[str] (semicolon-separated list)
 - started_at: Optional[str] (ISO datetime)
 - blocked: bool (да/yes/true/1 or нет/no/false/0)
@@ -21,7 +21,7 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
+## Шаги
 - [ ] Implement feature
   - Прогресс: Fixed bug in parser; Added validation; Updated tests
 """,
@@ -30,8 +30,8 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
-    assert task.subtasks[0].progress_notes == [
+    assert len(task.steps) == 1
+    assert task.steps[0].progress_notes == [
         "Fixed bug in parser",
         "Added validation",
         "Updated tests",
@@ -48,7 +48,7 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
+## Шаги
 - [ ] Work in progress
   - Начато: 2025-01-15T10:30:00
 """,
@@ -57,8 +57,8 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
-    assert task.subtasks[0].started_at == "2025-01-15T10:30:00"
+    assert len(task.steps) == 1
+    assert task.steps[0].started_at == "2025-01-15T10:30:00"
 
 
 def test_parse_blocked_yes_with_reason(tmp_path: Path):
@@ -71,7 +71,7 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
+## Шаги
 - [ ] Blocked subtask
   - Заблокировано: да; waiting for API response
 """,
@@ -80,9 +80,9 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
-    assert task.subtasks[0].blocked is True
-    assert task.subtasks[0].block_reason == "waiting for API response"
+    assert len(task.steps) == 1
+    assert task.steps[0].blocked is True
+    assert task.steps[0].block_reason == "waiting for API response"
 
 
 def test_parse_blocked_no(tmp_path: Path):
@@ -95,7 +95,7 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
+## Шаги
 - [ ] Not blocked
   - Заблокировано: нет
 """,
@@ -104,9 +104,9 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
-    assert task.subtasks[0].blocked is False
-    assert task.subtasks[0].block_reason == ""
+    assert len(task.steps) == 1
+    assert task.steps[0].blocked is False
+    assert task.steps[0].block_reason == ""
 
 
 def test_parse_blocked_russian_da(tmp_path: Path):
@@ -119,7 +119,7 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
+## Шаги
 - [ ] Blocked with да
   - Заблокировано: да; dependency not met
 """,
@@ -128,9 +128,9 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
-    assert task.subtasks[0].blocked is True
-    assert task.subtasks[0].block_reason == "dependency not met"
+    assert len(task.steps) == 1
+    assert task.steps[0].blocked is True
+    assert task.steps[0].block_reason == "dependency not met"
 
 
 def test_parse_blocked_english_yes(tmp_path: Path):
@@ -143,7 +143,7 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
+## Шаги
 - [ ] Blocked with yes
   - Заблокировано: yes; waiting for review
 """,
@@ -152,9 +152,9 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
-    assert task.subtasks[0].blocked is True
-    assert task.subtasks[0].block_reason == "waiting for review"
+    assert len(task.steps) == 1
+    assert task.steps[0].blocked is True
+    assert task.steps[0].block_reason == "waiting for review"
 
 
 def test_parse_all_phase1_fields_together(tmp_path: Path):
@@ -167,8 +167,8 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
-- [ ] Complex subtask
+## Шаги
+- [ ] Complex step
   - Критерии: Unit tests pass; Code reviewed
   - Тесты: test_feature.py
   - Блокеры: External API dependency
@@ -183,10 +183,10 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
+    assert len(task.steps) == 1
 
-    st = task.subtasks[0]
-    assert st.title == "Complex subtask"
+    st = task.steps[0]
+    assert st.title == "Complex step"
     assert st.completed is False
     assert st.success_criteria == ["Unit tests pass", "Code reviewed"]
     assert st.tests == ["test_feature.py"]
@@ -212,8 +212,8 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
-- [ ] Subtask with empty progress
+## Шаги
+- [ ] Step with empty progress
   - Прогресс:
 """,
         encoding="utf-8",
@@ -221,8 +221,8 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
-    assert task.subtasks[0].progress_notes == []
+    assert len(task.steps) == 1
+    assert task.steps[0].progress_notes == []
 
 
 def test_parse_empty_started_at(tmp_path: Path):
@@ -235,8 +235,8 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
-- [ ] Subtask without start time
+## Шаги
+- [ ] Step without start time
   - Начато:
 """,
         encoding="utf-8",
@@ -244,8 +244,8 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
-    assert task.subtasks[0].started_at == ""
+    assert len(task.steps) == 1
+    assert task.steps[0].started_at is None
 
 
 def test_parse_blocked_without_reason(tmp_path: Path):
@@ -258,7 +258,7 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
+## Шаги
 - [ ] Blocked without reason
   - Заблокировано: да
 """,
@@ -267,33 +267,33 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
-    assert task.subtasks[0].blocked is True
-    assert task.subtasks[0].block_reason == ""
+    assert len(task.steps) == 1
+    assert task.steps[0].blocked is True
+    assert task.steps[0].block_reason == ""
 
 
-def test_backward_compatibility(tmp_path: Path):
-    """Verify old task files without Phase 1 fields still parse correctly."""
+def test_parse_task_without_phase1_fields(tmp_path: Path):
+    """Verify tasks without Phase 1 fields still parse correctly."""
     task_file = tmp_path / "test.task"
     task_file.write_text(
         """---
 id: test-11
-title: Legacy Task
+title: Minimal Task
 status: DONE
 ---
 
 ## Описание
-This is a legacy task file without Phase 1 fields.
+This is a task file without Phase 1 fields.
 
-## Подзадачи
-- [x] First subtask
+## Шаги
+- [x] First step
   - Критерии: Works correctly
   - Тесты: All pass
   - Блокеры: None
   - Чекпоинты: Критерии=OK; Тесты=OK; Блокеры=OK
   - Создано: 2025-01-01T10:00:00
   - Завершено: 2025-01-05T15:30:00
-- [ ] Second subtask
+- [ ] Second step
   - Критерии: Feature implemented
   - Тесты: test_feature.py
   - Чекпоинты: Критерии=TODO; Тесты=TODO; Блокеры=TODO
@@ -303,13 +303,13 @@ This is a legacy task file without Phase 1 fields.
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert task.title == "Legacy Task"
-    assert task.description == "This is a legacy task file without Phase 1 fields."
-    assert len(task.subtasks) == 2
+    assert task.title == "Minimal Task"
+    assert task.description == "This is a task file without Phase 1 fields."
+    assert len(task.steps) == 2
 
-    # First subtask (completed, legacy fields only)
-    st1 = task.subtasks[0]
-    assert st1.title == "First subtask"
+    # First step (completed, no Phase 1 fields)
+    st1 = task.steps[0]
+    assert st1.title == "First step"
     assert st1.completed is True
     assert st1.created_at == "2025-01-01T10:00:00"
     assert st1.completed_at == "2025-01-05T15:30:00"
@@ -319,9 +319,9 @@ This is a legacy task file without Phase 1 fields.
     assert st1.blocked is False
     assert st1.block_reason == ""
 
-    # Second subtask (pending, no timestamps)
-    st2 = task.subtasks[1]
-    assert st2.title == "Second subtask"
+    # Second step (pending, no timestamps)
+    st2 = task.steps[1]
+    assert st2.title == "Second step"
     assert st2.completed is False
     assert st2.progress_notes == []
     assert st2.started_at is None
@@ -329,8 +329,8 @@ This is a legacy task file without Phase 1 fields.
     assert st2.block_reason == ""
 
 
-def test_parse_nested_subtasks_with_phase1_fields(tmp_path: Path):
-    """Verify Phase 1 fields work correctly in nested subtasks."""
+def test_parse_nested_steps_with_phase1_fields(tmp_path: Path):
+    """Verify Phase 1 fields work correctly in nested steps."""
     task_file = tmp_path / "test.task"
     task_file.write_text(
         """---
@@ -339,15 +339,15 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
-- [ ] Parent subtask
+## Шаги
+- [ ] Parent step
   - Прогресс: Started working on children
   - Начато: 2025-01-12T08:00:00
-  - [ ] Child subtask 1
+  - [ ] Child step 1
     - Прогресс: Half done
     - Начато: 2025-01-12T09:00:00
     - Заблокировано: нет
-  - [ ] Child subtask 2
+  - [ ] Child step 2
     - Заблокировано: да; waiting for child 1
 """,
         encoding="utf-8",
@@ -355,24 +355,26 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
+    assert len(task.steps) == 1
 
-    parent = task.subtasks[0]
-    assert parent.title == "Parent subtask"
+    parent = task.steps[0]
+    assert parent.title == "Parent step"
     assert parent.progress_notes == ["Started working on children"]
     assert parent.started_at == "2025-01-12T08:00:00"
     assert parent.blocked is False
 
-    assert len(parent.children) == 2
+    assert parent.plan and parent.plan.tasks
+    assert len(parent.plan.tasks) == 1
+    assert len(parent.plan.tasks[0].steps) == 2
 
-    child1 = parent.children[0]
-    assert child1.title == "Child subtask 1"
+    child1 = parent.plan.tasks[0].steps[0]
+    assert child1.title == "Child step 1"
     assert child1.progress_notes == ["Half done"]
     assert child1.started_at == "2025-01-12T09:00:00"
     assert child1.blocked is False
 
-    child2 = parent.children[1]
-    assert child2.title == "Child subtask 2"
+    child2 = parent.plan.tasks[0].steps[1]
+    assert child2.title == "Child step 2"
     assert child2.blocked is True
     assert child2.block_reason == "waiting for child 1"
 
@@ -387,8 +389,8 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
-- [ ] Subtask
+## Шаги
+- [ ] Step
   - Прогресс: Updated config (added key=value); Fixed issue
 """,
         encoding="utf-8",
@@ -396,9 +398,9 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
+    assert len(task.steps) == 1
     # Semicolons split notes - this is expected behavior
-    assert task.subtasks[0].progress_notes == [
+    assert task.steps[0].progress_notes == [
         "Updated config (added key=value)",
         "Fixed issue",
     ]
@@ -414,7 +416,7 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
+## Шаги
 - [ ] Blocked with Yes
   - Заблокировано: Yes; reason A
 - [ ] Blocked with TRUE
@@ -431,22 +433,22 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 5
+    assert len(task.steps) == 5
 
-    assert task.subtasks[0].blocked is True
-    assert task.subtasks[0].block_reason == "reason A"
+    assert task.steps[0].blocked is True
+    assert task.steps[0].block_reason == "reason A"
 
-    assert task.subtasks[1].blocked is True
-    assert task.subtasks[1].block_reason == "reason B"
+    assert task.steps[1].blocked is True
+    assert task.steps[1].block_reason == "reason B"
 
-    assert task.subtasks[2].blocked is True
-    assert task.subtasks[2].block_reason == "reason C"
+    assert task.steps[2].blocked is True
+    assert task.steps[2].block_reason == "reason C"
 
-    assert task.subtasks[3].blocked is False
-    assert task.subtasks[3].block_reason == ""
+    assert task.steps[3].blocked is False
+    assert task.steps[3].block_reason == ""
 
-    assert task.subtasks[4].blocked is False
-    assert task.subtasks[4].block_reason == ""
+    assert task.steps[4].blocked is False
+    assert task.steps[4].block_reason == ""
 
 
 def test_parse_whitespace_handling(tmp_path: Path):
@@ -459,8 +461,8 @@ title: Test Task
 status: TODO
 ---
 
-## Подзадачи
-- [ ] Subtask with whitespace
+## Шаги
+- [ ] Step with whitespace
   - Прогресс:   note1  ;  note2  ; note3
   - Начато:   2025-01-15T10:30:00
   - Заблокировано:  да  ;  reason with spaces
@@ -470,35 +472,10 @@ status: TODO
 
     task = TaskFileParser.parse(task_file)
     assert task is not None
-    assert len(task.subtasks) == 1
+    assert len(task.steps) == 1
 
-    st = task.subtasks[0]
+    st = task.steps[0]
     assert st.progress_notes == ["note1", "note2", "note3"]
     assert st.started_at == "2025-01-15T10:30:00"
     assert st.blocked is True
     assert st.block_reason == "reason with spaces"
-
-
-def test_parse_blocked_reason_without_да_prefix(tmp_path: Path):
-    """Verify backward compatibility: 'Заблокировано: reason' without да prefix."""
-    task_file = tmp_path / "test.task"
-    task_file.write_text(
-        """---
-id: test-16
-title: Test Task
-status: TODO
----
-
-## Подзадачи
-- [ ] Blocked subtask (legacy format)
-  - Заблокировано: waiting for API response
-""",
-        encoding="utf-8",
-    )
-
-    task = TaskFileParser.parse(task_file)
-    assert task is not None
-    assert len(task.subtasks) == 1
-    # Should treat as blocked with the entire value as reason
-    assert task.subtasks[0].blocked is True
-    assert task.subtasks[0].block_reason == "waiting for API response"

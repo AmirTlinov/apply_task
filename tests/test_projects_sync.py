@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import projects_sync
-import tasks
+from core import TaskDetail
 
 
 class DummyResponse:
@@ -67,7 +67,7 @@ def test_repo_issue_created(tmp_path, monkeypatch):
     sync = _sync_with_repo(tmp_path, monkeypatch)
     dummy = DummySession(post_payload={"number": 77})
     sync.session = dummy
-    task = tasks.TaskDetail(id="TASK-001", title="Test", status="TODO")
+    task = TaskDetail(id="TASK-001", title="Test", status="TODO")
 
     created = sync._ensure_repo_issue(task, "body")
 
@@ -80,7 +80,7 @@ def test_repo_issue_updated(tmp_path, monkeypatch):
     sync = _sync_with_repo(tmp_path, monkeypatch)
     dummy = DummySession()
     sync.session = dummy
-    task = tasks.TaskDetail(id="TASK-002", title="Done", status="DONE", project_issue_number=10)
+    task = TaskDetail(id="TASK-002", title="Done", status="DONE", project_issue_number=10)
 
     created = sync._ensure_repo_issue(task, "body")
 
@@ -109,9 +109,9 @@ def test_permission_error_disables_sync(monkeypatch, tmp_path):
 
     sync.session.post = lambda *a, **k: PermissionResponse()
     monkeypatch.setattr(sync, "_persist_metadata", lambda *a, **k: True)
-    task = tasks.TaskDetail(id="TASK-123", title="Demo", status="TODO")
+    task = TaskDetail(id="TASK-123", title="Demo", status="TODO")
 
-    assert sync.sync_task(task) is False
+    assert sync.sync_step(task) is False
     assert not sync.enabled
     assert "resource not accessible" in (sync.runtime_disabled_reason or "").lower()
 

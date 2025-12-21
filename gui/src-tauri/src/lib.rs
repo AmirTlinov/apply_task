@@ -121,17 +121,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
-            commands::tasks_list,
-            commands::tasks_show,
-            commands::tasks_context,
-            commands::tasks_create,
-            commands::tasks_update_status,
-            commands::tasks_checkpoint,
-            commands::tasks_ai_status,
-            commands::tasks_template_subtasks,
-            commands::tasks_send_signal,
-            commands::tasks_storage,
-            commands::tasks_delete,
+            commands::backend_set_storage_mode,
             commands::ai_intent,
         ])
         .run(tauri::generate_context!())

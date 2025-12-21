@@ -8,6 +8,8 @@ class ColumnLayout:
     min_width: int
     columns: List[str]
     stat_w: int = 3
+    id_w: int = 6
+    marks_w: int = 5
     prog_w: int = 6
     subt_w: int = 7
     title_min: int = 16
@@ -20,9 +22,11 @@ class ColumnLayout:
     def _base_min_widths(self, desired: Optional[Dict[str, int]] = None) -> Dict[str, int]:
         base = {
             'idx': 3,
+            'id': self.id_w,
             'stat': self.stat_w,
+            'marks': self.marks_w,
             'progress': self.prog_w,
-            'subtasks': self.subt_w,
+            'children': self.subt_w,
             'title': self.title_min,
             'notes': self.notes_w,
             'context': self.context_w,
@@ -48,7 +52,8 @@ class ColumnLayout:
 
         if min_total <= usable_width:
             remaining = usable_width - min_total
-            flex_cols = [c for c in self.columns if c in ('title', 'notes', 'context', 'subtasks')] or list(self.columns)
+            # Keep metric columns (% / done/total / marks) tight; send extra width to content columns.
+            flex_cols = [c for c in self.columns if c in ('title', 'notes', 'context')] or list(self.columns)
             weights = {col: (3 if col == 'title' else 1) for col in flex_cols}
             total_weight = max(1, sum(weights.values()))
             distributed = 0
@@ -62,7 +67,16 @@ class ColumnLayout:
         else:
             deficit = min_total - usable_width
             shrink_order = [c for c in self.columns if c != 'stat'] or list(self.columns)
-            min_limits = {'stat': max(2, self.stat_w - 1), 'progress': 2, 'subtasks': 3, 'title': 6, 'notes': 6, 'context': 6}
+            min_limits = {
+                'stat': max(2, self.stat_w - 1),
+                'id': 3,
+                'marks': max(3, self.marks_w - 2),
+                'progress': 2,
+                'children': 3,
+                'title': 6,
+                'notes': 6,
+                'context': 6,
+            }
             while deficit > 0 and shrink_order:
                 progressed = False
                 for col in shrink_order:
@@ -79,7 +93,7 @@ class ColumnLayout:
         total = sum(widths.values()) + separators
         if total > term_width:
             overflow = total - term_width
-            min_limits = {'idx': 1, 'stat': 1, 'progress': 2, 'subtasks': 2, 'title': 2, 'notes': 2, 'context': 2}
+            min_limits = {'idx': 1, 'id': 1, 'stat': 1, 'marks': 3, 'progress': 2, 'children': 2, 'title': 2, 'notes': 2, 'context': 2}
             for col in reversed(self.columns):
                 reducible = max(0, widths[col] - min_limits.get(col, 1))
                 if reducible <= 0:
@@ -97,12 +111,12 @@ class ResponsiveLayoutManager:
     """Responsive layout selector for TUI tables."""
 
     LAYOUTS = [
-        ColumnLayout(min_width=140, columns=['idx', 'stat', 'title', 'progress', 'subtasks'], stat_w=4, prog_w=8, subt_w=8, title_min=22),
-        ColumnLayout(min_width=110, columns=['idx', 'stat', 'title', 'progress', 'subtasks'], stat_w=3, prog_w=7, subt_w=7, title_min=18),
-        ColumnLayout(min_width=90, columns=['idx', 'stat', 'title', 'progress', 'subtasks'], stat_w=3, prog_w=6, subt_w=6, title_min=16),
-        ColumnLayout(min_width=72, columns=['idx', 'stat', 'title', 'progress', 'subtasks'], stat_w=2, prog_w=5, subt_w=5, title_min=12),
-        ColumnLayout(min_width=56, columns=['idx', 'stat', 'title', 'progress'], stat_w=2, prog_w=5, title_min=12),
-        ColumnLayout(min_width=0, columns=['idx', 'stat', 'title'], stat_w=2, title_min=10),
+        ColumnLayout(min_width=140, columns=['idx', 'id', 'stat', 'title', 'progress', 'children', 'marks'], stat_w=4, id_w=6, prog_w=8, subt_w=8, title_min=22),
+        ColumnLayout(min_width=110, columns=['idx', 'id', 'stat', 'title', 'progress', 'children', 'marks'], stat_w=3, id_w=6, prog_w=7, subt_w=7, title_min=18),
+        ColumnLayout(min_width=90, columns=['idx', 'id', 'stat', 'title', 'progress', 'children', 'marks'], stat_w=3, id_w=6, prog_w=6, subt_w=6, title_min=16),
+        ColumnLayout(min_width=72, columns=['idx', 'id', 'stat', 'title', 'progress', 'children', 'marks'], stat_w=2, id_w=5, prog_w=5, subt_w=5, title_min=12),
+        ColumnLayout(min_width=56, columns=['idx', 'id', 'stat', 'title', 'progress', 'marks'], stat_w=2, id_w=5, prog_w=5, title_min=12),
+        ColumnLayout(min_width=0, columns=['idx', 'id', 'title'], id_w=4, title_min=10),
     ]
 
     @classmethod
@@ -116,11 +130,8 @@ class ResponsiveLayoutManager:
 
 def detail_content_width(term_width: int) -> int:
     """Adaptive content width for detail/single-subtask views."""
+    # Detail views render their own frame borders (+...+), so a full-width content
+    # block is `term_width - 2`. Keeping the width close to the terminal edge is
+    # intentional for flagship density: the user expects the UI to use the space.
     tw = max(20, term_width)
-    if tw < 80:
-        base = tw - 4
-    elif tw < 120:
-        base = tw - 6
-    else:
-        base = int(tw * 0.9)
-    return max(30, min(base, tw - 2, 160))
+    return max(0, tw - 2)

@@ -1,6 +1,7 @@
 import pytest
 
-from tasks import Status, SubTask, Task, TaskDetail, TaskTrackerTUI
+from tasks import Status, Step, Task, TaskDetail, TaskTrackerTUI
+from core import PlanNode, TaskNode
 
 
 def build_tui(tmp_path, *, project_mode: bool = False):
@@ -11,14 +12,14 @@ def build_tui(tmp_path, *, project_mode: bool = False):
     return tui
 
 
-def open_subtask_detail(tui: TaskTrackerTUI, subtask: SubTask, *, task_id: str = "TASK-TEST"):
+def open_subtask_detail(tui: TaskTrackerTUI, subtask: Step, *, task_id: str = "TASK-TEST"):
     detail = TaskDetail(id=task_id, title="Detail", status="TODO")
-    detail.subtasks = [subtask]
+    detail.steps = [subtask]
     tui.detail_mode = True
     tui.current_task_detail = detail
     tui._rebuild_detail_flat()
-    tui.detail_selected_path = "0"
-    tui.show_subtask_details("0")
+    tui.detail_selected_path = "s:0"
+    tui.show_subtask_details("s:0")
     return detail
 
 
@@ -43,9 +44,9 @@ def test_move_selection_clamps_task_list(tmp_path):
 def test_move_selection_clamps_detail_mode(tmp_path):
     tui = build_tui(tmp_path)
     detail = TaskDetail(id="TASK-999", title="Detail", status="TODO")
-    detail.subtasks = [
-        SubTask(False, "Subtask example long enough to be valid"),
-        SubTask(False, "Second subtask example with details"),
+    detail.steps = [
+        Step(False, "Step example long enough to be valid"),
+        Step(False, "Second step example with details"),
     ]
     detail.next_steps = ["Ship vertical mouse scroll"]
     detail.dependencies = ["TASK-001"]
@@ -57,7 +58,7 @@ def test_move_selection_clamps_detail_mode(tmp_path):
 
     # Jump beyond total items and ensure we clamp to the last slot
     tui.move_vertical_selection(10)
-    total_items = len(detail.subtasks)
+    total_items = len(detail.steps)
     assert tui.detail_selected_index == total_items - 1
 
     tui.move_vertical_selection(-20)
@@ -73,7 +74,7 @@ def test_subtasks_view_stays_within_height(tmp_path):
         status="ACTIVE",
         description="\n".join(f"Line {i}" for i in range(12)),
     )
-    detail.subtasks = [SubTask(False, f"Subtask {i} long text goes here {i}") for i in range(8)]
+    detail.steps = [Step(False, f"Step {i} long text goes here {i}") for i in range(8)]
 
     tui.detail_mode = True
     tui.current_task_detail = detail
@@ -84,16 +85,18 @@ def test_subtasks_view_stays_within_height(tmp_path):
     lines = rendered.split("\n")
 
     assert len(lines) <= tui.get_terminal_height()
-    assert f">  {tui.detail_selected_index} " in rendered
+    expected_title = f"Step {tui.detail_selected_index} long text goes here {tui.detail_selected_index}"
+    assert expected_title in rendered
     assert "↑" in rendered and "↓" in rendered
 
 
-def test_detail_renders_nested_subtasks_with_paths(tmp_path):
+def test_detail_drilldown_cycle_step_plan_task(tmp_path):
     tui = build_tui(tmp_path)
     detail = TaskDetail(id="TASK-NEST", title="Detail", status="ACTIVE")
-    child = SubTask(False, "Child item", success_criteria=["c"], tests=["t"], blockers=["b"])
-    parent = SubTask(False, "Parent item", success_criteria=["p"], tests=["t"], blockers=["b"], children=[child])
-    detail.subtasks = [parent]
+    child = Step(False, "Child item", success_criteria=["c"], tests=["t"], blockers=["b"])
+    parent = Step(False, "Parent item", success_criteria=["p"], tests=["t"], blockers=["b"])
+    parent.plan = PlanNode(tasks=[TaskNode(title="Nested task", steps=[child])])
+    detail.steps = [parent]
     tui.detail_mode = True
     tui.current_task_detail = detail
     tui.detail_selected_index = 0
@@ -101,74 +104,90 @@ def test_detail_renders_nested_subtasks_with_paths(tmp_path):
 
     rendered = "".join(text for _, text in tui.get_detail_text())
 
-    assert "SUBTASKS (0/2" in rendered
-    assert ">▾ 0 " in rendered  # parent with expand indicator
-    assert "0.0 " in rendered  # nested subtask visible
+    # Root task detail shows only one level (steps list) — no inline plan/task/step mixing.
+    assert f"{tui._t('SUBTASKS')} (0/1" in rendered
+    assert "1.P " not in rendered
+    assert "1.T1 " not in rendered
+    assert "1.T1.1 " not in rendered
+
+    # Enter Step → Plan (Tasks list)
+    tui.show_subtask_details("s:0")
+    assert getattr(tui.current_task_detail, "kind", "") == "plan"
+    rendered_plan = "".join(text for _, text in tui.get_detail_text())
+    assert "Nested task" in rendered_plan
+    assert "Child item" not in rendered_plan
+
+    # Enter Task → Steps list
+    tui._open_selected_plan_task_detail()
+    assert getattr(tui.current_task_detail, "kind", "") == "task"
+    rendered_task = "".join(text for _, text in tui.get_detail_text())
+    assert "Child item" in rendered_task
 
 
-def test_collapse_expand_toggles_visibility(tmp_path):
+def test_drilldown_back_restores_previous_view(tmp_path):
     tui = build_tui(tmp_path)
     detail = TaskDetail(id="TASK-NEST", title="Detail", status="ACTIVE")
-    child = SubTask(False, "Child item", success_criteria=["c"], tests=["t"], blockers=["b"])
-    parent = SubTask(False, "Parent item", success_criteria=["p"], tests=["t"], blockers=["b"], children=[child])
-    detail.subtasks = [parent]
+    child = Step(False, "Child item", success_criteria=["c"], tests=["t"], blockers=["b"])
+    parent = Step(False, "Parent item", success_criteria=["p"], tests=["t"], blockers=["b"])
+    parent.plan = PlanNode(tasks=[TaskNode(title="Nested task", steps=[child])])
+    detail.steps = [parent]
     tui.detail_mode = True
     tui.current_task_detail = detail
+    tui.detail_selected_index = 0
     tui._rebuild_detail_flat()
 
-    rendered = "".join(text for _, text in tui.get_detail_text())
-    assert "0.0" in rendered  # expanded by default
+    tui.show_subtask_details("s:0")  # step → plan
+    assert getattr(tui.current_task_detail, "kind", "") == "plan"
+    tui._open_selected_plan_task_detail()  # plan task → task
+    assert getattr(tui.current_task_detail, "kind", "") == "task"
 
-    tui._toggle_collapse_selected(expand=False)
-    collapsed = "".join(text for _, text in tui.get_detail_text())
-    assert "0.0" not in collapsed
-    assert ">▸ 0 " in collapsed  # свернутый индикатор
-
-    tui._toggle_collapse_selected(expand=True)
-    expanded = "".join(text for _, text in tui.get_detail_text())
-    assert "0.0" in expanded
+    tui.exit_detail_view()
+    assert getattr(tui.current_task_detail, "kind", "") == "plan"
+    tui.exit_detail_view()
+    assert getattr(tui.current_task_detail, "kind", "") == "task"
+    assert getattr(tui.current_task_detail, "title", "") == "Detail"
 
 
 def test_collapse_state_persists_per_task(tmp_path):
     tui = build_tui(tmp_path)
-    child = SubTask(False, "Child", success_criteria=["c"], tests=["t"], blockers=["b"])
-    parent = SubTask(False, "Parent", success_criteria=["p"], tests=["t"], blockers=["b"], children=[child])
+    child = Step(False, "Child", success_criteria=["c"], tests=["t"], blockers=["b"])
+    parent = Step(False, "Parent", success_criteria=["p"], tests=["t"], blockers=["b"])
+    parent.plan = PlanNode(tasks=[TaskNode(title="Nested task", steps=[child])])
     detail = TaskDetail(id="TASK-PERSIST", title="Demo", status="ACTIVE")
-    detail.subtasks = [parent]
+    detail.steps = [parent]
     task = Task(name="Demo", status=Status.TODO, description="", category="", task_file="")
     task.detail = detail
 
     tui.show_task_details(task)
     tui._toggle_collapse_selected(expand=False)
     collapsed = "".join(text for _, text in tui.get_detail_text())
-    assert "0.0" not in collapsed
+    assert "1.T1.1" not in collapsed
 
     tui.show_task_details(task)  # reopen should keep collapsed
     reopened = "".join(text for _, text in tui.get_detail_text())
-    assert "0.0" not in reopened
+    assert "1.T1.1" not in reopened
 
 
 def test_selected_subtask_details_rendered(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 40
     detail = TaskDetail(id="TASK-DETAIL", title="Detail", status="ACTIVE")
-    detail.subtasks = [
-        SubTask(
+    detail.steps = [
+        Step(
             False,
             "Sub with data",
             success_criteria=["crit A"],
             tests=["test A"],
             blockers=["block A"],
         ),
-        SubTask(False, "Other"),
+        Step(False, "Other"),
     ]
     tui.detail_mode = True
     tui.current_task_detail = detail
     tui._rebuild_detail_flat()
     tui.detail_selected_index = 0
-    rendered = "".join(text for _, text in tui.get_detail_text())
+    rendered = "".join(text for _, text in tui.get_footer_text())
 
-    assert "SUBTASK DETAILS" in rendered
     assert "crit A" in rendered
     assert "test A" in rendered
     assert "block A" in rendered
@@ -184,13 +203,12 @@ def test_compact_summary_shows_blockers_when_room(tmp_path):
         description="Line one; Line two;",
     )
     detail.blockers = ["dep a", "dep b"]
-    detail.subtasks = [SubTask(False, "Subtask 1 long body text") for _ in range(2)]
+    detail.steps = [Step(False, "Step 1 long body text") for _ in range(2)]
     tui.detail_mode = True
     tui.current_task_detail = detail
-    rendered = "".join(text for _, text in tui.get_detail_text())
+    rendered = "".join(text for _, text in tui.get_footer_text())
 
     assert "Description:" in rendered
-    assert "Blockers:" in rendered
     assert "dep a" in rendered
 
 
@@ -198,23 +216,26 @@ def test_selection_stops_at_last_item(tmp_path):
     tui = build_tui(tmp_path)
     tui.get_terminal_height = lambda: 12
     detail = TaskDetail(id="TASK-STOP", title="Detail", status="ACTIVE")
-    detail.subtasks = [SubTask(False, f"Subtask {i} long body text") for i in range(6)]
+    detail.steps = [Step(False, f"Step {i} long body text") for i in range(6)]
 
     tui.detail_mode = True
     tui.current_task_detail = detail
     tui._rebuild_detail_flat()
-    tui.detail_selected_index = len(detail.subtasks) - 1  # уже на последнем
+    tui.detail_selected_index = len(detail.steps) - 1  # уже на последнем
+    tui.detail_selected_path = f"s:{tui.detail_selected_index}"
     tui._set_footer_height(0)
 
     # Дополнительные скроллы вниз не должны убирать подсветку
     for _ in range(3):
         tui.move_vertical_selection(1)
         rendered = "".join(text for _, text in tui.get_detail_text())
-        assert f">  {tui.detail_selected_index} " in rendered
+        expected_title = f"Step {tui.detail_selected_index} long body text"
+        assert expected_title in rendered
 
-    assert tui.detail_selected_index == len(detail.subtasks) - 1
-    # подсветка последнего элемента остаётся на экране
-    assert f">  {tui.detail_selected_index} " in rendered
+    assert tui.detail_selected_index == len(detail.steps) - 1
+    # последний элемент остаётся на экране
+    expected_title = f"Step {tui.detail_selected_index} long body text"
+    assert expected_title in rendered
 
 
 def test_last_subtask_visible_with_long_header(tmp_path):
@@ -226,23 +247,25 @@ def test_last_subtask_visible_with_long_header(tmp_path):
         status="ACTIVE",
         description="\n".join(f"Line {i}" for i in range(8)),  # съедает место
     )
-    detail.subtasks = [SubTask(False, f"Subtask {i} body text") for i in range(13)]
+    detail.steps = [Step(False, f"Step {i} body text") for i in range(13)]
 
     tui.detail_mode = True
     tui.current_task_detail = detail
     tui._rebuild_detail_flat()
-    tui.detail_selected_index = len(detail.subtasks) - 1  # последний
+    tui.detail_selected_index = len(detail.steps) - 1  # последний
+    tui.detail_selected_path = f"s:{tui.detail_selected_index}"
     tui._set_footer_height(0)
 
     rendered = "".join(text for _, text in tui.get_detail_text())
-    assert f">  {tui.detail_selected_index} " in rendered  # последний виден
+    expected_title = f"Step {tui.detail_selected_index} body text"
+    assert expected_title in rendered  # последний виден
     # нижний маркер может отсутствовать, но последний элемент должен быть в окне
 
 
 def test_maybe_reload_works_in_detail_mode(tmp_path, monkeypatch):
     tui = build_tui(tmp_path)
     detail = TaskDetail(id="TASK-1", title="Detail", status="DONE")
-    detail.subtasks = [SubTask(False, "A"), SubTask(False, "B")]
+    detail.steps = [Step(False, "A"), Step(False, "B")]
     tui.detail_mode = True
     tui.current_task_detail = detail
     tui.tasks = [Task(id="TASK-1", name="Detail", status=Status.DONE, description="", category="", detail=detail)]
@@ -263,7 +286,7 @@ def test_maybe_reload_works_in_detail_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(tui, "load_tasks", fake_load)
     tui.maybe_reload()
     assert called.get("load")
-    assert "↻ CLI" in tui.status_message
+    assert tui.status_message.startswith("↻")
 
 def test_border_lines_not_focusable(tmp_path):
     tui = build_tui(tmp_path)

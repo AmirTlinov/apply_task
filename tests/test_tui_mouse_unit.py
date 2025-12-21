@@ -5,8 +5,8 @@ from prompt_toolkit.mouse_events import MouseEventType, MouseButton, MouseModifi
 from core.desktop.devtools.interface import tui_mouse
 
 
-def _mouse(event_type, button=MouseButton.LEFT, y=0, modifiers=()):
-    return SimpleNamespace(event_type=event_type, button=button, position=SimpleNamespace(y=y), modifiers=modifiers)
+def _mouse(event_type, button=MouseButton.LEFT, x=0, y=0, modifiers=()):
+    return SimpleNamespace(event_type=event_type, button=button, position=SimpleNamespace(x=x, y=y), modifiers=modifiers)
 
 
 def test_middle_paste_triggers_clipboard():
@@ -192,7 +192,7 @@ def test_detail_click_selects_and_opens():
     class TUI:
         detail_mode = True
         current_task_detail = True
-        detail_flat_subtasks = [("0", None), ("1", None)]
+        detail_flat_subtasks = [SimpleNamespace(key="0"), SimpleNamespace(key="1")]
         detail_selected_index = None
 
         def _subtask_index_from_y(self, y):
@@ -231,3 +231,25 @@ def test_list_click_selects_and_opens():
     tui_mouse.handle_body_mouse(tui, _mouse(MouseEventType.MOUSE_UP, y=1))
     tui_mouse.handle_body_mouse(tui, _mouse(MouseEventType.MOUSE_UP, y=1))
     assert calls == ["ensure", "show:B"]
+
+
+def test_detail_click_switches_tab_via_hitboxes():
+    class TUI:
+        detail_mode = True
+        current_task_detail = True
+        editing_mode = False
+        settings_mode = False
+        detail_tab = "overview"
+        detail_tab_scroll_offsets = {}
+        _detail_tab_hitboxes = {"y": 1, "ranges": [(2, 8, "plan")]}
+
+        def force_render(self):
+            self.rendered = True
+
+        def _subtask_index_from_y(self, y):
+            raise AssertionError("subtask resolution should not be called for tab click")
+
+    tui = TUI()
+    tui_mouse.handle_body_mouse(tui, _mouse(MouseEventType.MOUSE_UP, x=3, y=1))
+    assert tui.detail_tab == "plan"
+    assert getattr(tui, "rendered", False)

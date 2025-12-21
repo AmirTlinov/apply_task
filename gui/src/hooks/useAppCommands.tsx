@@ -7,31 +7,48 @@ import {
     BarChart3,
     FolderOpen,
     Settings,
-    RefreshCw
+    RefreshCw,
+    History,
+    Undo2,
+    Redo2
 } from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
 import type { CommandPaletteCommand } from "@/components/common/CommandPalette";
 
-export function useAppCommands(refreshTasks?: () => void) {
+export function useAppCommands(opts?: {
+    refreshTasks?: () => void;
+    undo?: () => void;
+    redo?: () => void;
+    openHistory?: () => void;
+}) {
     const navigate = useNavigate();
     const { setNewTaskModalOpen } = useUIStore();
 
     const commands: CommandPaletteCommand[] = [
         {
             id: "new-task",
-            label: "Create new task",
-            description: "Create a task in the current project",
+            label: "Create new plan/task",
+            description: "Create a plan or task in the current project",
             icon: <Plus className="h-3.5 w-3.5 text-primary" />,
             shortcut: "⌘ N",
-            keywords: ["create", "new", "task"],
+            keywords: ["create", "new", "plan", "task"],
             onSelect: () => setNewTaskModalOpen(true),
         },
         {
-            id: "go-list",
+            id: "go-plans",
+            label: "Go to Plans",
+            description: "Plans list view",
+            icon: <LayoutList className="h-3.5 w-3.5 text-foreground-subtle" />,
+            shortcut: "g l",
+            keywords: ["plans", "list"],
+            onSelect: () => navigate({ to: "/plans" }),
+        },
+        {
+            id: "go-tasks",
             label: "Go to Tasks",
             description: "Task list view",
             icon: <LayoutList className="h-3.5 w-3.5 text-foreground-subtle" />,
-            shortcut: "g l",
+            shortcut: "g t",
             keywords: ["tasks", "list"],
             onSelect: () => navigate({ to: "/" }),
         },
@@ -49,7 +66,7 @@ export function useAppCommands(refreshTasks?: () => void) {
             label: "Go to Timeline",
             description: "Activity feed",
             icon: <Clock className="h-3.5 w-3.5 text-foreground-subtle" />,
-            shortcut: "g t",
+            shortcut: "g i",
             keywords: ["timeline", "activity"],
             onSelect: () => navigate({ to: "/timeline" }),
         },
@@ -67,6 +84,7 @@ export function useAppCommands(refreshTasks?: () => void) {
             label: "Go to Projects",
             description: "Switch active project",
             icon: <FolderOpen className="h-3.5 w-3.5 text-foreground-subtle" />,
+            shortcut: "g p",
             keywords: ["projects", "namespace"],
             onSelect: () => navigate({ to: "/projects" }),
         },
@@ -75,6 +93,7 @@ export function useAppCommands(refreshTasks?: () => void) {
             label: "Go to Settings",
             description: "Appearance & preferences",
             icon: <Settings className="h-3.5 w-3.5 text-foreground-subtle" />,
+            shortcut: "g s",
             keywords: ["settings", "preferences"],
             onSelect: () => navigate({ to: "/settings" }),
         },
@@ -85,7 +104,39 @@ export function useAppCommands(refreshTasks?: () => void) {
             icon: <RefreshCw className="h-3.5 w-3.5 text-foreground-subtle" />,
             keywords: ["refresh", "reload"],
             onSelect: () => {
-                refreshTasks?.();
+                opts?.refreshTasks?.();
+            },
+        },
+        {
+            id: "history-open",
+            label: "Open history",
+            description: "View operation history (undo/redo)",
+            icon: <History className="h-3.5 w-3.5 text-foreground-subtle" />,
+            keywords: ["history", "undo", "redo"],
+            onSelect: () => {
+                opts?.openHistory?.();
+            },
+        },
+        {
+            id: "undo",
+            label: "Undo",
+            description: "Undo last operation (safe snapshot restore)",
+            icon: <Undo2 className="h-3.5 w-3.5 text-foreground-subtle" />,
+            shortcut: "⌘ Z",
+            keywords: ["undo", "rollback"],
+            onSelect: () => {
+                opts?.undo?.();
+            },
+        },
+        {
+            id: "redo",
+            label: "Redo",
+            description: "Redo last undone operation (snapshot restore)",
+            icon: <Redo2 className="h-3.5 w-3.5 text-foreground-subtle" />,
+            shortcut: "⇧ ⌘ Z",
+            keywords: ["redo"],
+            onSelect: () => {
+                opts?.redo?.();
             },
         },
     ];

@@ -7,7 +7,6 @@ from unittest.mock import Mock
 from core import Status
 from core.desktop.devtools.interface.tui_models import (
     Task,
-    CLI_DEPS,
     CHECKLIST_SECTIONS,
     InteractiveFormattedTextControl,
 )
@@ -31,8 +30,8 @@ class TestTask:
         assert task.category == "test"
         assert task.completed is False
         assert task.progress == 0
-        assert task.subtasks_count == 0
-        assert task.subtasks_completed == 0
+        assert task.children_count == 0
+        assert task.children_completed == 0
 
     def test_task_creation_full(self):
         """Test creating task with all fields."""
@@ -44,8 +43,8 @@ class TestTask:
             completed=True,
             task_file=".tasks/test.task",
             progress=75,
-            subtasks_count=5,
-            subtasks_completed=3,
+            children_count=5,
+            children_completed=3,
             id="TASK-001",
             parent="TASK-000",
             domain="test-domain",
@@ -61,28 +60,6 @@ class TestTask:
         assert task.parent == "TASK-000"
         assert task.domain == "test-domain"
         assert task.blocked is True
-
-
-class TestCliDeps:
-    """Tests for CLI_DEPS constant."""
-
-    def test_cli_deps_has_all_required_attributes(self):
-        """Test that CLI_DEPS has all required attributes."""
-        assert hasattr(CLI_DEPS, "manager_factory")
-        assert hasattr(CLI_DEPS, "translate")
-        assert hasattr(CLI_DEPS, "derive_domain_explicit")
-        assert hasattr(CLI_DEPS, "resolve_task_reference")
-        assert hasattr(CLI_DEPS, "save_last_task")
-        assert hasattr(CLI_DEPS, "normalize_task_id")
-        assert hasattr(CLI_DEPS, "task_to_dict")
-
-    def test_cli_deps_manager_factory(self):
-        """Test that manager_factory creates TaskManager."""
-        manager = CLI_DEPS.manager_factory()
-        assert manager is not None
-        # Check that it's a TaskManager instance
-        from core.desktop.devtools.application.task_manager import TaskManager
-        assert isinstance(manager, TaskManager)
 
 
 class TestChecklistSections:

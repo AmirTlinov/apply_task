@@ -34,7 +34,7 @@ def test_sync_indicator_shows_failure_and_tooltip(tmp_path, monkeypatch):
     style, text, handler = fragments[0]
 
     assert "status.fail" in style
-    assert text.endswith("!")
+    assert text == "Git"
     assert callable(handler)
 
     # hover triggers tooltip update (should not raise)

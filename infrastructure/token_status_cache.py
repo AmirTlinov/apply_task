@@ -1,7 +1,7 @@
 """Token status cache for deduplicating GitHub Projects warnings.
 
 Session-level caching prevents spamming the same warning multiple times
-per CLI session or across rapid consecutive calls.
+per application session or across rapid consecutive calls.
 """
 
 import hashlib

@@ -3,8 +3,9 @@
  */
 
 import { Plus, Search, FolderOpen, CheckCircle2, Inbox } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-type EmptyStateVariant = "tasks" | "search" | "filtered" | "completed" | "default";
+type EmptyStateVariant = "plans" | "tasks" | "search" | "filtered" | "completed" | "default";
 
 interface EmptyStateProps {
   variant?: EmptyStateVariant;
@@ -26,8 +27,14 @@ const variantConfig: Record<
   tasks: {
     icon: Inbox,
     title: "No tasks yet",
-    description: "Create your first task to get started tracking your work",
+    description: "Create your first task to start tracking your work",
     actionLabel: "Create Task",
+  },
+  plans: {
+    icon: Inbox,
+    title: "No plans yet",
+    description: "Create your first plan to structure the work",
+    actionLabel: "Create Plan",
   },
   search: {
     icon: Search,
@@ -42,7 +49,7 @@ const variantConfig: Record<
   completed: {
     icon: CheckCircle2,
     title: "All done!",
-    description: "You've completed all your tasks. Time to celebrate! 🎉",
+    description: "You've completed all your tasks. Time to celebrate.",
   },
   default: {
     icon: Inbox,
@@ -65,88 +72,30 @@ export function EmptyState({
   const displayActionLabel = actionLabel ?? config.actionLabel;
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "48px 24px",
-        textAlign: "center",
-        minHeight: "320px",
-      }}
-    >
-      {/* Animated icon container */}
-      <div
-        className="empty-state-icon"
-        style={{
-          width: "80px",
-          height: "80px",
-          borderRadius: "20px",
-          backgroundColor: "var(--color-background-muted)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          marginBottom: "24px",
-        }}
-      >
-        <Icon
-          style={{
-            width: "36px",
-            height: "36px",
-            color: "var(--color-foreground-subtle)",
-          }}
-        />
+    <div className="flex min-h-[260px] flex-col items-center justify-center p-[var(--density-page-pad)] text-center">
+      <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-background-muted">
+        <Icon className="h-8 w-8 text-foreground-subtle" />
       </div>
 
-      {/* Title */}
-      <h3
-        style={{
-          fontSize: "18px",
-          fontWeight: 600,
-          color: "var(--color-foreground)",
-          marginBottom: "8px",
-          letterSpacing: "-0.01em",
-        }}
-      >
+      <h3 className="mb-2 text-lg font-semibold tracking-tight text-foreground">
         {displayTitle}
       </h3>
 
-      {/* Description */}
       <p
-        style={{
-          fontSize: "14px",
-          color: "var(--color-foreground-muted)",
-          maxWidth: "360px",
-          lineHeight: 1.5,
-          marginBottom: displayActionLabel ? "24px" : "0",
-        }}
+        className={
+          displayActionLabel
+            ? "mb-6 max-w-[360px] text-sm leading-relaxed text-foreground-muted"
+            : "max-w-[360px] text-sm leading-relaxed text-foreground-muted"
+        }
       >
         {displayDescription}
       </p>
 
-      {/* Action button */}
       {displayActionLabel && onAction && (
-        <button
-          onClick={onAction}
-          className="btn btn-primary"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "10px 20px",
-            backgroundColor: "var(--color-primary)",
-            color: "white",
-            fontSize: "14px",
-            fontWeight: 500,
-            borderRadius: "8px",
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          <Plus style={{ width: "16px", height: "16px" }} />
+        <Button onClick={onAction} className="gap-2">
+          <Plus className="h-4 w-4" />
           {displayActionLabel}
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -161,15 +110,6 @@ export function EmptyStateInline({
   message?: string;
 }) {
   return (
-    <div
-      style={{
-        padding: "24px",
-        textAlign: "center",
-        color: "var(--color-foreground-muted)",
-        fontSize: "14px",
-      }}
-    >
-      {message}
-    </div>
+    <div className="p-[var(--density-page-pad)] text-center text-sm text-foreground-muted">{message}</div>
   );
 }

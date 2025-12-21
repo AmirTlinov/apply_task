@@ -76,7 +76,7 @@ class TestToolDefinitions:
 
     def test_all_intents_covered(self):
         """All main intents should have a tool."""
-        from core.desktop.devtools.interface.cli_ai import INTENT_HANDLERS
+        from core.desktop.devtools.interface.intent_api import INTENT_HANDLERS
 
         covered_intents = set(TOOL_TO_INTENT.values())
         # These intents should be covered
@@ -153,21 +153,21 @@ class TestMCPServer:
         server.handle_request(JsonRpcRequest(jsonrpc="2.0", method="initialize", id=1))
         server.handle_request(JsonRpcRequest(jsonrpc="2.0", method="notifications/initialized"))
 
-        # Create task
+        # Create plan
         req = JsonRpcRequest(
             jsonrpc="2.0",
             method="tools/call",
             id=4,
             params={
                 "name": "tasks_create",
-                "arguments": {"title": "Test Task"}
+                "arguments": {"title": "Test Plan", "kind": "plan"}
             }
         )
         resp = server.handle_request(req)
 
         content = json.loads(resp["result"]["content"][0]["text"])
         assert content["success"] is True
-        assert "task_id" in content["result"]
+        assert "plan_id" in content["result"]
 
     def test_tools_call_unknown_tool(self, tmp_path):
         server = MCPServer(tasks_dir=tmp_path / ".tasks")
@@ -230,36 +230,47 @@ class TestMCPToolsIntegration:
     """Integration tests for MCP tools with task operations."""
 
     def test_full_workflow(self, tmp_path):
-        """Test create -> decompose -> define -> verify -> progress."""
+        """Test plan create -> task create -> decompose -> verify -> progress."""
         server = MCPServer(tasks_dir=tmp_path / ".tasks")
 
         # Initialize
         server.handle_request(JsonRpcRequest(jsonrpc="2.0", method="initialize", id=1))
         server.handle_request(JsonRpcRequest(jsonrpc="2.0", method="notifications/initialized"))
 
-        # 1. Create task
+        # 1. Create plan
         resp = server.handle_request(JsonRpcRequest(
             jsonrpc="2.0",
             method="tools/call",
             id=2,
-            params={"name": "tasks_create", "arguments": {"title": "Integration Test"}}
+            params={"name": "tasks_create", "arguments": {"title": "Integration Plan", "kind": "plan"}}
+        ))
+        content = json.loads(resp["result"]["content"][0]["text"])
+        plan_id = content["result"]["plan_id"]
+        assert plan_id
+
+        # 2. Create task under plan
+        resp = server.handle_request(JsonRpcRequest(
+            jsonrpc="2.0",
+            method="tools/call",
+            id=3,
+            params={"name": "tasks_create", "arguments": {"title": "Integration Task", "kind": "task", "parent": plan_id}},
         ))
         content = json.loads(resp["result"]["content"][0]["text"])
         task_id = content["result"]["task_id"]
         assert task_id
 
-        # 2. Decompose - needs criteria, tests, blockers
+        # 3. Decompose - steps require success_criteria; blockers are data (not a checkpoint)
         resp = server.handle_request(JsonRpcRequest(
             jsonrpc="2.0",
             method="tools/call",
-            id=3,
+            id=4,
             params={
                 "name": "tasks_decompose",
                 "arguments": {
                     "task": task_id,
-                    "subtasks": [{
+                    "steps": [{
                         "title": "Step 1",
-                        "criteria": ["Done"],
+                        "success_criteria": ["Done"],
                         "tests": ["test_step1"],
                         "blockers": ["none"]
                     }]
@@ -270,20 +281,19 @@ class TestMCPToolsIntegration:
         assert content["success"] is True
         assert content["result"]["total_created"] == 1
 
-        # 3. Verify all checkpoints (criteria, tests, blockers)
+        # 4. Verify checkpoints (criteria, tests)
         resp = server.handle_request(JsonRpcRequest(
             jsonrpc="2.0",
             method="tools/call",
-            id=4,
+            id=5,
             params={
                 "name": "tasks_verify",
                 "arguments": {
                     "task": task_id,
-                    "path": "0",
+                    "path": "s:0",
                     "checkpoints": {
                         "criteria": {"confirmed": True, "note": "criteria ok"},
                         "tests": {"confirmed": True, "note": "tests ok"},
-                        "blockers": {"confirmed": True, "note": "blockers resolved"}
                     }
                 }
             }
@@ -291,24 +301,24 @@ class TestMCPToolsIntegration:
         content = json.loads(resp["result"]["content"][0]["text"])
         assert content["success"] is True
 
-        # 4. Progress - mark as complete
+        # 5. Progress - mark as complete
         resp = server.handle_request(JsonRpcRequest(
             jsonrpc="2.0",
             method="tools/call",
-            id=5,
+            id=6,
             params={
                 "name": "tasks_progress",
-                "arguments": {"task": task_id, "path": "0", "completed": True}
+                "arguments": {"task": task_id, "path": "s:0", "completed": True}
             }
         ))
         content = json.loads(resp["result"]["content"][0]["text"])
         assert content["success"] is True
 
-        # 5. Context to verify state
+        # 6. Context to verify state
         resp = server.handle_request(JsonRpcRequest(
             jsonrpc="2.0",
             method="tools/call",
-            id=6,
+            id=7,
             params={"name": "tasks_context", "arguments": {"task": task_id}}
         ))
         content = json.loads(resp["result"]["content"][0]["text"])
@@ -322,12 +332,12 @@ class TestMCPToolsIntegration:
         server.handle_request(JsonRpcRequest(jsonrpc="2.0", method="initialize", id=1))
         server.handle_request(JsonRpcRequest(jsonrpc="2.0", method="notifications/initialized"))
 
-        # Create task
+        # Create plan
         server.handle_request(JsonRpcRequest(
             jsonrpc="2.0",
             method="tools/call",
             id=2,
-            params={"name": "tasks_create", "arguments": {"title": "Undo Test"}}
+            params={"name": "tasks_create", "arguments": {"title": "Undo Plan", "kind": "plan"}}
         ))
 
         # Undo
@@ -348,30 +358,40 @@ class TestMCPToolsIntegration:
         server.handle_request(JsonRpcRequest(jsonrpc="2.0", method="initialize", id=1))
         server.handle_request(JsonRpcRequest(jsonrpc="2.0", method="notifications/initialized"))
 
-        # Create task first
+        # Create plan first
         resp = server.handle_request(JsonRpcRequest(
             jsonrpc="2.0",
             method="tools/call",
             id=2,
-            params={"name": "tasks_create", "arguments": {"title": "Batch Test"}}
+            params={"name": "tasks_create", "arguments": {"title": "Batch Plan", "kind": "plan"}}
         ))
         content = json.loads(resp["result"]["content"][0]["text"])
-        task_id = content["result"]["task_id"]
+        plan_id = content["result"]["plan_id"]
 
-        # Atomic batch - subtasks need criteria, tests, blockers
+        # Create task under plan
         resp = server.handle_request(JsonRpcRequest(
             jsonrpc="2.0",
             method="tools/call",
             id=3,
+            params={"name": "tasks_create", "arguments": {"title": "Batch Task", "kind": "task", "parent": plan_id}},
+        ))
+        content = json.loads(resp["result"]["content"][0]["text"])
+        task_id = content["result"]["task_id"]
+
+        # Atomic batch: decompose then context
+        resp = server.handle_request(JsonRpcRequest(
+            jsonrpc="2.0",
+            method="tools/call",
+            id=4,
             params={
                 "name": "tasks_batch",
                 "arguments": {
                     "task": task_id,
                     "atomic": True,
                     "operations": [
-                        {"intent": "decompose", "subtasks": [{
+                        {"intent": "decompose", "steps": [{
                             "title": "B1",
-                            "criteria": ["Done"],
+                            "success_criteria": ["Done"],
                             "tests": ["test_b1"],
                             "blockers": ["none"],
                         }]},

@@ -1,4 +1,4 @@
-from tasks import Status, SubTask, TaskDetail, TaskTrackerTUI
+from tasks import Status, Step, TaskDetail, TaskTrackerTUI
 
 
 def test_detail_view_clamped_to_terminal(tmp_path):
@@ -15,7 +15,7 @@ def test_detail_view_clamped_to_terminal(tmp_path):
         blockers=[f"blocker {i}" for i in range(5)],
         domain="devtools",
     )
-    detail.subtasks = [SubTask(False, f"Subtask {i}") for i in range(6)]
+    detail.steps = [Step(False, f"Step {i}") for i in range(6)]
 
     tui.detail_mode = True
     tui.current_task_detail = detail
@@ -25,4 +25,3 @@ def test_detail_view_clamped_to_terminal(tmp_path):
 
     assert len(lines) <= tui.get_terminal_height()
     assert all(tui._display_width(line) <= tui.get_terminal_width() for line in lines if line)
-

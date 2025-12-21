@@ -2,25 +2,25 @@ import itertools
 
 import pytest
 
-from tasks import SubTask, TaskDetail, TaskTrackerTUI
+from tasks import TaskDetail, TaskTrackerTUI
 
 
 @pytest.mark.parametrize(
-    "term_width,expected_max",
+    "term_width",
     [
-        (70, 66),   # tw-4
-        (100, 94),  # tw-6
-        (200, 160), # capped at 160
+        70,
+        100,
+        200,
     ],
 )
-def test_detail_content_width_breakpoints(term_width, expected_max, tmp_path):
+def test_detail_content_width_uses_terminal_width(term_width, tmp_path):
     tui = TaskTrackerTUI(tasks_dir=tmp_path / ".tasks")
     tui.get_terminal_width = lambda: term_width
     width = tui._detail_content_width()
 
-    assert width <= expected_max
+    assert width == term_width - 2
     assert width <= term_width - 2
-    assert width >= 30
+    assert width >= 0
 
 
 @pytest.mark.parametrize("term_width,term_height", [(58, 10), (82, 14), (120, 18)])
@@ -38,7 +38,7 @@ def test_detail_view_resizes_for_various_widths(tmp_path, term_width, term_heigh
         blockers=[f"blocker {i}" for i in range(3)],
         domain="devtools",
     )
-    detail.subtasks = []
+    detail.steps = []
 
     tui.detail_mode = True
     tui.current_task_detail = detail
@@ -47,4 +47,3 @@ def test_detail_view_resizes_for_various_widths(tmp_path, term_width, term_heigh
 
     assert len(lines) <= tui.get_terminal_height()
     assert all(tui._display_width(line) <= tui.get_terminal_width() for line in lines if line)
-

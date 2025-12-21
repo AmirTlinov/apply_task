@@ -42,8 +42,9 @@ def test_sync_indicator_pull_push_label(monkeypatch):
         last_pull = "P"
         last_push = "Q"
 
+    calls = {}
     tui = SimpleNamespace(manager=SimpleNamespace(sync_service=Sync()))
-    tui.set_status_message = lambda msg, ttl=0: None
+    tui.set_status_message = lambda msg, ttl=0: calls.setdefault("msg", msg)
     tui._project_config_snapshot = lambda: {
         "auto_sync": True,
         "status_reason": "",
@@ -52,8 +53,10 @@ def test_sync_indicator_pull_push_label(monkeypatch):
     }
 
     frags = build_sync_indicator(tui, filter_flash=True)
-    text = "".join(f[1] for f in frags)
-    assert "P" in text and "Q" in text
+    handler = frags[0][2]
+    handler(SimpleNamespace(event_type=MouseEventType.MOUSE_MOVE))
+    assert "pull=P" in calls.get("msg", "")
+    assert "push=Q" in calls.get("msg", "")
 
 
 def test_sync_indicator_fallback_snapshot_and_flash(monkeypatch):

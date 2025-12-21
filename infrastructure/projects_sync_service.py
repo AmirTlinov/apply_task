@@ -16,11 +16,11 @@ class ProjectsSyncService(SyncService):
     def config(self):
         return self._sync.config
 
-    def sync_task(self, task: TaskDetail) -> bool:
-        return bool(self._sync.sync_task(task))
+    def sync_step(self, step: TaskDetail) -> bool:
+        return bool(self._sync.sync_step(step))
 
-    def pull_task_fields(self, task: TaskDetail) -> None:
-        return self._sync.pull_task_fields(task)
+    def pull_step_fields(self, step: TaskDetail) -> None:
+        return self._sync.pull_step_fields(step)
 
     def clone(self) -> "ProjectsSyncService":
         if hasattr(self._sync, "clone"):

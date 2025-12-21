@@ -6,6 +6,7 @@ The project follows a “hexagonal monolith with vertical feature slices”. To 
 .tasks/
   <domain>/
     <feature>/
+      PLAN-xxx.task
       TASK-xxx.task
 core/
   <domain>/<feature>/application/...
@@ -14,39 +15,39 @@ core/
   <domain>/<feature>/interface/...
 ```
 
+Each `PLAN-xxx.task` stores the plan contract/checklist, and each `TASK-xxx.task` stores a task with a nested steps tree.
+
 ### Core principles
 
-1. **Domain = folder.** Every task must be created with `--domain=<domain>/<feature>` (`-F`). The path matches both the `.tasks/` subfolder and the corresponding package in code.
+1. **Domain = folder.** Every plan/task should carry an explicit `domain=<domain>/<feature>`. The path matches both the `.tasks/` subfolder and the corresponding package in code.
 2. **Vertical slices.** Choose the domain first (`payments`, `chat`, `analytics`), then the feature (`refunds`, `session-runtime`).
 3. **Hexagonal layers**
    - `application` – orchestration/use-cases.
    - `domain`/`core` – entities and policies.
    - `infrastructure` – adapters, storage, external IO.
-   - `interface` – CLI/TUI/API entry points.
+   - `interface` – TUI/MCP/GUI entry points.
 4. **Tasks map to artefacts.** Each `.tasks/domain/feature/TASK-xxx.task` must have code changes under the same package. No anonymous catch-all folders.
-5. **Phase and component** help filtering in the TUI but never replace `--domain`.
+5. **Phase and component** help filtering in the TUI but never replace `domain`.
 
-### Choosing `--domain`
+### Choosing `domain`
 
 1. Inspect existing folders inside `.tasks/`.
 2. If a domain is new, create the folder and update this file + README.
-3. The TUI shows the domain path column; verify your tasks appear under the expected branch.
+3. The TUI shows the domain path column; verify your plans/tasks appear under the expected branch.
 
-### Task creation example
+### Plan + task creation example
 
-```bash
-apply_task "Implement refunds API #feature @TASK-042" \
-  --domain payments/refunds \
-  --parent TASK-010 \
-  --description "Add refund orchestration flow" \
-  --tests "pytest -q tests/payments/test_refunds.py" \
-  --risks "pci scope;manual approval" \
-  --subtasks @payload/refunds_subtasks.json
+Create plan + task, then set domain via `edit` (MCP) or the TUI meta editor:
+
+```json
+{"intent":"create","kind":"plan","title":"Refunds plan","contract":"..."}
+{"intent":"create","kind":"task","parent":"PLAN-001","title":"Implement refunds API"}
+{"intent":"edit","task":"TASK-042","domain":"payments/refunds"}
 ```
 
 ### Active domains
 
-- `desktop/devtools` – CLI/TUI, GitHub Projects sync, внутренние инструменты автора.
+- `desktop/devtools` – TUI/MCP/GUI, GitHub Projects sync, внутренние инструменты автора.
 
 ### Adding a new domain
 

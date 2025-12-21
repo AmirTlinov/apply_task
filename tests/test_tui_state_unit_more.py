@@ -4,6 +4,8 @@
 from types import SimpleNamespace
 
 from core.desktop.devtools.interface import tui_state
+from core.desktop.devtools.interface.tui_detail_tree import DetailNodeEntry
+from core import Step, PlanNode, TaskNode
 
 
 class TestToggleCollapseSelected:
@@ -57,7 +59,16 @@ class TestToggleSubtaskCollapse:
                 )
 
             def _selected_subtask_entry(self):
-                return ("0", SimpleNamespace(children=[]), None, False, False)  # No children, has_children=False
+                step = Step(False, "x", success_criteria=["c"])
+                return DetailNodeEntry(
+                    key="s:0",
+                    kind="step",
+                    node=step,
+                    level=0,
+                    collapsed=False,
+                    has_children=False,
+                    parent_key=None,
+                )  # No children
 
             def _select_subtask_by_path(self, path):
                 rebuilt["select"] = path
@@ -89,7 +100,16 @@ class TestToggleSubtaskCollapse:
                 )
 
             def _selected_subtask_entry(self):
-                return ("0.1", SimpleNamespace(children=[]), None, False, False)  # No children, nested path
+                node = TaskNode(title="t")  # No steps => no children
+                return DetailNodeEntry(
+                    key="s:0.t:1",
+                    kind="task",
+                    node=node,
+                    level=0,
+                    collapsed=False,
+                    has_children=False,
+                    parent_key="p:s:0",
+                )  # No children, nested node
 
             def _select_subtask_by_path(self, path):
                 rebuilt["select"] = path
@@ -106,8 +126,9 @@ class TestToggleSubtaskCollapse:
         t = TUI()
         tui_state.toggle_subtask_collapse(t, expand=False)
         # Should select parent path
-        assert rebuilt["select"] == "0"
+        assert rebuilt["select"] == "p:s:0"
         assert rebuilt["render"] is True
+
 
     def test_toggle_subtask_collapse_expand_when_not_collapsed(self):
         """Test toggle_subtask_collapse expand when not collapsed."""
@@ -115,13 +136,24 @@ class TestToggleSubtaskCollapse:
 
         class TUI(SimpleNamespace):
             def __init__(self):
+                step = Step(False, "parent", success_criteria=["c"])
+                step.plan = PlanNode(tasks=[TaskNode(title="t", steps=[Step(False, "leaf", success_criteria=["c"])])])
                 super().__init__(
                     detail_collapsed=set(),
                     detail_flat_subtasks=[],
+                    _step=step,
                 )
 
             def _selected_subtask_entry(self):
-                return ("0", SimpleNamespace(children=[1]), None, False, True)  # Not collapsed, has children
+                return DetailNodeEntry(
+                    key="s:0",
+                    kind="step",
+                    node=self._step,
+                    level=0,
+                    collapsed=False,
+                    has_children=True,
+                    parent_key=None,
+                )  # Not collapsed, has children
 
             def _select_subtask_by_path(self, path):
                 rebuilt["select"] = path
@@ -132,7 +164,7 @@ class TestToggleSubtaskCollapse:
         t = TUI()
         tui_state.toggle_subtask_collapse(t, expand=True)
         # Should select child_path
-        assert rebuilt["select"] == "0.0"
+        assert rebuilt["select"] == "p:s:0"
         assert "rebuild" in rebuilt
 
     def test_toggle_subtask_collapse_collapse_when_collapsed(self):
@@ -142,12 +174,21 @@ class TestToggleSubtaskCollapse:
         class TUI(SimpleNamespace):
             def __init__(self):
                 super().__init__(
-                    detail_collapsed={"0"},  # Already collapsed
+                    detail_collapsed={"s:0.t:1"},  # The selected node is already collapsed
                     detail_flat_subtasks=[],
                 )
 
             def _selected_subtask_entry(self):
-                return ("0.1", SimpleNamespace(children=[1]), None, True, True)  # Collapsed, has children, nested
+                node = TaskNode(title="t", steps=[Step(False, "leaf", success_criteria=["c"])])
+                return DetailNodeEntry(
+                    key="s:0.t:1",
+                    kind="task",
+                    node=node,
+                    level=0,
+                    collapsed=True,
+                    has_children=True,
+                    parent_key="p:s:0",
+                )  # Collapsed, has children, nested
 
             def _select_subtask_by_path(self, path):
                 rebuilt["select"] = path
@@ -164,8 +205,63 @@ class TestToggleSubtaskCollapse:
         t = TUI()
         tui_state.toggle_subtask_collapse(t, expand=False)
         # Should select parent path when already collapsed
-        assert rebuilt["select"] == "0"
+        assert rebuilt["select"] == "p:s:0"
         assert rebuilt["render"] is True
+
+
+class TestCollapseExpandSubtree:
+    """Tests for subtree collapse/expand helpers (z/Z)."""
+
+    def test_collapse_and_expand_subtask_descendants(self):
+        rebuilt = {}
+
+        leaf = Step(False, "leaf", success_criteria=["c"])
+        child = Step(False, "child", success_criteria=["c"])
+        child.plan = PlanNode(tasks=[TaskNode(title="t1", steps=[leaf])])
+
+        root = Step(False, "root", success_criteria=["c"])
+        root.plan = PlanNode(tasks=[TaskNode(title="t0", steps=[child])])
+
+        class TUI(SimpleNamespace):
+            def __init__(self):
+                super().__init__(
+                    detail_collapsed=set(),
+                    detail_flat_subtasks=[],
+                    current_task_detail=SimpleNamespace(id="TASK-1"),
+                    collapsed_by_task={},
+                )
+
+            def _selected_subtask_entry(self):
+                return DetailNodeEntry(
+                    key="s:0",
+                    kind="step",
+                    node=root,
+                    level=0,
+                    collapsed=False,
+                    has_children=True,
+                    parent_key=None,
+                )
+
+            def _rebuild_detail_flat(self, path):
+                rebuilt.setdefault("rebuild", []).append(path)
+
+            def _ensure_detail_selection_visible(self, count):
+                rebuilt.setdefault("ensure", []).append(count)
+
+            def force_render(self):
+                rebuilt["render"] = True
+
+        t = TUI()
+        tui_state.collapse_subtask_descendants(t)
+        assert rebuilt["rebuild"][-1] == "s:0"
+        assert "p:s:0" in t.detail_collapsed
+        assert "s:0.t:0" in t.detail_collapsed
+        assert "s:0.t:0.s:0" in t.detail_collapsed  # child step has a plan
+        assert "p:s:0.t:0.s:0" in t.detail_collapsed
+        assert "s:0.t:0.s:0.t:0" in t.detail_collapsed
+
+        tui_state.expand_subtask_descendants(t)
+        assert t.detail_collapsed == set()
 
 
 class TestMaybeReload:

@@ -1,38 +1,126 @@
 """Rendering helpers for TaskTrackerTUI to keep the class slim."""
-
-import time
-from typing import Dict, List, Tuple
+import re
+from dataclasses import replace
+from typing import Dict, List, Optional, Tuple
 
 from prompt_toolkit.formatted_text import FormattedText
 
 from core import Status
 from util.responsive import ResponsiveLayoutManager
+from core.desktop.devtools.interface.tui_detail_tree import canonical_path as _detail_canonical_path, node_kind as _detail_node_kind
 
 
-def _is_task_cli_active(tui, task) -> bool:
-    """Check if task has active CLI activity indicator."""
-    cli_task_id = getattr(tui, "_cli_activity_task_id", None)
-    expires = getattr(tui, "_cli_activity_expires", 0)
-    if not cli_task_id or time.time() > expires:
-        return False
-    return task.id == cli_task_id
+def _merge_style(selected_style: Optional[str], fragment_style: str) -> str:
+    if not selected_style:
+        return fragment_style
+    return f"{selected_style} {fragment_style}".strip()
 
 
-def _is_subtask_cli_active(tui, subtask_path: str) -> bool:
-    """Check if subtask has active CLI activity indicator."""
-    cli_task_id = getattr(tui, "_cli_activity_task_id", None)
-    cli_subtask_path = getattr(tui, "_cli_activity_subtask_path", None)
-    expires = getattr(tui, "_cli_activity_expires", 0)
-    if not cli_task_id or time.time() > expires:
-        return False
-    # Check if current detail view is for the active task
-    if not tui.current_task_detail or tui.current_task_detail.id != cli_task_id:
-        return False
-    # If no specific subtask path, all subtasks of this task are considered active
-    if not cli_subtask_path:
-        return True
-    # Check if the path matches or is a parent/child of the active path
-    return subtask_path == cli_subtask_path or subtask_path.startswith(cli_subtask_path + ".") or cli_subtask_path.startswith(subtask_path + ".")
+def _display_row_id(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    for prefix in ("PLAN-", "TASK-", "STEP-", "NODE-"):
+        if raw.upper().startswith(prefix):
+            return raw[len(prefix):]
+    return raw
+
+
+_TITLE_ID_PREFIX = re.compile(r"^(PLAN|TASK|STEP|NODE)-\\d+[A-Z0-9./_-]*\\b", re.IGNORECASE)
+
+
+def _strip_leading_id(title: str) -> str:
+    raw = str(title or "").strip()
+    if not raw:
+        return ""
+    match = _TITLE_ID_PREFIX.match(raw)
+    if not match:
+        return raw
+    remainder = raw[match.end():].lstrip(" :#-/\\|")
+    return remainder or raw
+
+
+def _checkpoint_marks_fragments(node, width: int, *, selected_style: Optional[str] = None) -> List[Tuple[str, str]]:
+    """Return per-dot styled fragments for criteria/tests marks, padded to `width`."""
+    if width <= 0:
+        return []
+
+    dim = "class:text.dim"
+
+    if node is None:
+        return [(dim, " " * width)]
+
+    has_any = any(
+        hasattr(node, attr)
+        for attr in (
+            "criteria_confirmed",
+            "tests_confirmed",
+            "criteria_auto_confirmed",
+            "tests_auto_confirmed",
+            "success_criteria",
+            "tests",
+        )
+    )
+    if not has_any:
+        return [(dim, " " * width)]
+
+    criteria_ok = bool(getattr(node, "criteria_confirmed", False) or getattr(node, "criteria_auto_confirmed", False))
+    tests_ok = bool(getattr(node, "tests_confirmed", False) or getattr(node, "tests_auto_confirmed", False))
+
+    # Use the same glyph for both states; readiness is encoded by color.
+    crit_symbol = "•"
+    test_symbol = "•"
+
+    crit_style = "class:icon.check" if criteria_ok else "class:text.dim"
+    test_style = "class:icon.check" if tests_ok else "class:text.dim"
+
+    if width >= 5:
+        token: List[Tuple[str, str]] = [
+            (dim, "["),
+            (crit_style, crit_symbol),
+            (dim, " "),
+            (test_style, test_symbol),
+            (dim, "]"),
+        ]
+        token_len = 5
+    elif width == 4:
+        token = [
+            (dim, "["),
+            (crit_style, crit_symbol),
+            (test_style, test_symbol),
+            (dim, "]"),
+        ]
+        token_len = 4
+    elif width == 3:
+        token = [
+            (crit_style, crit_symbol),
+            (dim, " "),
+            (test_style, test_symbol),
+        ]
+        token_len = 3
+    elif width == 2:
+        token = [
+            (crit_style, crit_symbol),
+            (test_style, test_symbol),
+        ]
+        token_len = 2
+    else:  # width == 1
+        token = [(crit_style, crit_symbol)]
+        token_len = 1
+
+    if width <= token_len:
+        return token
+
+    pad_total = width - token_len
+    left_pad = pad_total // 2
+    right_pad = pad_total - left_pad
+    fragments: List[Tuple[str, str]] = []
+    if left_pad:
+        fragments.append((dim, " " * left_pad))
+    fragments.extend(token)
+    if right_pad:
+        fragments.append((dim, " " * right_pad))
+    return fragments
 
 
 def render_task_list_text(tui) -> FormattedText:
@@ -41,13 +129,19 @@ def render_task_list_text(tui) -> FormattedText:
 
 def render_task_list_text_impl(tui) -> FormattedText:
     term_width = max(1, tui.get_terminal_width())
-    if not tui.filtered_tasks:
+    filtered = tui.filtered_tasks
+    if not filtered:
         empty_width = min(term_width, max(20, min(90, term_width - 2)))
         tui.task_row_map = []
+        empty_key = "TASK_LIST_EMPTY"
+        cta_key = "CTA_CREATE_TASK"
+        if not getattr(tui, "project_mode", False) and getattr(tui, "project_section", "tasks") == "plans":
+            empty_key = "TASK_LIST_EMPTY_PLANS"
+            cta_key = "CTA_CREATE_PLAN"
         lines = [
             ('class:border', '+' + '-' * empty_width + '+\n'),
-            ('class:text.dim', '| ' + tui._t("TASK_LIST_EMPTY").ljust(empty_width - 2) + ' |\n'),
-            ('class:text', '| ' + tui._t("CTA_CREATE_TASK").ljust(empty_width - 2) + ' |\n'),
+            ('class:text.dim', '| ' + tui._t(empty_key).ljust(empty_width - 2) + ' |\n'),
+            ('class:text', '| ' + tui._t(cta_key).ljust(empty_width - 2) + ' |\n'),
             ('class:text', '| ' + tui._t("CTA_IMPORT_TASK").ljust(empty_width - 2) + ' |\n'),
             ('class:text.dim', '| ' + tui._t("CTA_DOMAIN_HINT").ljust(empty_width - 2) + ' |\n'),
             ('class:text.dim', '| ' + tui._t("CTA_KEYS_HINT").ljust(empty_width - 2) + ' |\n'),
@@ -60,18 +154,29 @@ def render_task_list_text_impl(tui) -> FormattedText:
     line_counter = 0
 
     layout = ResponsiveLayoutManager.select_layout(term_width)
+    project_mode = bool(getattr(tui, "project_mode", False))
+    if project_mode and layout.has_column("id"):
+        if layout.columns == ["idx", "id", "title"]:
+            layout = replace(layout, columns=["idx", "stat", "title"])
+        else:
+            layout = replace(layout, columns=[c for c in layout.columns if c != "id"])
     desired_widths: Dict[str, int] = {}
     if layout.has_column('progress'):
-        max_prog = max((len(f"{t.progress}%") for t in tui.filtered_tasks), default=4)
-        desired_widths['progress'] = max(3, max_prog)
-    if layout.has_column('subtasks'):
-        max_sub = 0
-        for t in tui.filtered_tasks:
-            if t.subtasks_count:
-                max_sub = max(max_sub, len(f"{t.subtasks_completed}/{t.subtasks_count}"))
-            else:
-                max_sub = max(max_sub, 1)
-        desired_widths['subtasks'] = max(3, max_sub)
+        metrics = getattr(tui, "_filtered_tasks_metrics", {}) or {}
+        max_prog = metrics.get("max_progress_len") or max((len(f"{t.progress}%") for t in filtered), default=4)
+        desired_widths['progress'] = max(3, int(max_prog))
+    if layout.has_column('id'):
+        max_id = max((len(_display_row_id(getattr(t, "id", ""))) for t in filtered), default=2)
+        desired_widths['id'] = max(2, int(max_id))
+    if layout.has_column('children'):
+        metrics = getattr(tui, "_filtered_tasks_metrics", {}) or {}
+        max_sub = metrics.get("max_children_len") or 0
+        if not max_sub:
+            for t in filtered:
+                done = int(getattr(t, "children_completed", 0) or 0)
+                total = int(getattr(t, "children_count", 0) or 0)
+                max_sub = max(max_sub, len(f"{done}/{total}"))
+        desired_widths['children'] = max(3, int(max_sub), int(tui._display_width(tui._t("TABLE_HEADER_SUBTASKS"))))
 
     widths = layout.calculate_widths(term_width, desired_widths)
 
@@ -89,19 +194,25 @@ def render_task_list_text_impl(tui) -> FormattedText:
     title_label = tui._t("TABLE_HEADER_TASK")
     if getattr(tui, "project_mode", False):
         title_label = tui._t("TABLE_HEADER_PROJECT", fallback="Проект")
+    elif getattr(tui, "project_section", "tasks") == "plans":
+        title_label = tui._t("TABLE_HEADER_PLAN", fallback=title_label)
     column_labels = {
         'idx': ('#', widths.get('idx', 3)),
+        'id': (tui._t("TABLE_HEADER_ID"), widths.get('id', 4)),
         'stat': ('◉', widths.get('stat', 3)),
         'title': (title_label, widths.get('title', 20)),
+        'marks': ('✓✓', widths.get('marks', 5)),
         'progress': (tui._t("TABLE_HEADER_PROGRESS"), widths.get('progress', 4)),
-        'subtasks': (tui._t("TABLE_HEADER_SUBTASKS"), widths.get('subtasks', 3)),
+        'children': (tui._t("TABLE_HEADER_SUBTASKS"), widths.get('children', 3)),
     }
 
     header_align = {
         'idx': 'center',
+        'id': 'center',
         'stat': 'center',
+        'marks': 'center',
         'progress': 'center',
-        'subtasks': 'center',
+        'children': 'center',
     }
     for col in layout.columns:
         if col in column_labels:
@@ -117,17 +228,23 @@ def render_task_list_text_impl(tui) -> FormattedText:
 
     compact_status_mode = len(layout.columns) <= 3
     visible_rows = tui._visible_row_limit()
-    start_idx = min(tui.list_view_offset, max(0, len(tui.filtered_tasks) - visible_rows))
-    end_idx = min(len(tui.filtered_tasks), start_idx + visible_rows)
+    start_idx = min(tui.list_view_offset, max(0, len(filtered) - visible_rows))
+    end_idx = min(len(filtered), start_idx + visible_rows)
 
     for idx in range(start_idx, end_idx):
-        task = tui.filtered_tasks[idx]
+        task = filtered[idx]
         status_text, status_class, _ = tui._get_status_info(task)
+        selected = idx == tui.selected_index
+        style_key = tui._selection_style_for_status(task.status)
 
         cell_data = {}
 
         if 'idx' in layout.columns:
-            cell_data['idx'] = (tui._format_cell(str(idx), widths['idx'], align='center'), 'class:text.dim')
+            cell_data['idx'] = (tui._format_cell(str(idx + 1), widths['idx'], align='center'), 'class:text.dim')
+
+        if 'id' in layout.columns:
+            id_text = _display_row_id(getattr(task, "id", ""))
+            cell_data['id'] = (tui._format_cell(id_text, widths['id'], align='center'), 'class:text.dim')
 
         if 'stat' in layout.columns:
             if compact_status_mode:
@@ -139,35 +256,35 @@ def render_task_list_text_impl(tui) -> FormattedText:
                 cell_data['stat'] = (tui._format_cell(status_text, widths['stat'], align='center'), status_class)
 
         if 'title' in layout.columns:
-            title_scrolled = tui._apply_scroll(task.name)
-            # Add CLI activity indicator
-            cli_active = _is_task_cli_active(tui, task)
-            if cli_active:
-                # Prepend activity indicator (⚡) to title
-                activity_prefix = "⚡"
-                title_with_indicator = activity_prefix + title_scrolled
-                cell_data['title'] = (tui._format_cell(title_with_indicator, widths['title']), 'class:icon.warn')
-            else:
-                cell_data['title'] = (tui._format_cell(title_scrolled, widths['title']), 'class:text')
+            title_scrolled = tui._apply_scroll(_strip_leading_id(task.name))
+            cell_data['title'] = (tui._format_cell(title_scrolled, widths['title']), 'class:text')
+
+        if 'marks' in layout.columns:
+            detail = getattr(task, "detail", None)
+            selected_style = f"class:{style_key}" if selected else None
+            cell_data['marks'] = _checkpoint_marks_fragments(detail, widths['marks'], selected_style=selected_style)
 
         if 'progress' in layout.columns:
             prog_text = f"{task.progress}%"
             prog_style = 'class:icon.check' if task.progress >= 100 else 'class:text.dim'
             cell_data['progress'] = (tui._format_cell(prog_text, widths['progress'], align='center'), prog_style)
 
-        if 'subtasks' in layout.columns:
-            subt_text = f"{task.subtasks_completed}/{task.subtasks_count}" if task.subtasks_count else "—"
-            cell_data['subtasks'] = (tui._format_cell(subt_text, widths['subtasks'], align='center'), 'class:text.dim')
+        if 'children' in layout.columns:
+            done = int(getattr(task, "children_completed", 0) or 0)
+            total = int(getattr(task, "children_count", 0) or 0)
+            subt_text = f"{done}/{total}"
+            cell_data['children'] = (tui._format_cell(subt_text, widths['children'], align='center'), 'class:text.dim')
 
         row_line = line_counter
-        style_key = tui._selection_style_for_status(task.status)
-        selected = idx == tui.selected_index
         result.append(('class:border', '|'))
         for col in layout.columns:
             if col in cell_data:
-                text, css_class = cell_data[col]
-                cell_style = f"class:{style_key}" if selected else css_class
-                result.append((cell_style, text))
+                if col == 'marks':
+                    result.extend(cell_data[col])
+                else:
+                    text, css_class = cell_data[col]
+                    cell_style = f"class:{style_key}" if selected else css_class
+                    result.append((cell_style, text))
                 result.append(('class:border', '|'))
 
         tui.task_row_map.append((row_line, idx))
@@ -186,12 +303,19 @@ def render_detail_text_impl(tui) -> FormattedText:
     if not tui.current_task_detail:
         return FormattedText([("class:text.dim", tui._t("STATUS_TASK_NOT_SELECTED"))])
 
+    if getattr(tui, "detail_tab", "overview") != "overview":
+        from core.desktop.devtools.interface.tui_detail_tabs import render_detail_tab_text
+        return render_detail_tab_text(tui)
+
     detail = tui.current_task_detail
-    if not getattr(tui, "detail_flat_subtasks", []):
-        tui._rebuild_detail_flat()
-    if not getattr(tui, "detail_selected_path", "") and tui.detail_flat_subtasks:
-        sel_idx = min(getattr(tui, "detail_selected_index", 0), len(tui.detail_flat_subtasks) - 1)
-        tui.detail_selected_path = tui.detail_flat_subtasks[sel_idx][0]
+    if getattr(detail, "kind", "task") != "plan":
+        if hasattr(tui, "_ensure_detail_flat"):
+            tui._ensure_detail_flat(getattr(tui, "detail_selected_path", None))
+        elif not getattr(tui, "detail_flat_subtasks", []):
+            tui._rebuild_detail_flat()
+        if not getattr(tui, "detail_selected_path", "") and tui.detail_flat_subtasks:
+            sel_idx = min(getattr(tui, "detail_selected_index", 0), len(tui.detail_flat_subtasks) - 1)
+            tui.detail_selected_path = tui.detail_flat_subtasks[sel_idx].key
     tui.subtask_row_map = []
     result: List[Tuple[str, str]] = []
 
@@ -233,245 +357,563 @@ def render_detail_text_impl(tui) -> FormattedText:
     result.append(('class:border', '| '))
     result.append(('class:header', tui._pad_display(title_display, content_width - 2)))
     result.append(('class:border', ' |\n'))
+
+    # Breadcrumbs / navigation context (stable even for deep nesting).
+    try:
+        _, _, path_prefix = tui._get_root_task_context()
+    except Exception:
+        path_prefix = ""
+    path_display = tui._display_subtask_path(path_prefix) if path_prefix else "—"
+    crumb_line = tui._t("DETAIL_BREADCRUMBS", path=path_display)
+    result.append(('class:border', '| '))
+    result.append(('class:text.dim', tui._pad_display(crumb_line, content_width - 2)))
+    result.append(('class:border', ' |\n'))
     result.append(('class:border', '+' + '-'*content_width + '+\n'))
 
-    meta_left = [
-        f"{tui._t('DOMAIN')}: {detail.domain or '-'}",
-        f"{tui._t('PHASE')}: {detail.phase or '-'}",
-        f"{tui._t('COMPONENT')}: {detail.component or '-'}",
-        f"{tui._t('PARENT')}: {detail.parent or '-'}",
+    # ---------- Tab bar (overview is a tab too) ----------
+    inner_width = max(0, content_width - 2)
+    current_tab = getattr(tui, "detail_tab", "overview") or "overview"
+    overview_label = tui._t("TAB_TASKS") if getattr(detail, "kind", "task") == "plan" else tui._t("TAB_OVERVIEW")
+    all_tabs = [
+        ("overview", overview_label),
+        ("plan", tui._t("TAB_PLAN")),
+        ("contract", tui._t("TAB_CONTRACT")),
+        ("notes", tui._t("TAB_NOTES")),
+        ("meta", tui._t("TAB_META")),
     ]
-    meta_right = [
-        f"{tui._t('STATUS_DONE')}: {detail.status}",
-        f"{tui._t('PROGRESS')}: {detail.calculate_progress():.0f}%",
-        f"Σ: {len(detail.subtasks)}",
-        f"{tui._t('TAGS')}: {', '.join(detail.tags) if detail.tags else '-'}",
-    ]
+    allowed_ids = None
+    try:
+        allowed_ids = set(getattr(tui, "_detail_tabs")() or [])
+    except Exception:
+        allowed_ids = None
+    tabs = [t for t in all_tabs if (allowed_ids is None or t[0] in allowed_ids)]
+    row: List[Tuple[str, str]] = [('class:border', '| ')]
+    remaining = inner_width
+    tabbar_y = sum(text.count("\n") for _, text in result)
+    tab_hitboxes: List[Tuple[int, int, str]] = []
+    x_cursor = 2  # account for leading "| "
 
-    def _render_meta_row(left: str, right: str) -> None:
-        inner = content_width - 2
-        left_padded = tui._pad_display(left, inner//2)
-        right_trimmed = tui._trim_display(right, inner - len(left_padded))
-        line = f"{left_padded}{right_trimmed}"
-        result.append(('class:border', '| '))
-        result.append(('class:text.dim', tui._pad_display(line, inner)))
-        result.append(('class:border', ' |\n'))
-
-    for l, r in zip(meta_left, meta_right):
-        _render_meta_row(l, r)
-
-    result.append(('class:border', '+' + '-'*content_width + '+\n'))
-
-    def _render_desc(label: str, text: str) -> None:
-        if not text:
+    def _push_tab(style: str, text: str, *, tab_id: str | None = None) -> None:
+        nonlocal remaining, x_cursor
+        if remaining <= 0:
             return
-        result.append(('class:border', '| '))
-        result.append(('class:header', f"{label}:".ljust(content_width - 2)))
-        result.append(('class:border', ' |\n'))
-        for line in tui._wrap_display(text, content_width - 2):
-            result.append(('class:border', '| '))
-            result.append(('class:text', line))
-            result.append(('class:border', ' |\n'))
+        chunk = tui._trim_display(text, remaining)
+        if not chunk:
+            return
+        row.append((style, chunk))
+        used = tui._display_width(chunk)
+        if tab_id is not None and used > 0:
+            tab_hitboxes.append((x_cursor, x_cursor + used, tab_id))
+        x_cursor += used
+        remaining -= used
 
-    _render_desc(tui._t("DESCRIPTION"), detail.description or "-")
-    if detail.context:
-        _render_desc(tui._t("STATUS_CONTEXT"), detail.context)
+    for idx_tab, (tab_id, label) in enumerate(tabs):
+        selected = tab_id == current_tab
+        style = "class:header" if selected else "class:text.dim"
+        token = f"[{label}]" if selected else label
+        if idx_tab > 0:
+            _push_tab("class:text.dim", "  ")
+        _push_tab(style, token, tab_id=tab_id)
+    if remaining > 0:
+        row.append(("class:text.dim", " " * remaining))
+    row.append(("class:border", " |\n"))
+    result.extend(row)
+    result.append(('class:border', '+' + '-'*content_width + '+\n'))
+    tui._detail_tab_hitboxes = {"y": tabbar_y, "ranges": tab_hitboxes}
 
-    # ---------------- Subtask list with scrolling window -----------------
-    tui._rebuild_detail_flat(getattr(tui, "detail_selected_path", None))
-    items: List[Tuple[str, object, int, bool, bool]] = list(tui.detail_flat_subtasks)
-    aux_sections = {"blockers": detail.blockers}
+    # Flagship density: keep the subtasks list as the primary content.
+    # ---------------- Overview list with scrolling window -----------------
+    aux_sections = {}
 
-    total_items = len(items)
     used_lines = 0
     for frag in result:
         if isinstance(frag, tuple) and len(frag) >= 2:
             used_lines += frag[1].count('\n')
     list_budget = max(1, tui.get_terminal_height() - tui.footer_height - used_lines - 3)
+    inner_width = max(1, content_width - 2)
+    table_width = inner_width + 2
 
-    if total_items:
-        tui.detail_selected_index = max(0, min(tui.detail_selected_index, total_items - 1))
-        visible = min(total_items, list_budget)
+    def _count_steps(nodes) -> tuple[int, int]:
+        """Count nested steps (iterative, no recursion). Returns (total, done)."""
+        total = 0
+        done = 0
+        stack = [iter(list(nodes or []))]
+        while stack:
+            try:
+                node = next(stack[-1])
+            except StopIteration:
+                stack.pop()
+                continue
+            total += 1
+            if getattr(node, "completed", False):
+                done += 1
+            plan = getattr(node, "plan", None)
+            tasks = list(getattr(plan, "tasks", []) or []) if plan else []
+            for task in reversed(tasks):
+                child_steps = list(getattr(task, "steps", []) or [])
+                if child_steps:
+                    stack.append(iter(child_steps))
+        return total, done
 
-        def _adjust_offset(vis: int) -> int:
-            max_offset = max(0, total_items - vis)
-            offset = min(getattr(tui, "detail_view_offset", 0), max_offset)
-            if tui.detail_selected_index < offset:
-                offset = tui.detail_selected_index
-            elif tui.detail_selected_index >= offset + vis:
-                offset = tui.detail_selected_index - vis + 1
-            return max(0, min(offset, max_offset))
+    def _display_node_path(node_key: str) -> str:
+        kind = _detail_node_kind(node_key)
+        if kind == "plan":
+            return tui._display_subtask_path(_detail_canonical_path(node_key, kind)) + ".P"
+        return tui._display_subtask_path(node_key)
 
-        tui.detail_view_offset = _adjust_offset(visible)
-        start = tui.detail_view_offset
-        end = min(total_items, start + visible)
-        hidden_above = start
-        hidden_below = total_items - end
+    def _detail_table_config(rows: List[Dict[str, object]], title_label: str):
+        # Detail views lose a couple of columns worth of width vs the main list view due to the
+        # outer frame. Select the layout as if we had the full terminal width so the column set
+        # stays consistent with the Plans table, then shrink columns during width calculation.
+        layout = ResponsiveLayoutManager.select_layout(table_width + 2)
+        required_cols = {"id", "marks", "progress", "children"}
+        if not required_cols.issubset(set(layout.columns)):
+            for candidate in reversed(ResponsiveLayoutManager.LAYOUTS):
+                if required_cols.issubset(set(candidate.columns)):
+                    layout = candidate
+                    break
+        desired_widths: Dict[str, int] = {}
+        if layout.has_column('progress'):
+            max_prog = max((len(f"{r['progress']}%") for r in rows), default=3)
+            desired_widths['progress'] = max(3, max_prog)
+        if layout.has_column('id'):
+            max_id = max((len(str(r.get("id_value", "") or "")) for r in rows), default=2)
+            desired_widths['id'] = max(2, max_id)
+        if layout.has_column('children'):
+            max_sub = max((len(f"{r['children_done']}/{r['children_total']}") for r in rows), default=3)
+            desired_widths['children'] = max(3, max_sub, int(tui._display_width(tui._t("TABLE_HEADER_SUBTASKS"))))
+        widths = layout.calculate_widths(table_width, desired_widths)
+        column_labels = {
+            'idx': ('#', widths.get('idx', 3)),
+            'id': (tui._t("TABLE_HEADER_ID"), widths.get('id', 4)),
+            'stat': ('◉', widths.get('stat', 3)),
+            'title': (title_label, widths.get('title', 20)),
+            'marks': ('✓✓', widths.get('marks', 5)),
+            'progress': (tui._t("TABLE_HEADER_PROGRESS"), widths.get('progress', 4)),
+            'children': (tui._t("TABLE_HEADER_SUBTASKS"), widths.get('children', 3)),
+        }
+        header_align = {
+            'idx': 'center',
+            'id': 'center',
+            'stat': 'center',
+            'marks': 'center',
+            'progress': 'center',
+            'children': 'center',
+        }
+        separator_line = "+".join("-" * widths[col] for col in layout.columns)
+        return layout, widths, column_labels, header_align, separator_line
 
-        while True:
-            marker_lines = int(hidden_above > 0) + int(hidden_below > 0)
-            if visible + marker_lines <= list_budget:
-                break
-            if visible == 1:
-                break
-            visible = max(1, min(total_items, list_budget - marker_lines))
+    # Plan overview shows Tasks in plan; Task overview shows nested Steps.
+    if getattr(detail, "kind", "task") == "plan":
+        plan_tasks = tui._plan_detail_tasks()
+        cache_key = getattr(tui, "_detail_plan_tasks_cache_key", None)
+        plan_rows: List[Dict[str, int]] = []
+        cached_rows = None
+        cached_summary = None
+        if cache_key and not getattr(tui, "_detail_plan_tasks_dirty", False):
+            cached_key = getattr(tui, "_detail_plan_rows_cache_key", None)
+            if cached_key == cache_key:
+                cached_rows = getattr(tui, "_detail_plan_rows_cache", None)
+                cached_summary = getattr(tui, "_detail_plan_summary_cache", None)
+        if cached_rows is not None and len(cached_rows) == len(plan_tasks) and cached_summary:
+            plan_rows = cached_rows
+            total_items = int(cached_summary.get("total", len(plan_tasks)))
+            completed = int(cached_summary.get("completed", 0))
+        else:
+            completed = 0
+            for t in plan_tasks:
+                blocked = bool(getattr(t, "blocked", False))
+                steps_total, steps_done = (
+                    tui._cached_step_tree_counts(t)
+                    if hasattr(tui, "_cached_step_tree_counts")
+                    else _count_steps(list(getattr(t, "steps", []) or []))
+                )
+                if steps_total > 0:
+                    prog = int((steps_done / steps_total) * 100)
+                else:
+                    try:
+                        prog = int(getattr(t, "calculate_progress")() or 0)
+                    except Exception:
+                        prog = int(getattr(t, "progress", 0) or 0)
+                status_raw = str(getattr(t, "status", "") or "").strip().upper()
+                if prog == 100 and not blocked:
+                    status_raw = "DONE"
+                status_obj = Status.from_string(status_raw)
+                if status_obj == Status.DONE:
+                    completed += 1
+                symbol, icon_class = tui._status_indicator(status_obj)
+                plan_rows.append({
+                    "id_value": _display_row_id(getattr(t, "id", "")),
+                    "progress": prog,
+                    "children_done": steps_done,
+                    "children_total": steps_total,
+                    "status_obj": status_obj,
+                    "status_symbol": symbol,
+                    "status_class": icon_class,
+                })
+            total_items = len(plan_tasks)
+            if cache_key:
+                tui._detail_plan_rows_cache = list(plan_rows)
+                tui._detail_plan_rows_cache_key = cache_key
+                tui._detail_plan_summary_cache = {"total": total_items, "completed": completed}
+        layout, widths, column_labels, header_align, separator_line = _detail_table_config(
+            plan_rows,
+            tui._t("TABLE_HEADER_TASK"),
+        )
+        table_overhead = 3
+        rows_budget = max(1, list_budget - table_overhead)
+
+        line_counter = 0
+        above_marker_line = None
+        below_marker_line = None
+        for frag in result:
+            if isinstance(frag, tuple) and len(frag) >= 2:
+                line_counter += frag[1].count('\n')
+
+        if total_items:
+            tui.detail_selected_index = max(0, min(tui.detail_selected_index, total_items - 1))
+            visible = min(total_items, rows_budget)
+
+            def _adjust_offset(vis: int) -> int:
+                max_offset = max(0, total_items - vis)
+                offset = min(getattr(tui, "detail_view_offset", 0), max_offset)
+                if tui.detail_selected_index < offset:
+                    offset = tui.detail_selected_index
+                elif tui.detail_selected_index >= offset + vis:
+                    offset = tui.detail_selected_index - vis + 1
+                return max(0, min(offset, max_offset))
+
             tui.detail_view_offset = _adjust_offset(visible)
             start = tui.detail_view_offset
             end = min(total_items, start + visible)
             hidden_above = start
             hidden_below = total_items - end
+
+            while True:
+                marker_lines = int(hidden_above > 0) + int(hidden_below > 0)
+                if visible + marker_lines <= rows_budget:
+                    break
+                if visible == 1:
+                    break
+                visible = max(1, min(total_items, rows_budget - marker_lines))
+                tui.detail_view_offset = _adjust_offset(visible)
+                start = tui.detail_view_offset
+                end = min(total_items, start + visible)
+                hidden_above = start
+                hidden_below = total_items - end
+        else:
+            visible = 0
+            start = end = 0
+            hidden_above = hidden_below = 0
+            tui.detail_view_offset = 0
+            tui.detail_selected_index = 0
+
+        result.append(("class:border", "| "))
+        header_label = tui._t("TAB_TASKS").upper()
+        overflow_hint = ("↑" if hidden_above else "") + ("↓" if hidden_below else "")
+        header = f"{overflow_hint + ' ' if overflow_hint else ''}{header_label} ({completed}/{total_items} {tui._t('COMPLETED_SUFFIX')})"
+        result.append(("class:header", header[: content_width - 2].ljust(content_width - 2)))
+        result.append(("class:border", " |\n"))
+        line_counter += 1
+
+        if hidden_above:
+            above_marker_line = line_counter
+            result.append(("class:border", "| "))
+            result.append(("class:text.dim", f"↑ +{hidden_above}".ljust(content_width - 2)))
+            result.append(("class:border", " |\n"))
+            line_counter += 1
+
+        result.append(("class:border.dim", "| "))
+        result.append(("class:border.dim", separator_line.ljust(inner_width)))
+        result.append(("class:border.dim", " |\n"))
+        line_counter += 1
+
+        result.append(("class:border", "| "))
+        for idx_col, col in enumerate(layout.columns):
+            if idx_col > 0:
+                result.append(("class:border", "|"))
+            label, width = column_labels[col]
+            align = header_align.get(col, "left")
+            result.append(("class:header", tui._format_cell(label, width, align=align)))
+        result.append(("class:border", " |\n"))
+        line_counter += 1
+
+        result.append(("class:border.dim", "| "))
+        result.append(("class:border.dim", separator_line.ljust(inner_width)))
+        result.append(("class:border.dim", " |\n"))
+        line_counter += 1
+
+        tui.subtask_row_map = []
+        for global_idx in range(start, end):
+            t = plan_tasks[global_idx]
+            row_data = plan_rows[global_idx]
+            status_obj = row_data["status_obj"]
+            symbol = row_data["status_symbol"]
+            icon_class = row_data["status_class"]
+            selected = global_idx == tui.detail_selected_index
+            style_key = tui._selection_style_for_status(status_obj)
+            compact_status_mode = len(layout.columns) <= 3
+            cell_data = {}
+
+            if 'idx' in layout.columns:
+                cell_data['idx'] = (tui._format_cell(str(global_idx + 1), widths['idx'], align='center'), 'class:text.dim')
+
+            if 'id' in layout.columns:
+                id_text = str(row_data.get("id_value", "") or "")
+                cell_data['id'] = (tui._format_cell(id_text, widths['id'], align='center'), 'class:text.dim')
+
+            if 'stat' in layout.columns:
+                if compact_status_mode:
+                    marker = symbol if icon_class != 'class:status.unknown' else '○'
+                    stat_width = widths['stat']
+                    marker_text = marker.center(stat_width) if stat_width > 1 else marker
+                    cell_data['stat'] = (marker_text, icon_class)
+                else:
+                    cell_data['stat'] = (tui._format_cell(symbol, widths['stat'], align='center'), icon_class)
+
+            if 'title' in layout.columns:
+                title = _strip_leading_id(f"{getattr(t, 'title', '')}".strip())
+                title_scrolled = tui._apply_scroll(title)
+                cell_data['title'] = (tui._format_cell(title_scrolled, widths['title']), 'class:text')
+
+            if 'marks' in layout.columns:
+                selected_style = f"class:{style_key}" if selected else None
+                cell_data['marks'] = _checkpoint_marks_fragments(t, widths['marks'], selected_style=selected_style)
+
+            if 'progress' in layout.columns:
+                prog_text = f"{row_data['progress']}%"
+                prog_style = 'class:icon.check' if row_data['progress'] >= 100 else 'class:text.dim'
+                cell_data['progress'] = (tui._format_cell(prog_text, widths['progress'], align='center'), prog_style)
+
+            if 'children' in layout.columns:
+                subt_text = f"{row_data['children_done']}/{row_data['children_total']}"
+                cell_data['children'] = (tui._format_cell(subt_text, widths['children'], align='center'), 'class:text.dim')
+
+            row_line = line_counter
+            result.append(("class:border", "| "))
+            for idx_col, col in enumerate(layout.columns):
+                if idx_col > 0:
+                    result.append(("class:border", "|"))
+                if col == 'marks':
+                    result.extend(cell_data[col])
+                else:
+                    text, css_class = cell_data[col]
+                    cell_style = f"class:{style_key}" if selected else css_class
+                    result.append((cell_style, text))
+            result.append(("class:border", " |\n"))
+            line_counter += 1
+            tui.subtask_row_map.append((row_line, global_idx))
+
+        if hidden_below:
+            below_marker_line = line_counter
+            result.append(("class:border", "| "))
+            result.append(("class:text.dim", f"↓ +{hidden_below}".ljust(content_width - 2)))
+            result.append(("class:border", " |\n"))
+            line_counter += 1
     else:
-        visible = 0
-        start = end = 0
-        hidden_above = hidden_below = 0
-        tui.detail_view_offset = 0
-    if items:
-        tui._selected_subtask_entry()
+        if hasattr(tui, "_ensure_detail_flat"):
+            tui._ensure_detail_flat(getattr(tui, "detail_selected_path", None))
+        else:
+            tui._rebuild_detail_flat(getattr(tui, "detail_selected_path", None))
+        items = list(tui.detail_flat_subtasks or [])
+        if any(getattr(entry, "kind", "") != "step" for entry in items):
+            items = [entry for entry in items if getattr(entry, "kind", "") == "step"]
+            tui.detail_selected_index = max(0, min(tui.detail_selected_index, max(0, len(items) - 1)))
+            tui.detail_selected_path = items[tui.detail_selected_index].key if items else ""
+        stats_by_key = dict(getattr(tui, "detail_stats_by_key", {}) or {})
+        node_rows: List[Dict[str, object]] = []
+        for entry in items:
+            stats = stats_by_key.get(entry.key)
+            if stats is None:
+                status_obj = Status.TODO
+                symbol, icon_class = tui._status_indicator(status_obj)
+                progress = 0
+                children_done = 0
+                children_total = 0
+            else:
+                status_obj = stats.status
+                symbol, icon_class = tui._status_indicator(status_obj)
+                progress = int(getattr(stats, "progress", 0) or 0)
+                children_done = int(getattr(stats, "children_done", 0) or 0)
+                children_total = int(getattr(stats, "children_total", 0) or 0)
 
-    completed = sum(1 for _, st, _, _, _ in items if getattr(st, "completed", False))
-    line_counter = 0
-    above_marker_line = None
-    below_marker_line = None
-    for frag in result:
-        if isinstance(frag, tuple) and len(frag) >= 2:
-            line_counter += frag[1].count('\n')
+            node_rows.append(
+                {
+                    "id_value": _display_row_id(getattr(entry.node, "id", "")),
+                    "progress": progress,
+                    "children_done": children_done,
+                    "children_total": children_total,
+                    "status_obj": status_obj,
+                    "status_symbol": symbol,
+                    "status_class": icon_class,
+                }
+            )
 
-    result.append(('class:border', '+' + '-'*content_width + '+\n'))
-    result.append(('class:border', '| '))
-    overflow_hint = ("↑" if hidden_above else "") + ("↓" if hidden_below else "")
-    header = f"{overflow_hint + ' ' if overflow_hint else ''}{tui._t('SUBTASKS')} ({completed}/{len(items)} {tui._t('COMPLETED_SUFFIX')})"
-    result.append(('class:header', header[: content_width - 2].ljust(content_width - 2)))
-    result.append(('class:border', ' |\n'))
-    line_counter += 1
+        total_items = len(items)
+        layout, widths, column_labels, header_align, separator_line = _detail_table_config(
+            node_rows,
+            tui._t("LIST_EDITOR_SCOPE_SUBTASK", fallback=tui._t("DETAIL_STEPS")),
+        )
+        table_overhead = 3
+        rows_budget = max(1, list_budget - table_overhead)
+        if total_items:
+            tui.detail_selected_index = max(0, min(tui.detail_selected_index, total_items - 1))
+            visible = min(total_items, rows_budget)
 
-    if hidden_above:
-        above_marker_line = line_counter
+            def _adjust_offset(vis: int) -> int:
+                max_offset = max(0, total_items - vis)
+                offset = min(getattr(tui, "detail_view_offset", 0), max_offset)
+                if tui.detail_selected_index < offset:
+                    offset = tui.detail_selected_index
+                elif tui.detail_selected_index >= offset + vis:
+                    offset = tui.detail_selected_index - vis + 1
+                return max(0, min(offset, max_offset))
+
+            tui.detail_view_offset = _adjust_offset(visible)
+            start = tui.detail_view_offset
+            end = min(total_items, start + visible)
+            hidden_above = start
+            hidden_below = total_items - end
+
+            while True:
+                marker_lines = int(hidden_above > 0) + int(hidden_below > 0)
+                if visible + marker_lines <= rows_budget:
+                    break
+                if visible == 1:
+                    break
+                visible = max(1, min(total_items, rows_budget - marker_lines))
+                tui.detail_view_offset = _adjust_offset(visible)
+                start = tui.detail_view_offset
+                end = min(total_items, start + visible)
+                hidden_above = start
+                hidden_below = total_items - end
+        else:
+            visible = 0
+            start = end = 0
+            hidden_above = hidden_below = 0
+            tui.detail_view_offset = 0
+        if items:
+            tui._selected_subtask_entry()
+
+        # Drill-down: task detail shows exactly one level (steps list).
+        visible_steps = [e for e in items if getattr(e, "kind", "") == "step"]
+        step_total = len(visible_steps)
+        completed = sum(1 for e in visible_steps if bool(getattr(getattr(e, "node", None), "completed", False)))
+        line_counter = 0
+        above_marker_line = None
+        below_marker_line = None
+        for frag in result:
+            if isinstance(frag, tuple) and len(frag) >= 2:
+                line_counter += frag[1].count('\n')
+
         result.append(('class:border', '| '))
-        result.append(('class:text.dim', f"↑ +{hidden_above}".ljust(content_width - 2)))
+        overflow_hint = ("↑" if hidden_above else "") + ("↓" if hidden_below else "")
+        header = f"{overflow_hint + ' ' if overflow_hint else ''}{tui._t('SUBTASKS')} ({completed}/{step_total} {tui._t('COMPLETED_SUFFIX')})"
+        result.append(('class:header', header[: content_width - 2].ljust(content_width - 2)))
         result.append(('class:border', ' |\n'))
         line_counter += 1
 
-    tui.subtask_row_map = []
-    for global_idx in range(start, end):
-        path, st, level, collapsed, has_children = items[global_idx]
-        selected = global_idx == tui.detail_selected_index
-        bg_style = f"class:{tui._selection_style_for_status(Status.DONE if selected else None)}" if selected else None
-        base_border = 'class:border'
+        if hidden_above:
+            above_marker_line = line_counter
+            result.append(('class:border', '| '))
+            result.append(('class:text.dim', f"↑ +{hidden_above}".ljust(content_width - 2)))
+            result.append(('class:border', ' |\n'))
+            line_counter += 1
 
-        pointer = '>' if selected else ' '
-        indicator = "▸" if (has_children and collapsed) else ("▾" if has_children else " ")
-        base_prefix = f"{'  ' * level}{pointer}{indicator} {path} "
-
-        st_title = st.title
-        if tui.horizontal_offset > 0:
-            st_title = st_title[tui.horizontal_offset:] if len(st_title) > tui.horizontal_offset else ""
-
-        # Check for CLI activity on this subtask
-        subtask_cli_active = _is_subtask_cli_active(tui, path)
-        if subtask_cli_active:
-            st_title = "⚡" + st_title
-
-        sub_status = tui._subtask_status(st)
-        symbol, icon_class = tui._status_indicator(sub_status)
-        if selected:
-            icon_class = tui._merge_styles(icon_class, bg_style)
-
-        prefix_len = len(base_prefix) + len(symbol) + 1
-
-        row_line = line_counter
-        result.append((base_border, '| '))
-        result.append((tui._merge_styles('class:text', bg_style), base_prefix))
-        result.append((icon_class, f"{symbol} "))
-
-        flags = {
-            "criteria": getattr(st, "criteria_confirmed", False),
-            "tests": getattr(st, "tests_confirmed", False),
-            "blockers": getattr(st, "blockers_resolved", False),
-        }
-        glyphs = [
-            ('class:icon.check', '•') if flags['criteria'] else ('class:text.dim', '·'),
-            ('class:icon.check', '•') if flags['tests'] else ('class:text.dim', '·'),
-            ('class:icon.check', '•') if flags['blockers'] else ('class:text.dim', '·'),
-        ]
-        flag_text = []
-        for idxf, (cls, symbol_f) in enumerate(glyphs):
-            flag_text.append((cls, symbol_f))
-            if idxf < 2:
-                flag_text.append(('class:text.dim', ' '))
-        flag_width = len(' [• • •]')
-        title_width = max(5, content_width - 2 - prefix_len - flag_width)
-        # Use warning style for CLI-active subtasks
-        base_title_style = 'class:icon.warn' if subtask_cli_active else 'class:text'
-        title_style = tui._merge_styles(base_title_style, bg_style) if selected else base_title_style
-        result.append((title_style, st_title[:title_width].ljust(title_width)))
-        bracket_style = tui._merge_styles('class:text.dim', bg_style) if selected else 'class:text.dim'
-        result.append((bracket_style, ' ['))
-        for frag_style, frag_text in flag_text:
-            style = tui._merge_styles(frag_style, bg_style) if selected else frag_style
-            result.append((style, frag_text))
-        result.append((bracket_style, ']'))
-        result.append((base_border, ' |\n'))
-        line_counter += 1
-        tui.subtask_row_map.append((row_line, global_idx))
-
-    if hidden_below:
-        below_marker_line = line_counter
-        result.append(('class:border', '| '))
-        result.append(('class:text.dim', f"↓ +{hidden_below}".ljust(content_width - 2)))
-        result.append(('class:border', ' |\n'))
+        result.append(("class:border.dim", "| "))
+        result.append(("class:border.dim", separator_line.ljust(inner_width)))
+        result.append(("class:border.dim", " |\n"))
         line_counter += 1
 
-    selected_entry = tui._selected_subtask_entry() if items else None
-    if selected_entry:
-        remaining = max(0, tui.get_terminal_height() - tui.footer_height - line_counter - 1)
-        if remaining > 2:
-            _, st_sel, _, _, _ = selected_entry
-            detail_lines: List[Tuple[str, str]] = []
-            detail_lines.append(('class:border', '+' + '-'*content_width + '+\n'))
-            detail_lines.append(('class:border', '| '))
-            header = f"{tui._t('SUBTASK_DETAILS')}: {tui.detail_selected_path or ''}"
-            detail_lines.append(('class:header', header[: content_width - 2].ljust(content_width - 2)))
-            detail_lines.append(('class:border', ' |\n'))
+        result.append(("class:border", "| "))
+        for idx_col, col in enumerate(layout.columns):
+            if idx_col > 0:
+                result.append(("class:border", "|"))
+            label, width = column_labels[col]
+            align = header_align.get(col, "left")
+            result.append(("class:header", tui._format_cell(label, width, align=align)))
+        result.append(("class:border", " |\n"))
+        line_counter += 1
 
-            def _append_block(title: str, rows: List[str]) -> None:
-                if not rows:
-                    return
-                detail_lines.append(('class:border', '| '))
-                detail_lines.append(('class:text.dim', f" {title}:".ljust(content_width - 2)))
-                detail_lines.append(('class:border', ' |\n'))
-                for idxr, row in enumerate(rows, 1):
-                    prefix = f"  {idxr}. "
-                    raw = prefix + row
-                    if tui.horizontal_offset > 0:
-                        raw = raw[tui.horizontal_offset:] if len(raw) > tui.horizontal_offset else ""
-                    for chunk, _ in tui._wrap_with_prefix(row, content_width - 2, prefix):
-                        detail_lines.append(('class:border', '| '))
-                        detail_lines.append(('class:text', chunk))
-                        detail_lines.append(('class:border', ' |\n'))
+        result.append(("class:border.dim", "| "))
+        result.append(("class:border.dim", separator_line.ljust(inner_width)))
+        result.append(("class:border.dim", " |\n"))
+        line_counter += 1
 
-            _append_block(tui._t("CRITERIA"), getattr(st_sel, "success_criteria", []))
-            _append_block(tui._t("TESTS"), getattr(st_sel, "tests", []))
-            _append_block(tui._t("BLOCKERS"), getattr(st_sel, "blockers", []))
+        tui.subtask_row_map = []
+        for global_idx in range(start, end):
+            entry = items[global_idx]
+            path = entry.key
+            node = entry.node
+            row_data = node_rows[global_idx]
+            selected = global_idx == tui.detail_selected_index
+            title_raw = _strip_leading_id(str(getattr(node, "title", "") or "").strip())
+            if not title_raw:
+                title_raw = tui._t("LIST_EDITOR_SCOPE_SUBTASK", fallback="Step")
 
-            # Add timestamps section if available
-            created_at = getattr(st_sel, "created_at", None)
-            completed_at = getattr(st_sel, "completed_at", None)
-            if created_at or completed_at:
-                detail_lines.append(('class:border', '| '))
-                detail_lines.append(('class:text.dim', f" {tui._t('SUBTASK_TIMESTAMPS')}:".ljust(content_width - 2)))
-                detail_lines.append(('class:border', ' |\n'))
-                if created_at:
-                    detail_lines.append(('class:border', '| '))
-                    detail_lines.append(('class:text', f"  {tui._t('SUBTASK_CREATED')}: {created_at}".ljust(content_width - 2)))
-                    detail_lines.append(('class:border', ' |\n'))
-                if completed_at:
-                    detail_lines.append(('class:border', '| '))
-                    detail_lines.append(('class:text', f"  {tui._t('SUBTASK_COMPLETED')}: {completed_at}".ljust(content_width - 2)))
-                    detail_lines.append(('class:border', ' |\n'))
+            if tui.horizontal_offset > 0:
+                title_raw = title_raw[tui.horizontal_offset:] if len(title_raw) > tui.horizontal_offset else ""
 
-            sliced = tui._slice_formatted_lines(detail_lines, 0, remaining)
-            result.extend(sliced)
-            line_counter += remaining
+            status_obj = row_data["status_obj"]
+            symbol = row_data["status_symbol"]
+            icon_class = row_data["status_class"]
+            style_key = tui._selection_style_for_status(status_obj)
+            compact_status_mode = len(layout.columns) <= 3
+            cell_data = {}
+
+            if 'idx' in layout.columns:
+                cell_data['idx'] = (tui._format_cell(str(global_idx + 1), widths['idx'], align='center'), 'class:text.dim')
+
+            if 'id' in layout.columns:
+                id_text = str(row_data.get("id_value", "") or "")
+                cell_data['id'] = (tui._format_cell(id_text, widths['id'], align='center'), 'class:text.dim')
+
+            if 'stat' in layout.columns:
+                if compact_status_mode:
+                    marker = symbol if icon_class != 'class:status.unknown' else '○'
+                    stat_width = widths['stat']
+                    marker_text = marker.center(stat_width) if stat_width > 1 else marker
+                    cell_data['stat'] = (marker_text, icon_class)
+                else:
+                    cell_data['stat'] = (tui._format_cell(symbol, widths['stat'], align='center'), icon_class)
+
+            if 'title' in layout.columns:
+                cell_data['title'] = (tui._format_cell(title_raw, widths['title']), 'class:text')
+
+            if 'marks' in layout.columns:
+                selected_style = f"class:{style_key}" if selected else None
+                cell_data['marks'] = _checkpoint_marks_fragments(node, widths['marks'], selected_style=selected_style)
+
+            if 'progress' in layout.columns:
+                prog_text = f"{row_data['progress']}%"
+                prog_style = 'class:icon.check' if row_data['progress'] >= 100 else 'class:text.dim'
+                cell_data['progress'] = (tui._format_cell(prog_text, widths['progress'], align='center'), prog_style)
+
+            if 'children' in layout.columns:
+                subt_text = f"{row_data['children_done']}/{row_data['children_total']}"
+                cell_data['children'] = (tui._format_cell(subt_text, widths['children'], align='center'), 'class:text.dim')
+
+            row_line = line_counter
+            result.append(('class:border', '| '))
+            for idx_col, col in enumerate(layout.columns):
+                if idx_col > 0:
+                    result.append(('class:border', '|'))
+                if col == 'marks':
+                    result.extend(cell_data[col])
+                else:
+                    text, css_class = cell_data[col]
+                    cell_style = f"class:{style_key}" if selected else css_class
+                    result.append((cell_style, text))
+            result.append(('class:border', ' |\n'))
+            line_counter += 1
+            tui.subtask_row_map.append((row_line, global_idx))
+
+        if hidden_below:
+            below_marker_line = line_counter
+            result.append(('class:border', '| '))
+            result.append(('class:text.dim', f"↓ +{hidden_below}".ljust(content_width - 2)))
+            result.append(('class:border', ' |\n'))
+            line_counter += 1
 
     section_titles = {"blockers": "Blockers:"}
     for key, entries in aux_sections.items():
@@ -558,13 +1000,33 @@ def render_checkpoint_view(tui) -> FormattedText:
 
 
 def render_checkpoint_view_impl(tui) -> FormattedText:
-    if not tui.current_task_detail or not getattr(tui, "detail_selected_path", ""):
+    detail = getattr(tui, "current_task_detail", None)
+    if not detail:
         return FormattedText([("class:text.dim", tui._t("STATUS_TASK_NOT_SELECTED"))])
 
-    path = tui.detail_selected_path
-    subtask = tui._get_subtask_by_path(path)
-    if not subtask:
-        return FormattedText([("class:text.dim", tui._t("ERR_SUBTASK_NOT_FOUND"))])
+    target = None
+    target_title = ""
+    if getattr(detail, "kind", "task") == "plan":
+        target = detail
+        target_title = str(getattr(detail, "title", "") or "")
+    else:
+        entry = tui._selected_subtask_entry() if hasattr(tui, "_selected_subtask_entry") else None
+        if not entry and hasattr(tui, "_rebuild_detail_flat"):
+            try:
+                tui._rebuild_detail_flat(getattr(tui, "detail_selected_path", "") or None)
+                entry = tui._selected_subtask_entry() if hasattr(tui, "_selected_subtask_entry") else None
+            except Exception:
+                entry = None
+        if not entry:
+            return FormattedText([("class:text.dim", tui._t("ERR_SUBTASK_NOT_FOUND"))])
+        target = getattr(entry, "node", None)
+        if not target:
+            return FormattedText([("class:text.dim", tui._t("ERR_SUBTASK_NOT_FOUND"))])
+        target_title = str(getattr(target, "title", "") or "")
+        if getattr(entry, "kind", "") == "plan":
+            target_title = target_title.strip() or tui._t("TAB_PLAN")
+        elif getattr(entry, "kind", "") == "task":
+            target_title = target_title.strip() or tui._t("TABLE_HEADER_TASK")
 
     term_width = max(1, tui.get_terminal_width())
     content_width = tui._detail_content_width(term_width)
@@ -578,7 +1040,7 @@ def render_checkpoint_view_impl(tui) -> FormattedText:
     result.append((header_style, header_line + '\n'))
 
     # Title Row
-    title_display = f"{tui._t('CHECKPOINTS')}: {subtask.title}"
+    title_display = f"{tui._t('CHECKPOINTS')}: {target_title}"
     if tui.horizontal_offset > 0:
         title_display = title_display[tui.horizontal_offset:] if len(title_display) > tui.horizontal_offset else ""
 
@@ -590,9 +1052,8 @@ def render_checkpoint_view_impl(tui) -> FormattedText:
 
     # Checkpoints List
     checkpoints_data = [
-        ("criteria", tui._t("CHECKPOINT_CRITERIA"), subtask.criteria_confirmed, subtask.success_criteria),
-        ("tests", tui._t("CHECKPOINT_TESTS"), subtask.tests_confirmed, subtask.tests),
-        ("blockers", tui._t("CHECKPOINT_BLOCKERS"), subtask.blockers_resolved, subtask.blockers),
+        ("criteria", tui._t("CHECKPOINT_CRITERIA"), bool(getattr(target, "criteria_confirmed", False) or getattr(target, "criteria_auto_confirmed", False)), list(getattr(target, "success_criteria", []) or [])),
+        ("tests", tui._t("CHECKPOINT_TESTS"), bool(getattr(target, "tests_confirmed", False) or getattr(target, "tests_auto_confirmed", False)), list(getattr(target, "tests", []) or [])),
     ]
 
     tui.checkpoint_row_map = []
@@ -638,6 +1099,22 @@ def render_checkpoint_view_impl(tui) -> FormattedText:
                     result.append((content_style, prefix + line.ljust(content_width - 10 - len(prefix))))
                     result.append(('class:border', '|\n'))
                     line_counter += 1
+
+    # Blockers are data, not a checkpoint: render as a read-only section.
+    blockers = list(getattr(target, "blockers", []) or [])
+    if blockers:
+        result.append(('class:border', '|'))
+        result.append(('class:text.dim', f"  {tui._t('BLOCKERS')}:".ljust(content_width - 2)))
+        result.append(('class:border', '|\n'))
+        line_counter += 1
+        for item in blockers:
+            prefix = "      - "
+            wrapped = tui._wrap_display(str(item), content_width - 10)
+            for line in wrapped:
+                result.append(('class:border', '|'))
+                result.append(('class:text.dim', prefix + line.ljust(content_width - 10 - len(prefix))))
+                result.append(('class:border', '|\n'))
+                line_counter += 1
 
     result.append((header_style, header_line + '\n'))
 

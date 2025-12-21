@@ -46,12 +46,112 @@ def test_build_status_text_basic():
     tui = DummyTUI()
     result = build_status_text(tui)
     text = "".join(fragment[1] for fragment in result)
-    assert "STATUS_TASKS_COUNT" in text
+    assert "STATUS_PROJECTS_COUNT" in text
     assert "ALL" in text
     # ensure settings button exists
     assert any("SETTINGS" in frag[1] for frag in result)
     tui.exit_detail_view()
     tui.open_settings_dialog()
+
+
+def test_build_status_text_shows_back_button_in_tasks_view():
+    fragments = {}
+
+    class DummyTUI(SimpleNamespace):
+        def __init__(self):
+            super().__init__(
+                filtered_tasks=[SimpleNamespace(status=Status.DONE)],
+                domain_filter="",
+                phase_filter=None,
+                component_filter=None,
+                current_filter=None,
+                _filter_flash_until=0,
+                spinner_message="",
+                status_message="",
+                status_message_expires=0,
+                detail_mode=False,
+                project_mode=False,
+                _last_filter_value=None,
+            )
+
+        def _t(self, key, **kwargs):
+            if key == "BTN_BACK":
+                return "[BACK]"
+            if key == "BTN_SETTINGS":
+                return "[SETTINGS]"
+            return key
+
+        def _sync_indicator_fragments(self, flash=False):
+            return []
+
+        def _spinner_frame(self):
+            return None
+
+        def get_terminal_width(self):
+            return 80
+
+        def exit_detail_view(self):
+            fragments["exit_detail"] = fragments.get("exit_detail", 0) + 1
+
+        def return_to_projects(self):
+            fragments["back_to_projects"] = fragments.get("back_to_projects", 0) + 1
+
+        def open_settings_dialog(self):
+            fragments["settings"] = fragments.get("settings", 0) + 1
+
+    tui = DummyTUI()
+    res = build_status_text(tui)
+    assert res[0][1] == "[BACK] "
+    back_handler = res[0][2]
+    back_handler(SimpleNamespace(event_type=MouseEventType.MOUSE_UP, button=MouseButton.LEFT))
+    assert fragments.get("back_to_projects", 0) == 1
+
+
+def test_build_status_text_shows_project_name_in_tasks_view():
+    class DummyTUI(SimpleNamespace):
+        def __init__(self):
+            super().__init__(
+                filtered_tasks=[SimpleNamespace(status=Status.DONE)],
+                domain_filter="",
+                phase_filter=None,
+                component_filter=None,
+                current_filter=None,
+                _filter_flash_until=0,
+                spinner_message="",
+                status_message="",
+                status_message_expires=0,
+                detail_mode=False,
+                project_mode=False,
+                last_project_name="MyProject",
+                _last_filter_value=None,
+            )
+
+        def _t(self, key, **kwargs):
+            if key == "BTN_BACK":
+                return "[BACK]"
+            if key == "BTN_SETTINGS":
+                return "[SETTINGS]"
+            return key
+
+        def _sync_indicator_fragments(self, flash=False):
+            return []
+
+        def _spinner_frame(self):
+            return None
+
+        def get_terminal_width(self):
+            return 80
+
+        def return_to_projects(self):
+            return None
+
+        def open_settings_dialog(self):
+            return None
+
+    tui = DummyTUI()
+    res = build_status_text(tui)
+    text = "".join(part[1] for part in res)
+    assert "MyProject" in text
 
 
 def test_build_status_text_filter_flash(monkeypatch):

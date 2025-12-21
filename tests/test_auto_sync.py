@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
 
 import tasks
 import projects_sync
+from core.desktop.devtools.application import task_manager as task_manager_mod
 
 
 class DummyProjects(projects_sync.ProjectsSync):
@@ -22,7 +23,7 @@ class DummyProjects(projects_sync.ProjectsSync):
     def enabled(self) -> bool:
         return self.enabled_flag
 
-    def sync_task(self, task):
+    def sync_step(self, task):
         self.calls.append(task.id)
         if not task.project_item_id:
             task.project_item_id = "gh-item"
@@ -51,7 +52,7 @@ def test_auto_sync_all(monkeypatch, tmp_path):
     _write_task(tasks_dir / "TASK-001.task", "TASK-001")
 
     dummy_sync = DummyProjects()
-    monkeypatch.setattr(tasks, "get_projects_sync", lambda: dummy_sync)
+    monkeypatch.setattr(task_manager_mod, "get_projects_sync", lambda: dummy_sync)
     monkeypatch.setattr(tasks.TaskManager, "_make_parallel_sync", lambda self, base_sync: dummy_sync)
     monkeypatch.setattr(tasks.TaskManager, "load_config", staticmethod(lambda: {"auto_sync": True}))
 
@@ -70,7 +71,7 @@ def test_auto_sync_disabled(monkeypatch, tmp_path):
     _write_task(tasks_dir / "TASK-001.task", "TASK-001")
 
     dummy_sync = DummyProjects()
-    monkeypatch.setattr(tasks, "get_projects_sync", lambda: dummy_sync)
+    monkeypatch.setattr(task_manager_mod, "get_projects_sync", lambda: dummy_sync)
     monkeypatch.setattr(tasks.TaskManager, "load_config", staticmethod(lambda: {"auto_sync": False}))
 
     manager = tasks.TaskManager(tasks_dir=tasks_dir)
@@ -87,7 +88,7 @@ def test_pool_size_respects_config(monkeypatch, tmp_path):
 
     dummy_sync = DummyProjects()
     dummy_sync.config.workers = 1
-    monkeypatch.setattr(tasks, "get_projects_sync", lambda: dummy_sync)
+    monkeypatch.setattr(task_manager_mod, "get_projects_sync", lambda: dummy_sync)
     monkeypatch.setattr(tasks.TaskManager, "load_config", staticmethod(lambda: {"auto_sync": True}))
 
     captured = {}
@@ -108,8 +109,8 @@ def test_pool_size_respects_config(monkeypatch, tmp_path):
                     return fn(arg)
             return DummyFuture()
 
-    monkeypatch.setattr(tasks, "ThreadPoolExecutor", DummyPool)
-    monkeypatch.setattr(tasks, "as_completed", lambda futs: futs)
+    monkeypatch.setattr(task_manager_mod, "ThreadPoolExecutor", DummyPool)
+    monkeypatch.setattr(task_manager_mod, "as_completed", lambda futs: futs)
 
     manager = tasks.TaskManager(tasks_dir=tasks_dir)
     assert captured["max"] == 1

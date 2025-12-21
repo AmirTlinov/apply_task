@@ -33,7 +33,7 @@ from infrastructure.token_status_cache import (
     should_show_projects_warning,
     mark_projects_warning_shown,
 )
-from core.status import task_status_label
+from core.status import status_label
 
 PROJECT_ROOT = Path(os.environ.get("APPLY_TASK_PROJECT_ROOT") or Path.cwd()).resolve()
 GRAPHQL_URL = "https://api.github.com/graphql"
@@ -166,7 +166,7 @@ def _default_config_data() -> Dict[str, Any]:
             },
             "progress": {"name": "Progress"},
             "domain": {"name": "Domain"},
-            "subtasks": {"name": "Subtasks"},
+            "steps": {"name": "Steps"},
         },
     }
 
@@ -380,7 +380,7 @@ class ProjectsSync:
                 data["project"] = project
                 _write_project_file(data, self.config_path)
 
-    def sync_task(self, task) -> bool:
+    def sync_step(self, task) -> bool:
         if not self.enabled:
             return False
         try:
@@ -452,8 +452,14 @@ class ProjectsSync:
             }
             _write_project_file(data, self.config_path)
         project = data.get("project") or {}
+        raw_fields = dict(data.get("fields") or {})
+        # Backward compatibility: legacy config used `fields.subtasks`.
+        if "steps" not in raw_fields and "subtasks" in raw_fields:
+            raw_fields["steps"] = raw_fields.get("subtasks") or {}
+        raw_fields.pop("subtasks", None)
+
         fields_cfg = {}
-        for alias, cfg in (data.get("fields") or {}).items():
+        for alias, cfg in raw_fields.items():
             fields_cfg[alias] = FieldConfig(name=cfg.get("name", alias), options=cfg.get("options", {}))
         stored_type = (project.get("type") or "repository").lower()
         raw_number = project.get("number")
@@ -978,7 +984,7 @@ class ProjectsSync:
                 continue
             value = None
             if field["typename"] == "ProjectV2SingleSelectField":
-                status_ui = task_status_label(task.status)
+                status_ui = status_label(task.status)
                 desired = field_cfg.options.get(status_ui) or field_cfg.options.get(task.status)
                 option_id = field["options"].get(desired)
                 if option_id:
@@ -989,7 +995,7 @@ class ProjectsSync:
             else:  # text/datetime
                 if alias == "domain":
                     value = {"text": task.domain or "-"}
-                elif alias == "subtasks":
+                elif alias == "steps":
                     total = len(task.subtasks)
                     completed = sum(1 for st in task.subtasks if st.completed)
                     value = {"text": f"{completed}/{total}" if total else "-"}
@@ -1049,20 +1055,29 @@ class ProjectsSync:
         lines = [
             f"# {task.id}: {task.title}",
             "",
-            f"- Status: {task_status_label(task.status)}",
+            f"- Status: {status_label(task.status)}",
             f"- Domain: {task.domain or '—'}",
             f"- Progress: {task.calculate_progress()}%",
         ]
         if getattr(task, "description", ""):
             lines += ["", "## Description", task.description]
-        if task.subtasks:
-            lines += ["", "## Subtasks"]
-            for sub in task.subtasks:
-                mark = "x" if sub.completed else " "
-                crit = "✓" if sub.criteria_confirmed else "·"
-                tests = "✓" if sub.tests_confirmed else "·"
-                blockers = "✓" if sub.blockers_resolved else "·"
-                lines.append(f"- [{mark}] {sub.title} [criteria {crit} | tests {tests} | blockers {blockers}]")
+        steps = list(getattr(task, "steps", []) or [])
+        if steps:
+            lines += ["", "## Steps"]
+
+            def walk(nodes, indent: int = 0) -> None:
+                for st in nodes:
+                    mark = "x" if getattr(st, "completed", False) else " "
+                    crit = "✓" if getattr(st, "criteria_confirmed", False) else "·"
+                    tests_ok = bool(getattr(st, "tests_confirmed", False) or getattr(st, "tests_auto_confirmed", False))
+                    tests = "✓" if tests_ok else "·"
+                    pad = "  " * indent
+                    lines.append(f"{pad}- [{mark}] {st.title} [criteria {crit} | tests {tests}]")
+                    children = list(getattr(st, "steps", []) or [])
+                    if children:
+                        walk(children, indent + 1)
+
+            walk(steps)
         if getattr(task, "success_criteria", None):
             lines += ["", "## Success criteria", *[f"- {item}" for item in task.success_criteria]]
         if getattr(task, "risks", None):
@@ -1120,7 +1135,7 @@ class ProjectsSync:
     # Pull from GitHub → local files
     # ------------------------------------------------------------------
 
-    def pull_task_fields(self, task) -> bool:
+    def pull_step_fields(self, task) -> bool:
         if not self.enabled or not getattr(task, "project_item_id", None):
             return False
         try:

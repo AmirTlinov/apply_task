@@ -33,45 +33,45 @@ class TestFileRepositorySecurity:
     """Test path traversal prevention in FileTaskRepository."""
 
     def test_rejects_dotdot_in_task_id(self, tmp_path):
-        repo = FileTaskRepository(tasks_dir=tmp_path)
+        repo = FileTaskRepository(tmp_path)
         with pytest.raises(ValueError, match="path traversal"):
             repo._resolve_path("../../../etc/passwd")
 
     def test_rejects_slash_in_task_id(self, tmp_path):
-        repo = FileTaskRepository(tasks_dir=tmp_path)
+        repo = FileTaskRepository(tmp_path)
         with pytest.raises(ValueError, match="path traversal"):
             repo._resolve_path("task/evil")
 
     def test_rejects_backslash_in_task_id(self, tmp_path):
-        repo = FileTaskRepository(tasks_dir=tmp_path)
+        repo = FileTaskRepository(tmp_path)
         with pytest.raises(ValueError, match="path traversal"):
             repo._resolve_path("task\\evil")
 
     def test_rejects_dotdot_in_domain(self, tmp_path):
-        repo = FileTaskRepository(tasks_dir=tmp_path)
+        repo = FileTaskRepository(tmp_path)
         with pytest.raises(ValueError, match="path traversal"):
             repo._resolve_path("TASK-001", "../../../etc")
 
     def test_rejects_absolute_domain(self, tmp_path):
-        repo = FileTaskRepository(tasks_dir=tmp_path)
+        repo = FileTaskRepository(tmp_path)
         with pytest.raises(ValueError, match="path traversal"):
             repo._resolve_path("TASK-001", "/etc/passwd")
 
     def test_accepts_valid_paths(self, tmp_path):
-        repo = FileTaskRepository(tasks_dir=tmp_path)
+        repo = FileTaskRepository(tmp_path)
         # Should not raise
         path = repo._resolve_path("TASK-001")
         assert path.name == "TASK-001.task"
         assert path.is_relative_to(tmp_path)
 
     def test_accepts_valid_domain(self, tmp_path):
-        repo = FileTaskRepository(tasks_dir=tmp_path)
+        repo = FileTaskRepository(tmp_path)
         path = repo._resolve_path("TASK-001", "backend")
         assert "backend" in str(path)
         assert path.is_relative_to(tmp_path)
 
     def test_accepts_nested_domain(self, tmp_path):
-        repo = FileTaskRepository(tasks_dir=tmp_path)
+        repo = FileTaskRepository(tmp_path)
         # Forward slashes in domain are OK - they create subdirectories
         # Security is ensured by is_relative_to check
         path = repo._resolve_path("TASK-001", "backend/api")

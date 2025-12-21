@@ -1,4 +1,4 @@
-"""Templates helpers shared between CLI and TUI creation flows."""
+"""Templates helpers shared between UI adapters and automation."""
 
 from typing import Tuple
 

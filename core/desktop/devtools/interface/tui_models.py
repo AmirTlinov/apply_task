@@ -8,16 +8,6 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.mouse_events import MouseEvent
 
 from core import Status, TaskDetail
-from core.desktop.devtools.application.task_manager import TaskManager
-from core.desktop.devtools.application.context import (
-    derive_domain_explicit,
-    resolve_task_reference,
-    save_last_task,
-    normalize_task_id,
-)
-from core.desktop.devtools.interface.i18n import translate
-from core.desktop.devtools.interface.serializers import task_to_dict
-from core.desktop.devtools.interface.cli_commands import CliDeps
 
 
 @dataclass
@@ -30,8 +20,8 @@ class Task:
     completed: bool = False
     task_file: Optional[str] = None
     progress: int = 0
-    subtasks_count: int = 0
-    subtasks_completed: int = 0
+    children_count: int = 0
+    children_completed: int = 0
     id: Optional[str] = None
     parent: Optional[str] = None
     detail: Optional[TaskDetail] = None
@@ -39,17 +29,6 @@ class Task:
     phase: str = ""
     component: str = ""
     blocked: bool = False
-
-
-CLI_DEPS = CliDeps(
-    manager_factory=lambda: TaskManager(),
-    translate=translate,
-    derive_domain_explicit=derive_domain_explicit,
-    resolve_task_reference=resolve_task_reference,
-    save_last_task=save_last_task,
-    normalize_task_id=normalize_task_id,
-    task_to_dict=task_to_dict,
-)
 
 
 CHECKLIST_SECTIONS = [

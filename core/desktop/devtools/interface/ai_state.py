@@ -32,7 +32,7 @@ class UserSignal(Enum):
     PAUSE = "pause"         # Pause execution
     RESUME = "resume"       # Resume from pause
     STOP = "stop"           # Stop current task
-    SKIP = "skip"           # Skip current subtask
+    SKIP = "skip"           # Skip current step
     MESSAGE = "message"     # Send message to AI
 
 
@@ -41,7 +41,7 @@ class AIActivity:
     """Single AI activity entry for history."""
     timestamp: float
     operation: str          # Intent name
-    task_id: Optional[str]
+    step_id: Optional[str]
     path: Optional[str]
     summary: str            # Human-readable summary
     success: bool
@@ -51,7 +51,7 @@ class AIActivity:
         return {
             "time": datetime.fromtimestamp(self.timestamp).strftime("%H:%M:%S"),
             "op": self.operation,
-            "task": self.task_id,
+            "step": self.step_id,
             "path": self.path,
             "summary": self.summary,
             "ok": self.success,
@@ -61,15 +61,15 @@ class AIActivity:
 
 @dataclass
 class AIPlan:
-    """AI's current plan for task execution."""
-    task_id: str
+    """AI's current plan for step execution."""
+    step_id: str
     steps: List[str]                    # Planned steps (human readable)
     current_step: int = 0               # Currently executing step
     estimated_total: int = 0            # Estimated total operations
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "task": self.task_id,
+            "step": self.step_id,
             "steps": self.steps,
             "current": self.current_step,
             "total": len(self.steps),
@@ -84,7 +84,7 @@ class AISessionState:
     # Current status
     status: AIStatus = AIStatus.IDLE
     current_operation: Optional[str] = None
-    current_task_id: Optional[str] = None
+    current_step_id: Optional[str] = None
     current_path: Optional[str] = None
 
     # Plan
@@ -106,11 +106,11 @@ class AISessionState:
     operations_count: int = 0
     errors_count: int = 0
 
-    def start_operation(self, operation: str, task_id: Optional[str] = None, path: Optional[str] = None) -> None:
+    def start_operation(self, operation: str, step_id: Optional[str] = None, path: Optional[str] = None) -> None:
         """Mark start of AI operation."""
         self.status = AIStatus.EXECUTING
         self.current_operation = operation
-        self.current_task_id = task_id
+        self.current_step_id = step_id
         self.current_path = path
         self.operation_start = time.time()
         self.last_update = self.operation_start
@@ -122,7 +122,7 @@ class AISessionState:
         activity = AIActivity(
             timestamp=self.operation_start,
             operation=self.current_operation or "unknown",
-            task_id=self.current_task_id,
+            step_id=self.current_step_id,
             path=self.current_path,
             summary=summary,
             success=success,
@@ -141,9 +141,9 @@ class AISessionState:
         self.current_operation = None
         self.last_update = time.time()
 
-    def set_plan(self, task_id: str, steps: List[str]) -> None:
+    def set_plan(self, step_id: str, steps: List[str]) -> None:
         """Set AI's execution plan."""
-        self.plan = AIPlan(task_id=task_id, steps=steps, estimated_total=len(steps))
+        self.plan = AIPlan(step_id=step_id, steps=steps, estimated_total=len(steps))
 
     def advance_plan(self) -> None:
         """Move to next step in plan."""
@@ -177,7 +177,7 @@ class AISessionState:
             "status": self.status.value,
             "current": {
                 "op": self.current_operation,
-                "task": self.current_task_id,
+                "step": self.current_step_id,
                 "path": self.current_path,
             } if self.current_operation else None,
             "plan": self.plan.to_dict() if self.plan else None,
@@ -228,16 +228,16 @@ def reset_ai_state() -> None:
 
 
 # Signals file for cross-process communication
-def _get_signals_file(tasks_dir: Optional[Path] = None) -> Path:
+def _get_signals_file(steps_dir: Optional[Path] = None) -> Path:
     """Get path to signals file."""
-    if tasks_dir:
-        return tasks_dir / ".ai_signals"
-    return Path.home() / ".tasks" / ".ai_signals"
+    if steps_dir:
+        return steps_dir / ".ai_signals"
+    return Path.home() / ".steps" / ".ai_signals"
 
 
-def write_user_signal(signal: UserSignal, message: str = "", tasks_dir: Optional[Path] = None) -> None:
+def write_user_signal(signal: UserSignal, message: str = "", steps_dir: Optional[Path] = None) -> None:
     """Write user signal to file for AI to read."""
-    signals_file = _get_signals_file(tasks_dir)
+    signals_file = _get_signals_file(steps_dir)
     signals_file.parent.mkdir(parents=True, exist_ok=True)
 
     data = {
@@ -248,9 +248,9 @@ def write_user_signal(signal: UserSignal, message: str = "", tasks_dir: Optional
     signals_file.write_text(json.dumps(data))
 
 
-def read_user_signal(tasks_dir: Optional[Path] = None) -> tuple[UserSignal, str]:
+def read_user_signal(steps_dir: Optional[Path] = None) -> tuple[UserSignal, str]:
     """Read and consume user signal from file."""
-    signals_file = _get_signals_file(tasks_dir)
+    signals_file = _get_signals_file(steps_dir)
 
     if not signals_file.exists():
         return UserSignal.NONE, ""

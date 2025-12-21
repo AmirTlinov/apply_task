@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Search, X, FileText } from "lucide-react";
+import { FileText, Search, X } from "lucide-react";
 import type { TaskListItem } from "@/types/task";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 export interface CommandPaletteCommand {
   id: string;
@@ -77,60 +79,28 @@ export function CommandPalette({
     return out;
   }, [filteredCommands, filteredTasks]);
 
+  const safeActiveIndex = Math.min(
+    Math.max(activeIndex, 0),
+    Math.max(0, items.length - 1)
+  );
+
   useEffect(() => {
     if (!isOpen) return;
-    setQuery("");
-    setActiveIndex(0);
     const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
   }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
-    if (activeIndex < 0) setActiveIndex(0);
-    if (activeIndex > items.length - 1) setActiveIndex(Math.max(0, items.length - 1));
-  }, [activeIndex, isOpen, items.length]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        onClose();
-        return;
-      }
-      if (e.key === "ArrowDown" || e.key.toLowerCase() === "j") {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        setActiveIndex((i) => Math.min(items.length - 1, i + 1));
-        return;
-      }
-      if (e.key === "ArrowUp" || e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        setActiveIndex((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (e.key === "Enter") {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        const item = items[activeIndex];
-        if (!item) return;
-        if (item.kind === "command") item.command.onSelect();
-        if (item.kind === "task") onSelectTask(item.task.id);
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeIndex, isOpen, items, onClose, onSelectTask]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${activeIndex}"]`);
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${safeActiveIndex}"]`);
     el?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex, isOpen]);
+  }, [isOpen, safeActiveIndex]);
+
+  const handleClose = () => {
+    setQuery("");
+    setActiveIndex(0);
+    onClose();
+  };
 
   if (!isOpen) return null;
 
@@ -138,98 +108,74 @@ export function CommandPalette({
   const showTasks = filteredTasks.length > 0;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(0,0,0,0.45)",
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "center",
-        zIndex: 1200,
-        padding: "10vh 16px 16px",
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          width: "640px",
-          maxWidth: "96vw",
-          backgroundColor: "var(--color-background)",
-          borderRadius: "14px",
-          boxShadow: "var(--shadow-xl)",
-          border: "1px solid var(--color-border)",
-          overflow: "hidden",
-        }}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
+    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
+      <DialogContent
+        hideClose
+        className="max-w-[640px] overflow-hidden rounded-2xl"
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            padding: "14px 16px",
-            borderBottom: "1px solid var(--color-border)",
-            backgroundColor: "var(--color-background-subtle)",
-          }}
-        >
-          <Search style={{ width: "16px", height: "16px", color: "var(--color-foreground-subtle)" }} />
+        <div className="flex items-center gap-2 border-b border-border bg-background-subtle px-4 py-3">
+          <Search className="h-4 w-4 text-foreground-subtle" />
           <input
             ref={inputRef}
+            autoFocus
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
               setActiveIndex(0);
             }}
-            placeholder="Type a command or search tasks…"
-            style={{
-              flex: 1,
-              border: "none",
-              outline: "none",
-              background: "transparent",
-              fontSize: "14px",
-              color: "var(--color-foreground)",
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                handleClose();
+                return;
+              }
+
+              const isCtrl = e.ctrlKey || e.metaKey;
+              const next =
+                e.key === "ArrowDown" || (isCtrl && e.key.toLowerCase() === "n");
+              const prev =
+                e.key === "ArrowUp" || (isCtrl && e.key.toLowerCase() === "p");
+
+              if (next) {
+                e.preventDefault();
+                setActiveIndex((i) => Math.min(items.length - 1, i + 1));
+                return;
+              }
+              if (prev) {
+                e.preventDefault();
+                setActiveIndex((i) => Math.max(0, i - 1));
+                return;
+              }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                const item = items[safeActiveIndex];
+                if (!item) return;
+                if (item.kind === "command") item.command.onSelect();
+                if (item.kind === "task") onSelectTask(item.task.id);
+                handleClose();
+              }
             }}
+            placeholder="Type a command or search tasks…"
+            className="h-8 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-foreground-muted"
           />
           <button
-            onClick={onClose}
-            style={{
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              padding: "6px",
-              borderRadius: "8px",
-              color: "var(--color-foreground-muted)",
-            }}
-            title="Close"
+            type="button"
+            onClick={handleClose}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-foreground-muted transition-colors hover:bg-background-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            aria-label="Close"
           >
-            <X style={{ width: "16px", height: "16px" }} />
+            <X className="h-4 w-4" />
           </button>
         </div>
 
         <div
           ref={listRef}
-          style={{
-            maxHeight: "52vh",
-            overflowY: "auto",
-            padding: "8px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "8px",
-          }}
+          className="max-h-[52vh] overflow-y-auto p-2"
+          role="listbox"
+          aria-label="Results"
         >
           {!showCommands && !showTasks && (
-            <div
-              style={{
-                padding: "22px 12px",
-                color: "var(--color-foreground-muted)",
-                fontSize: "13px",
-                textAlign: "center",
-              }}
-            >
+            <div className="px-3 py-[var(--density-page-pad)] text-center text-sm text-foreground-muted">
               No matches
             </div>
           )}
@@ -240,14 +186,14 @@ export function CommandPalette({
                 <Row
                   key={c.id}
                   idx={idx}
-                  isActive={idx === activeIndex}
+                  isActive={idx === safeActiveIndex}
                   icon={c.icon}
                   title={c.label}
                   description={c.description}
                   shortcut={c.shortcut}
                   onClick={() => {
                     c.onSelect();
-                    onClose();
+                    handleClose();
                   }}
                 />
               ))}
@@ -262,11 +208,11 @@ export function CommandPalette({
                   <TaskRow
                     key={t.id}
                     idx={idx}
-                    isActive={idx === activeIndex}
+                    isActive={idx === safeActiveIndex}
                     task={t}
                     onClick={() => {
                       onSelectTask(t.id);
-                      onClose();
+                      handleClose();
                     }}
                   />
                 );
@@ -275,43 +221,22 @@ export function CommandPalette({
           )}
         </div>
 
-        <div
-          style={{
-            padding: "10px 14px",
-            borderTop: "1px solid var(--color-border)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "10px",
-            color: "var(--color-foreground-muted)",
-            fontSize: "12px",
-            backgroundColor: "var(--color-background-subtle)",
-          }}
-        >
-          <span>↑/↓ or j/k · Enter to open · Esc to close</span>
-          <span style={{ fontFamily: "var(--font-mono)" }}>{items.length} results</span>
+        <div className="flex items-center justify-between gap-3 border-t border-border bg-background-subtle px-4 py-2 text-xs text-foreground-muted">
+          <span>↑/↓ · Enter to open · Esc to close</span>
+          <span className="font-mono">{items.length} results</span>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div>
-      <div
-        style={{
-          fontSize: "11px",
-          fontWeight: 700,
-          color: "var(--color-foreground-subtle)",
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-          padding: "10px 10px 6px",
-        }}
-      >
+    <div className="py-1">
+      <div className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-widest text-foreground-subtle">
         {title}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>{children}</div>
+      <div className="flex flex-col gap-1 px-1 pb-1">{children}</div>
     </div>
   );
 }
@@ -334,87 +259,40 @@ function Row({
   onClick: () => void;
 }) {
   return (
-    <div
+    <button
+      type="button"
       data-idx={idx}
       onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "10px",
-        padding: "10px 10px",
-        borderRadius: "10px",
-        cursor: "pointer",
-        backgroundColor: isActive ? "var(--color-primary-subtle)" : "transparent",
-        border: `1px solid ${isActive ? "var(--color-primary)" : "transparent"}`,
-      }}
-      onMouseEnter={(e) => {
-        if (!isActive) e.currentTarget.style.backgroundColor = "var(--color-background-muted)";
-      }}
-      onMouseLeave={(e) => {
-        if (!isActive) e.currentTarget.style.backgroundColor = "transparent";
-      }}
+      role="option"
+      aria-selected={isActive}
+      className={cn(
+        "flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors",
+        isActive
+          ? "border-primary/40 bg-primary/10"
+          : "border-transparent hover:bg-background-muted"
+      )}
     >
-      <div
-        style={{
-          width: "28px",
-          height: "28px",
-          borderRadius: "8px",
-          backgroundColor: "var(--color-background-muted)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-        }}
-      >
-        {icon ?? <FileText style={{ width: "14px", height: "14px", color: "var(--color-foreground-subtle)" }} />}
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-background-muted">
+        {icon ?? <FileText className="h-3.5 w-3.5 text-foreground-subtle" />}
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: "8px" }}>
-          <div
-            style={{
-              fontSize: "13px",
-              fontWeight: 600,
-              color: "var(--color-foreground)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <div className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
             {title}
           </div>
           {shortcut && (
-            <kbd
-              style={{
-                fontSize: "11px",
-                fontFamily: "var(--font-mono)",
-                color: "var(--color-foreground-subtle)",
-                padding: "2px 6px",
-                border: "1px solid var(--color-border)",
-                borderRadius: "6px",
-                backgroundColor: "var(--color-background)",
-                flexShrink: 0,
-              }}
-            >
+            <kbd className="shrink-0 rounded-md border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-foreground-subtle shadow-sm">
               {shortcut}
             </kbd>
           )}
         </div>
         {description && (
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--color-foreground-muted)",
-              marginTop: "2px",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
+          <div className="mt-0.5 truncate text-xs text-foreground-muted">
             {description}
           </div>
         )}
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -430,53 +308,35 @@ function TaskRow({
   onClick: () => void;
 }) {
   return (
-    <div
+    <button
+      type="button"
       data-idx={idx}
       onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "10px",
-        padding: "10px 10px",
-        borderRadius: "10px",
-        cursor: "pointer",
-        backgroundColor: isActive ? "var(--color-primary-subtle)" : "transparent",
-        border: `1px solid ${isActive ? "var(--color-primary)" : "transparent"}`,
-      }}
-      onMouseEnter={(e) => {
-        if (!isActive) e.currentTarget.style.backgroundColor = "var(--color-background-muted)";
-      }}
-      onMouseLeave={(e) => {
-        if (!isActive) e.currentTarget.style.backgroundColor = "transparent";
-      }}
+      role="option"
+      aria-selected={isActive}
+      className={cn(
+        "flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left transition-colors",
+        isActive
+          ? "border-primary/40 bg-primary/10"
+          : "border-transparent hover:bg-background-muted"
+      )}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--color-foreground-subtle)" }}>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="shrink-0 font-mono text-[11px] text-foreground-subtle">
           {task.id}
         </span>
-        <span
-          style={{
-            fontSize: "13px",
-            fontWeight: 600,
-            color: "var(--color-foreground)",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            minWidth: 0,
-          }}
-        >
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
           {task.title}
         </span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+      <div className="flex shrink-0 items-center gap-2">
         <StatusBadge status={task.status} size="sm" />
         {typeof task.progress === "number" && (
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--color-foreground-subtle)" }}>
+          <span className="font-mono text-[11px] text-foreground-subtle">
             {task.progress}%
           </span>
         )}
       </div>
-    </div>
+    </button>
   );
 }
-

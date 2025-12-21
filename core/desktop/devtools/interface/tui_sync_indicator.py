@@ -32,7 +32,12 @@ def build_sync_indicator(tui, filter_flash: bool = False) -> List[Tuple[str, str
     flash = bool(getattr(tui, "_sync_flash_until", 0) and now < getattr(tui, "_sync_flash_until", 0))
     fragments = sync_status_fragments(snapshot, enabled, flash, filter_flash)
 
-    tooltip = snapshot.get("status_reason")
+    tooltip = snapshot.get("status_reason") or ""
+    if not tooltip:
+        last_pull = snapshot.get("last_pull")
+        last_push = snapshot.get("last_push")
+        if last_pull or last_push:
+            tooltip = f"pull={last_pull or '—'} push={last_push or '—'}"
 
     def _tooltip_handler(message: str):
         def handler(event: MouseEvent):

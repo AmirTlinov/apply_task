@@ -1,29 +1,36 @@
 from pathlib import Path
 
-from core import SubTask, TaskDetail
+from core import Step, TaskDetail
 from infrastructure.file_repository import FileTaskRepository
-from tasks import TaskFileParser
+from infrastructure.task_file_parser import TaskFileParser
 
 
 def _sample_task() -> TaskDetail:
-    sub = SubTask(
-        False,
-        "Subtask for repo roundtrip with enough details",
-        success_criteria=["criterion A"],
+    sub = Step.new(
+        "Nested step for repo roundtrip with enough details",
+        criteria=["criterion A"],
         tests=["pytest -q"],
         blockers=["wait for review"],
+        created_at="2025-12-14T00:00:00Z",
     )
+    assert sub is not None
     task = TaskDetail(
         id="TASK-001",
         title="Repository roundtrip sample task with rich content",
         status="TODO",
+        kind="task",
+        parent="PLAN-001",
         domain="demo",
         description="Demo description",
+        contract="Current user request (contract)",
         context="Extra context",
     )
-    task.subtasks = [sub]
+    task.steps = [sub]
+    task.contract_versions = [
+        {"version": 1, "timestamp": "2025-12-14T00:00:00Z", "text": "Initial request"},
+    ]
     task.success_criteria = ["task-level criterion"]
-    task.dependencies = ["TASK-777"]
+    task.dependencies = ["external dependency"]
     task.next_steps = ["ship feature"]
     task.problems = ["problem one"]
     task.risks = ["risk one"]
@@ -31,19 +38,47 @@ def _sample_task() -> TaskDetail:
     return task
 
 
+def _sample_plan() -> TaskDetail:
+    plan = TaskDetail(
+        id="PLAN-001",
+        title="Repository roundtrip sample plan",
+        status="TODO",
+        kind="plan",
+        domain="demo",
+        contract="Plan contract",
+        plan_doc="Goal: keep the plan narrative here.\n\nMilestones:\n- Foundation\n- Integration",
+        plan_steps=["Step 1", "Step 2", "Step 3"],
+        plan_current=1,
+    )
+    plan.contract_versions = [
+        {"version": 1, "timestamp": "2025-12-14T00:00:00Z", "text": "Initial request"},
+    ]
+    return plan
+
+
 def test_file_repository_roundtrip(tmp_path: Path):
     repo = FileTaskRepository(tmp_path / ".tasks")
     task = _sample_task()
+    plan = _sample_plan()
 
     repo.save(task)
+    repo.save(plan)
     loaded = repo.load(task.id, domain=task.domain)
+    loaded_plan = repo.load(plan.id, domain=plan.domain)
 
     assert loaded is not None
     assert loaded.title == task.title
     assert loaded.domain == task.domain
-    assert loaded.subtasks[0].success_criteria == task.subtasks[0].success_criteria
+    assert loaded.steps[0].success_criteria == task.steps[0].success_criteria
+    assert loaded.contract == task.contract
+    assert loaded.contract_versions == task.contract_versions
     assert loaded.problems == task.problems
     assert loaded.history == task.history
+    assert loaded_plan is not None
+    assert loaded_plan.kind == "plan"
+    assert loaded_plan.plan_steps == plan.plan_steps
+    assert loaded_plan.plan_current == plan.plan_current
+    assert loaded_plan.plan_doc == plan.plan_doc
 
 
 def test_compute_signature_changes_on_write(tmp_path: Path):
@@ -66,7 +101,7 @@ def test_taskfileparser_roundtrip(tmp_path: Path):
     task = _sample_task()
     task.id = "TASK-123"
     task.domain = "alpha/beta"
-    task.subtasks[0].criteria_notes.append("note")
+    task.steps[0].criteria_notes.append("note")
     content = task.to_file_content()
 
     path = tmp_path / ".tasks" / task.domain / f"{task.id}.task"
@@ -77,7 +112,9 @@ def test_taskfileparser_roundtrip(tmp_path: Path):
     assert parsed is not None
     assert parsed.title == task.title
     assert parsed.domain == task.domain
-    assert parsed.subtasks[0].criteria_notes == task.subtasks[0].criteria_notes
+    assert parsed.steps[0].criteria_notes == task.steps[0].criteria_notes
+    assert parsed.contract == task.contract
+    assert parsed.contract_versions == task.contract_versions
     assert parsed.risks == task.risks
     assert parsed.next_steps == task.next_steps
     assert parsed.dependencies == task.dependencies
@@ -90,6 +127,16 @@ def test_next_id_increments(tmp_path: Path):
     first.id = repo.next_id()
     repo.save(first)
     assert repo.next_id() == "TASK-002"
+    assert repo.next_plan_id() == "PLAN-001"
+
+
+def test_next_id_does_not_reuse_trashed_ids(tmp_path: Path):
+    repo = FileTaskRepository(tmp_path / ".tasks")
+    trash_dir = tmp_path / ".tasks" / ".trash"
+    trash_dir.mkdir(parents=True, exist_ok=True)
+    (trash_dir / "TASK-010.task").write_text("---\nid: TASK-010\n---\n", encoding="utf-8")
+
+    assert repo.next_id() == "TASK-011"
 
 
 def test_delete_removes_file(tmp_path: Path):

@@ -2,10 +2,11 @@
  * Kanban Board view - tasks organized by status columns with drag-drop support
  */
 
-import { useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Plus, MoreHorizontal, SortAsc, SortDesc, Filter, Archive } from "lucide-react";
 import type { TaskListItem, TaskStatus } from "@/types/task";
 import { EmptyState } from "@/components/common/EmptyState";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -15,9 +16,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { toast } from "@/components/common/Toast";
+import { toast } from "@/components/common/toast";
 import { cn } from "@/lib/utils";
 import { TaskCard } from "@/features/tasks/components/TaskCard";
+import { getApiTaskId } from "@/lib/taskId";
+import { useUIStore } from "@/stores/uiStore";
 
 interface KanbanBoardProps {
   tasks: TaskListItem[];
@@ -78,6 +81,8 @@ export function KanbanBoard({
   onDelete,
   isLoading = false,
 }: KanbanBoardProps) {
+  const isMobile = useMediaQuery("(max-width: 767px)");
+  const detailPanelTaskId = useUIStore((s) => s.detailPanel?.taskId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<StatusColumn | null>(null);
@@ -94,6 +99,13 @@ export function KanbanBoard({
     setSelectedId(taskId);
     onTaskClick?.(taskId);
   }, [onTaskClick]);
+
+  useEffect(() => {
+    if (!detailPanelTaskId) return;
+    const match = tasks.find((t) => getApiTaskId(t) === detailPanelTaskId);
+    if (!match) return;
+    setSelectedId(match.id);
+  }, [detailPanelTaskId, tasks]);
 
   const handleDragStart = useCallback((taskId: string) => {
     setDraggedTaskId(taskId);
@@ -135,7 +147,7 @@ export function KanbanBoard({
   const toggleHideDone = () => {
     setHideDoneTasks((prev) => {
       const next = !prev;
-      toast.info(next ? "Done tasks hidden from board" : "Done tasks visible");
+      toast.info(next ? "Done steps hidden from board" : "Done steps visible");
       return next;
     });
   };
@@ -173,9 +185,14 @@ export function KanbanBoard({
 
   if (isLoading) {
     return (
-      <div className="flex gap-5 p-6 flex-1 overflow-x-auto">
+      <div
+        className={cn(
+          "flex flex-1 min-h-0 gap-[var(--density-page-gap)] p-[var(--density-page-pad)]",
+          isMobile ? "flex-col overflow-y-auto overflow-x-hidden" : "overflow-x-auto items-stretch"
+        )}
+      >
         {columns.map((col) => (
-          <KanbanColumnSkeleton key={col.id} title={col.title} />
+          <KanbanColumnSkeleton key={col.id} title={col.title} isMobile={isMobile} />
         ))}
       </div>
     );
@@ -183,20 +200,27 @@ export function KanbanBoard({
 
   if (tasks.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center p-8">
+      <div className="flex flex-1 items-center justify-center p-[var(--density-page-pad)]">
         <EmptyState variant="tasks" onAction={onNewTask} />
       </div>
     );
   }
 
   return (
-    <div className="flex gap-5 p-6 flex-1 overflow-x-auto items-start h-full">
+    <div
+      className={cn(
+        "flex flex-1 min-h-0 gap-[var(--density-page-gap)] p-[var(--density-page-pad)]",
+        isMobile ? "flex-col overflow-y-auto overflow-x-hidden" : "overflow-x-auto items-stretch"
+      )}
+    >
       {filteredColumns.map((column) => (
         <KanbanColumn
           key={column.id}
+          mode={isMobile ? "stacked" : "columns"}
           config={column}
           tasks={column.tasks}
           selectedId={selectedId}
+          detailPanelTaskId={detailPanelTaskId || undefined}
           draggedTaskId={draggedTaskId}
           isDragOver={dragOverColumn === column.id}
           onTaskClick={handleClick}
@@ -221,9 +245,11 @@ export function KanbanBoard({
 }
 
 interface KanbanColumnProps {
+  mode: "columns" | "stacked";
   config: ColumnConfig;
   tasks: TaskListItem[];
   selectedId: string | null;
+  detailPanelTaskId?: string;
   draggedTaskId: string | null;
   isDragOver: boolean;
   onTaskClick: (taskId: string) => void;
@@ -244,9 +270,11 @@ interface KanbanColumnProps {
 }
 
 function KanbanColumn({
+  mode,
   config,
   tasks,
   selectedId,
+  detailPanelTaskId,
   draggedTaskId,
   isDragOver,
   onTaskClick,
@@ -265,12 +293,16 @@ function KanbanColumn({
   onStatusChange,
   onDelete,
 }: KanbanColumnProps) {
+  const dragEnabled = mode === "columns";
+
   const handleDragOver = (e: React.DragEvent) => {
+    if (!dragEnabled) return;
     e.preventDefault();
     onDragOver();
   };
 
   const handleDrop = (e: React.DragEvent) => {
+    if (!dragEnabled) return;
     e.preventDefault();
     onDrop();
   };
@@ -280,12 +312,23 @@ function KanbanColumn({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       className={cn(
-        "flex flex-col min-w-[320px] max-w-[320px] rounded-xl transition-all duration-200 h-full max-h-full",
-        isDragOver ? "bg-muted/80 border-2 border-dashed border-primary/50" : "bg-muted/30 border-2 border-transparent"
+        "flex flex-col rounded-xl transition-all duration-200 border-2",
+        mode === "columns"
+          ? "flex-1 min-h-0 min-w-[240px] sm:min-w-[260px] xl:min-w-[300px] h-full max-h-full"
+          : "w-full min-w-0",
+        dragEnabled && isDragOver
+          ? "bg-muted/80 border-dashed border-primary/50"
+          : "bg-muted/30 border-transparent"
       )}
     >
       {/* Column header */}
-      <div className="flex items-center justify-between p-3.5 border-b border-border/50 bg-background/50 backdrop-blur-sm sticky top-0 rounded-t-xl z-10">
+      <div
+        className={cn(
+          "flex items-center justify-between border-b border-border/50 bg-background/50 backdrop-blur-sm rounded-t-xl",
+          mode === "columns" && "sticky top-0 z-10",
+          "p-[var(--density-card-pad)]"
+        )}
+      >
         <div className="flex items-center gap-2.5">
           <span
             className="w-2 h-2 rounded-full ring-2 ring-opacity-20"
@@ -312,26 +355,26 @@ function KanbanColumn({
               <SortDesc className="mr-2 h-3.5 w-3.5" /> Sort Z-A
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onToggleFilter}>
-              <Filter className="mr-2 h-3.5 w-3.5" /> {filterValue ? "Edit filter" : "Filter tasks"}
-            </DropdownMenuItem>
-            {config.id === "DONE" && (
-              <DropdownMenuItem onClick={onToggleHideDone}>
-                <Archive className="mr-2 h-3.5 w-3.5" /> {hideDoneTasks ? "Show done tasks" : "Hide done tasks"}
-              </DropdownMenuItem>
-            )}
+	            <DropdownMenuItem onClick={onToggleFilter}>
+	              <Filter className="mr-2 h-3.5 w-3.5" /> {filterValue ? "Edit filter" : "Filter steps"}
+	            </DropdownMenuItem>
+	            {config.id === "DONE" && (
+	              <DropdownMenuItem onClick={onToggleHideDone}>
+	                <Archive className="mr-2 h-3.5 w-3.5" /> {hideDoneTasks ? "Show done steps" : "Hide done steps"}
+	              </DropdownMenuItem>
+	            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
       {isFilterEditing && (
-        <div className="p-3 border-b border-border bg-background animate-accordion-down">
-          <Input
-            value={filterValue}
-            onChange={(e) => onFilterChange(e.target.value)}
-            placeholder="Filter tasks..."
-            autoFocus
-            className="h-8 text-xs"
+        <div className="p-[var(--density-card-pad)] border-b border-border bg-background animate-accordion-down">
+	          <Input
+	            value={filterValue}
+	            onChange={(e) => onFilterChange(e.target.value)}
+	            placeholder="Filter steps..."
+	            autoFocus
+	            className="h-8 text-xs"
             onKeyDown={(e) => {
               if (e.key === "Escape") {
                 onToggleFilter();
@@ -342,25 +385,37 @@ function KanbanColumn({
       )}
 
       {/* Column content */}
-      <div className="flex-1 flex flex-col gap-3 overflow-y-auto p-3 min-h-[100px] scrollbar-thin">
+      <div
+        className={cn(
+          "flex flex-col gap-2 p-[var(--density-card-pad)]",
+          mode === "columns" ? "flex-1 min-h-[100px] overflow-y-auto scrollbar-thin" : "overflow-visible"
+        )}
+      >
         {tasks.map((task) => (
           <div
             key={task.id}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.effectAllowed = "move";
-              e.dataTransfer.setData("text/plain", task.id);
-              onDragStart(task.id);
-            }}
-            onDragEnd={onDragEnd}
+            draggable={dragEnabled}
+            onDragStart={
+              dragEnabled
+                ? (e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", task.id);
+                    onDragStart(task.id);
+                  }
+                : undefined
+            }
+            onDragEnd={dragEnabled ? onDragEnd : undefined}
             className={cn(
-              "cursor-grab active:cursor-grabbing",
+              dragEnabled && "cursor-grab active:cursor-grabbing",
               draggedTaskId === task.id && "opacity-50 grayscale"
             )}
           >
             <TaskCard
               task={task}
-              isSelected={selectedId === task.id}
+              isSelected={
+                selectedId === task.id ||
+                (detailPanelTaskId ? getApiTaskId(task) === detailPanelTaskId : false)
+              }
               onClick={() => onTaskClick(task.id)}
               onStatusChange={(status) => onStatusChange?.(task.id, status)}
               onDelete={() => onDelete?.(task.id)}
@@ -369,31 +424,36 @@ function KanbanColumn({
         ))}
 
         {/* Drop zone indicator when empty */}
-        {tasks.length === 0 && isDragOver && (
+        {dragEnabled && tasks.length === 0 && isDragOver && (
           <div className="flex flex-1 min-h-[120px] rounded-xl border-2 border-dashed border-primary/20 bg-primary/5 items-center justify-center text-sm font-medium text-primary opacity-70 animate-pulse">
             Drop here
           </div>
         )}
 
-        {/* Add task button */}
-        {onNewTask && (
-          <button
-            onClick={onNewTask}
-            className="group flex w-full items-center gap-2 rounded-xl border border-dashed border-border p-3 text-[13px] text-foreground-muted transition-all hover:border-primary hover:bg-primary-subtle hover:text-primary mt-auto"
-          >
-            <Plus className="h-4 w-4" />
-            Create new task
-          </button>
-        )}
+	        {/* Add step button */}
+	        {onNewTask && (
+	          <button
+	            onClick={onNewTask}
+	            className="group mt-auto flex w-full items-center gap-2 rounded-xl border border-dashed border-border p-2 text-[13px] text-foreground-muted transition-all hover:border-primary hover:bg-primary-subtle hover:text-primary"
+	          >
+	            <Plus className="h-4 w-4" />
+	            Create new step
+	          </button>
+	        )}
       </div>
     </div>
   );
 }
 
-function KanbanColumnSkeleton({ title }: { title: string }) {
+function KanbanColumnSkeleton({ title, isMobile }: { title: string; isMobile: boolean }) {
   return (
-    <div className="flex flex-col min-w-[320px] max-w-[320px] rounded-xl bg-background-subtle h-[500px] animate-pulse">
-      <div className="flex items-center gap-2.5 p-3.5 border-b border-border">
+    <div
+      className={cn(
+        "flex flex-col rounded-xl bg-background-subtle animate-pulse border border-border/60",
+        isMobile ? "w-full" : "flex-1 min-w-[260px] sm:min-w-[280px] xl:min-w-[320px] h-[500px]"
+      )}
+    >
+      <div className="flex items-center gap-2.5 p-[var(--density-card-pad)] border-b border-border">
         <div className="h-2 w-2 rounded-full bg-border" />
         <span className="text-sm font-semibold text-foreground opacity-50">{title}</span>
       </div>

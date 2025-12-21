@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
 from core.desktop.devtools.interface import tui_state
+from core.desktop.devtools.interface.tui_detail_tree import DetailNodeEntry
+from core import Step, PlanNode, TaskNode
 
 
 def test_toggle_collapse_selected_switches(monkeypatch):
@@ -40,14 +42,25 @@ def test_toggle_subtask_collapse_expand_and_collapse():
 
     class TUI(SimpleNamespace):
         def __init__(self):
+            step = Step(False, "x", success_criteria=["c"])
+            step.plan = PlanNode(tasks=[TaskNode(title="t")])
             super().__init__(
                 detail_mode=False,
-                detail_flat_subtasks=[("0", SimpleNamespace(children=[1]), None, True, True)],
-                detail_collapsed={"0"},
+                _step=step,
+                detail_collapsed={"s:0"},
             )
 
         def _selected_subtask_entry(self):
-            return self.detail_flat_subtasks[0]
+            collapsed = "s:0" in self.detail_collapsed
+            return DetailNodeEntry(
+                key="s:0",
+                kind="step",
+                node=self._step,
+                level=0,
+                collapsed=collapsed,
+                has_children=True,
+                parent_key=None,
+            )
 
         def _select_subtask_by_path(self, path):
             rebuilt["select"] = path
@@ -181,6 +194,4 @@ def test_maybe_reload_no_prev_detail_paths():
     tui = T()
     tui_state.maybe_reload(tui, now=1.0)
     assert getattr(tui, "set_msg", False) is True
-
-
 

@@ -6,6 +6,111 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Apply Task</title>
 
+    <script>
+      (() => {
+        const diag = {
+          lines: [`URL: ${location.href}`],
+          moduleUrl: null,
+          render() {
+            const metaEl = document.getElementById("boot-meta");
+            if (!metaEl) return;
+            metaEl.textContent = this.lines.join("\n");
+          },
+          add(line) {
+            this.lines = [...this.lines, line];
+            this.render();
+          },
+        };
+
+        window.__applyTaskBootDiag = diag;
+
+        window.addEventListener(
+          "error",
+          (e) => {
+            if (e instanceof ErrorEvent) {
+              const file = e.filename ? ` @ ${e.filename}:${e.lineno}:${e.colno}` : "";
+              diag.add(`JS error: ${e.message}${file}`);
+              return;
+            }
+
+            const target = e.target;
+            if (target instanceof HTMLScriptElement && target.type === "module") {
+              diag.add(`Module script failed: ${target.src || "(inline)"}`);
+              return;
+            }
+            if (target instanceof HTMLLinkElement) {
+              const rel = target.getAttribute("rel") || "";
+              if (rel.includes("stylesheet")) {
+                diag.add(`Stylesheet failed: ${target.href || "(unknown)"}`);
+              } else if (rel.includes("modulepreload")) {
+                diag.add(`Preload failed: ${target.href || "(unknown)"}`);
+              }
+            }
+          },
+          true
+        );
+
+        window.addEventListener("unhandledrejection", (e) => {
+          const reason = e.reason instanceof Error ? e.reason.message : String(e.reason);
+          diag.add(`Unhandled rejection: ${reason}`);
+        });
+
+        window.addEventListener(
+          "DOMContentLoaded",
+          () => {
+            diag.render();
+            const moduleScript = document.querySelector('script[type="module"][src]');
+            if (moduleScript instanceof HTMLScriptElement && moduleScript.src) {
+              diag.moduleUrl = moduleScript.src;
+              diag.add(`Module: ${moduleScript.src}`);
+
+              window.setTimeout(async () => {
+                // Skip diagnostics when UI boot succeeded (boot splash removed).
+                if (!document.getElementById("boot-splash")) return;
+
+                const url = diag.moduleUrl;
+                if (!url) return;
+
+                const addFetchResult = (status, contentType, snippet) => {
+                  const ct = contentType ? ` ${contentType}` : "";
+                  diag.add(`Fetch: ${status}${ct}`);
+                  if (snippet) diag.add(`Snippet: ${snippet}`);
+                };
+
+                try {
+                  if (typeof fetch !== "function") {
+                    diag.add("Fetch: unavailable");
+                    return;
+                  }
+
+                  const resp = await fetch(url, { cache: "no-store" });
+                  const contentType = resp.headers.get("content-type") || "";
+                  const text = await resp.text();
+                  const snippet = text
+                    .slice(0, 120)
+                    .replace(/\s+/g, " ")
+                    .trim();
+                  addFetchResult(String(resp.status), contentType, snippet);
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  diag.add(`Fetch failed: ${msg}`);
+                }
+              }, 900);
+            }
+          },
+          { once: true }
+        );
+      })();
+    </script>
+
+    <script type="module">
+      // Confirms module scripts can execute at all (before loading the external bundle).
+      window.__applyTaskBootDiag?.add("Inline module: OK");
+    </script>
+    <script nomodule>
+      window.__applyTaskBootDiag?.add("Inline module: NOT supported");
+    </script>
+
     <!-- Inter font from Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,10 +126,65 @@
         overflow: hidden;
         background: #ffffff;
       }
+
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+        color: #111827;
+      }
+
+      #boot-splash .card {
+        width: 100%;
+        max-width: 520px;
+        border: 1px solid rgba(17, 24, 39, 0.12);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 12px 40px rgba(17, 24, 39, 0.10);
+        padding: 18px 18px 16px;
+      }
+
+      #boot-splash .title {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      #boot-splash .hint {
+        margin-top: 8px;
+        font-size: 12px;
+        color: rgba(17, 24, 39, 0.70);
+        line-height: 1.4;
+      }
+
+      #boot-splash .meta {
+        margin-top: 10px;
+        border-top: 1px solid rgba(17, 24, 39, 0.08);
+        padding-top: 10px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 11px;
+        color: rgba(17, 24, 39, 0.60);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
     </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot-splash">
+      <div class="card">
+        <div class="title">Starting Apply Task…</div>
+        <div class="hint">
+          If you keep seeing this screen, the frontend didn’t load. Rebuild with <code>pnpm -C gui tauri build</code>
+          or run <code>apply_task gui --dev</code>.
+          <div class="meta" id="boot-meta" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

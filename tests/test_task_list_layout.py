@@ -16,8 +16,8 @@ def test_task_list_respects_width_on_small_terminal(tmp_path):
             description="",
             category="",
             progress=87,
-            subtasks_count=5,
-            subtasks_completed=2,
+            children_count=5,
+            children_completed=2,
         ),
         Task(
             name="Secondary long title to verify wrapping",
@@ -25,8 +25,8 @@ def test_task_list_respects_width_on_small_terminal(tmp_path):
             description="",
             category="",
             progress=3,
-            subtasks_count=0,
-            subtasks_completed=0,
+            children_count=0,
+            children_completed=0,
         ),
     ]
 
@@ -35,7 +35,7 @@ def test_task_list_respects_width_on_small_terminal(tmp_path):
 
     assert max_width <= tui.get_terminal_width()
     layout = ResponsiveLayoutManager.select_layout(tui.get_terminal_width())
-    assert layout.columns == ['idx', 'stat', 'title']
+    assert layout.columns == ['idx', 'id', 'title']
 
 
 def test_task_list_handles_wide_numbers_without_overflow(tmp_path):
@@ -49,8 +49,8 @@ def test_task_list_handles_wide_numbers_without_overflow(tmp_path):
             description="",
             category="",
             progress=123,
-            subtasks_count=123,
-            subtasks_completed=7,
+            children_count=123,
+            children_completed=7,
         ),
         Task(
             name="Beta prep",
@@ -58,8 +58,8 @@ def test_task_list_handles_wide_numbers_without_overflow(tmp_path):
             description="",
             category="",
             progress=99,
-            subtasks_count=45,
-            subtasks_completed=12,
+            children_count=45,
+            children_completed=12,
         ),
     ]
 
@@ -85,8 +85,8 @@ def test_task_list_clamps_ultra_narrow_width(tmp_path):
             description="",
             category="",
             progress=12,
-            subtasks_count=1,
-            subtasks_completed=0,
+            children_count=1,
+            children_completed=0,
         )
     ]
 
@@ -94,7 +94,7 @@ def test_task_list_clamps_ultra_narrow_width(tmp_path):
     max_width = max(tui._display_width(line) for line in rendered_lines if line)
 
     assert max_width <= tui.get_terminal_width()
-    assert ResponsiveLayoutManager.select_layout(tui.get_terminal_width()).columns == ['idx', 'stat', 'title']
+    assert ResponsiveLayoutManager.select_layout(tui.get_terminal_width()).columns == ['idx', 'id', 'title']
 
 
 def test_task_list_shows_indices(tmp_path):
@@ -102,11 +102,11 @@ def test_task_list_shows_indices(tmp_path):
     tui.get_terminal_width = lambda: 90
     tui.get_terminal_height = lambda: 12
     tui.tasks = [
-        Task(name="Alpha", status=Status.DONE, description="", category="", progress=10, subtasks_count=0, subtasks_completed=0),
-        Task(name="Beta", status=Status.ACTIVE, description="", category="", progress=20, subtasks_count=0, subtasks_completed=0),
+        Task(name="Alpha", status=Status.DONE, description="", category="", progress=10, children_count=0, children_completed=0),
+        Task(name="Beta", status=Status.ACTIVE, description="", category="", progress=20, children_count=0, children_completed=0),
     ]
 
     text = "".join(part for _, part in tui.get_task_list_text())
 
-    assert " 0 " in text
     assert " 1 " in text
+    assert " 2 " in text

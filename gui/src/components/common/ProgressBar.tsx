@@ -19,29 +19,29 @@ export function ProgressBar({
 
   // Color based on progress
   const getProgressColor = (pct: number) => {
-    if (pct >= 100) return "bg-[var(--color-status-ok)]";
-    if (pct >= 50) return "bg-[var(--color-status-warn)]";
-    return "bg-[var(--color-foreground-subtle)]";
+    if (pct >= 100) return "bg-status-ok";
+    if (pct >= 50) return "bg-status-warn";
+    return "bg-foreground/30";
   };
 
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <div
         className={cn(
-          "flex-1 rounded-full bg-[var(--color-background-muted)] overflow-hidden",
+          "flex-1 overflow-hidden rounded-full bg-background-muted",
           size === "sm" ? "h-1" : "h-1.5"
         )}
       >
         <div
           className={cn(
-            "h-full rounded-full transition-all duration-[var(--duration-normal)] ease-[var(--ease-out)]",
+            "h-full rounded-full transition-[width] duration-300 ease-out",
             getProgressColor(percentage)
           )}
           style={{ width: `${percentage}%` }}
         />
       </div>
       {showLabel && (
-        <span className="text-xs text-[var(--color-foreground-muted)] font-medium tabular-nums">
+        <span className="text-xs font-medium tabular-nums text-foreground-muted">
           {Math.round(percentage)}%
         </span>
       )}

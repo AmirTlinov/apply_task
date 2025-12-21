@@ -2,7 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import tasks
-from core import TaskDetail, SubTask
+from core import Step, TaskDetail
 
 
 class DummySync:
@@ -16,14 +16,14 @@ class DummySync:
     def enabled(self):
         return self.enabled_flag
 
-    def sync_task(self, task):
+    def sync_step(self, task):
         self.calls_sync.append(task.id)
         # emulate minimal fill
         task.project_item_id = task.project_item_id or "gh-item"
         task.project_issue_number = task.project_issue_number or 1
         return True
 
-    def pull_task_fields(self, task):
+    def pull_step_fields(self, task):
         self.calls_pull.append(task.id)
         task.tags.append("pulled")
         return True
@@ -32,16 +32,18 @@ class DummySync:
 def build_manager(tmp_path, sync_obj):
     tasks_dir = tmp_path / ".tasks"
     tasks_dir.mkdir()
-    return tasks.TaskManager(tasks_dir=tasks_dir, sync_provider=lambda: sync_obj)
+    return tasks.TaskManager(tasks_dir=tasks_dir, sync_service=sync_obj, auto_sync=False)
 
 
 def test_save_task_pushes_when_sync_enabled(tmp_path):
     sync = DummySync()
     manager = build_manager(tmp_path, sync)
-    task = manager.create_task("Demo", domain="d")
-    task.subtasks = [
-        SubTask(True, "Long enough subtask for ok", ["c"], ["t"], ["b"], True, True, True),
-        SubTask(True, "Second long subtask ok", ["c"], ["t"], ["b"], True, True, True),
+    plan = manager.create_plan("Plan", domain="d")
+    manager.save_task(plan, skip_sync=True)
+    task = manager.create_task("Demo", parent=plan.id, domain="d")
+    task.steps = [
+        Step(True, "Long enough step for ok", ["c"], ["t"], ["b"], criteria_confirmed=True, tests_confirmed=True),
+        Step(True, "Second long step ok", ["c"], ["t"], ["b"], criteria_confirmed=True, tests_confirmed=True),
     ]
     manager.save_task(task)
 

@@ -1,18 +1,23 @@
 from .status import Status
-from .subtask import SubTask
+from .step import Step, PlanNode, TaskNode, _flatten_step_tree, ensure_tree_ids
 from .task_detail import TaskDetail
-from .task_event import (
-    TaskEvent,
+from .evidence import VerificationCheck, Attachment
+from .step_event import (
+    StepEvent,
     events_to_timeline,
     EVENT_CREATED,
     EVENT_CHECKPOINT,
     EVENT_STATUS,
     EVENT_BLOCKED,
     EVENT_UNBLOCKED,
-    EVENT_SUBTASK_DONE,
+    EVENT_STEP_DONE,
     EVENT_COMMENT,
     EVENT_DEPENDENCY_ADDED,
     EVENT_DEPENDENCY_RESOLVED,
+    EVENT_CONTRACT_UPDATED,
+    EVENT_PLAN_UPDATED,
+    EVENT_PLAN_ADVANCED,
+    EVENT_OVERRIDE,
     ACTOR_AI,
     ACTOR_HUMAN,
     ACTOR_SYSTEM,
@@ -28,20 +33,30 @@ from .dependency_validator import (
 
 __all__ = [
     "Status",
-    "SubTask",
+    "Step",
+    "PlanNode",
+    "TaskNode",
+    "_flatten_step_tree",
+    "ensure_tree_ids",
     "TaskDetail",
+    "VerificationCheck",
+    "Attachment",
     # Events
-    "TaskEvent",
+    "StepEvent",
     "events_to_timeline",
     "EVENT_CREATED",
     "EVENT_CHECKPOINT",
     "EVENT_STATUS",
     "EVENT_BLOCKED",
     "EVENT_UNBLOCKED",
-    "EVENT_SUBTASK_DONE",
+    "EVENT_STEP_DONE",
     "EVENT_COMMENT",
     "EVENT_DEPENDENCY_ADDED",
     "EVENT_DEPENDENCY_RESOLVED",
+    "EVENT_CONTRACT_UPDATED",
+    "EVENT_PLAN_UPDATED",
+    "EVENT_PLAN_ADVANCED",
+    "EVENT_OVERRIDE",
     "ACTOR_AI",
     "ACTOR_HUMAN",
     "ACTOR_SYSTEM",

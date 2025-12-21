@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from core.desktop.devtools.interface.cli_ai import (
+from core.desktop.devtools.interface.intent_api import (
     handle_batch,
     handle_decompose,
     handle_done,
@@ -12,16 +12,19 @@ from core.desktop.devtools.interface.cli_ai import (
 )
 from core.desktop.devtools.application.task_manager import TaskManager
 
+OVERRIDE_REASON = "test override"
 
 def _create_task_with_subtasks(manager, num_subtasks=2, status="TODO"):
     """Helper to create a task with subtasks."""
-    task = manager.create_task(title="Test Task", priority="MEDIUM")
+    plan = manager.create_plan("Test Plan")
+    manager.save_task(plan, skip_sync=True)
+    task = manager.create_task(title="Test Task", priority="MEDIUM", parent=plan.id)
     task.description = "Test"
     manager.save_task(task)
 
     # Add subtasks using decompose
     subtasks_data = [
-        {"title": f"Subtask {i}", "criteria": ["Done"], "tests": [], "blockers": []}
+        {"title": f"Step {i}", "success_criteria": ["Done"], "tests": [], "blockers": []}
         for i in range(num_subtasks)
     ]
     resp = handle_decompose(
@@ -29,22 +32,26 @@ def _create_task_with_subtasks(manager, num_subtasks=2, status="TODO"):
         {
             "intent": "decompose",
             "task": task.id,
-            "subtasks": subtasks_data,
+            "steps": subtasks_data,
         },
     )
     assert resp.success is True
 
     # Optionally set status for each subtask
     if status != "TODO":
-        for i in range(num_subtasks):
-            if status == "IN_PROGRESS":
-                # Mark as in progress (incomplete)
-                task_obj = manager.load_task(task.id)
-                task_obj.subtasks[i].completed = False
-                manager.save_task(task_obj)
-            elif status == "DONE":
+        if status == "DONE":
+            for i in range(num_subtasks):
                 # Use done with force to bypass confirmation requirements
-                handle_done(manager, {"intent": "done", "task": task.id, "path": str(i), "force": True})
+                handle_done(
+                    manager,
+                    {
+                        "intent": "done",
+                        "task": task.id,
+                        "path": f"s:{i}",
+                        "force": True,
+                        "override_reason": OVERRIDE_REASON,
+                    },
+                )
 
     return task
 
@@ -67,7 +74,7 @@ class TestPathsExpansion:
                 "intent": "batch",
                 "task": task.id,
                 "operations": [
-                    {"intent": "done", "paths": ["0", "1"], "force": True},
+                    {"intent": "done", "paths": ["s:0", "s:1"], "force": True, "override_reason": OVERRIDE_REASON},
                 ],
             },
         )
@@ -79,8 +86,8 @@ class TestPathsExpansion:
 
         # Verify both subtasks were updated
         reloaded = manager.load_task(task.id)
-        assert reloaded.subtasks[0].completed is True
-        assert reloaded.subtasks[1].completed is True
+        assert reloaded.steps[0].completed is True
+        assert reloaded.steps[1].completed is True
 
     def test_paths_expansion_with_done(self, tmp_path):
         """Test bulk done intent with paths array."""
@@ -96,7 +103,7 @@ class TestPathsExpansion:
                 "intent": "batch",
                 "task": task.id,
                 "operations": [
-                    {"intent": "done", "paths": ["0", "1", "2"], "force": True},
+                    {"intent": "done", "paths": ["s:0", "s:1", "s:2"], "force": True, "override_reason": OVERRIDE_REASON},
                 ],
             },
         )
@@ -107,9 +114,9 @@ class TestPathsExpansion:
 
         # Verify all subtasks were completed
         reloaded = manager.load_task(task.id)
-        assert reloaded.subtasks[0].completed is True
-        assert reloaded.subtasks[1].completed is True
-        assert reloaded.subtasks[2].completed is True
+        assert reloaded.steps[0].completed is True
+        assert reloaded.steps[1].completed is True
+        assert reloaded.steps[2].completed is True
 
     def test_paths_expansion_with_verify(self, tmp_path):
         """Test bulk verify intent with paths array."""
@@ -125,7 +132,11 @@ class TestPathsExpansion:
                 "intent": "batch",
                 "task": task.id,
                 "operations": [
-                    {"intent": "verify", "paths": ["0", "1"]},
+                    {
+                        "intent": "verify",
+                        "paths": ["s:0", "s:1"],
+                        "checkpoints": {"criteria": {"confirmed": True}, "tests": {"confirmed": True}},
+                    },
                 ],
             },
         )
@@ -136,8 +147,8 @@ class TestPathsExpansion:
 
         # Verify both subtasks were verified
         reloaded = manager.load_task(task.id)
-        assert reloaded.subtasks[0].computed_status == "completed"
-        assert reloaded.subtasks[1].computed_status == "completed"
+        assert reloaded.steps[0].computed_status == "completed"
+        assert reloaded.steps[1].computed_status == "completed"
 
     def test_paths_expansion_with_note(self, tmp_path):
         """Test bulk note intent with paths array (Phase 1)."""
@@ -154,7 +165,7 @@ class TestPathsExpansion:
                 "intent": "batch",
                 "task": task.id,
                 "operations": [
-                    {"intent": "done", "paths": ["0", "1"], "force": True},
+                    {"intent": "done", "paths": ["s:0", "s:1"], "force": True, "override_reason": OVERRIDE_REASON},
                 ],
             },
         )
@@ -178,7 +189,7 @@ class TestPathsExpansion:
                 "intent": "batch",
                 "task": task.id,
                 "operations": [
-                    {"intent": "done", "paths": ["0", "1"], "force": True},
+                    {"intent": "done", "paths": ["s:0", "s:1"], "force": True, "override_reason": OVERRIDE_REASON},
                 ],
             },
         )
@@ -195,7 +206,9 @@ class TestPathsExpansion:
         manager = TaskManager(tasks_dir=tasks_dir)
 
         # Create task with domain set from the start
-        task = manager.create_task(title="Test Task", priority="MEDIUM", domain="phase1")
+        plan = manager.create_plan("Phase1 Plan", domain="phase1")
+        manager.save_task(plan, skip_sync=True)
+        task = manager.create_task(title="Test Task", priority="MEDIUM", domain="phase1", parent=plan.id)
         task.description = "Test"
         manager.save_task(task)
 
@@ -205,9 +218,9 @@ class TestPathsExpansion:
             {
                 "intent": "decompose",
                 "task": task.id,
-                "subtasks": [
-                    {"title": "Subtask 0", "criteria": ["Done"], "tests": [], "blockers": []},
-                    {"title": "Subtask 1", "criteria": ["Done"], "tests": [], "blockers": []},
+                "steps": [
+                    {"title": "Step 0", "success_criteria": ["Done"], "tests": [], "blockers": []},
+                    {"title": "Step 1", "success_criteria": ["Done"], "tests": [], "blockers": []},
                 ],
             },
         )
@@ -221,8 +234,9 @@ class TestPathsExpansion:
                         "intent": "done",
                         "task": task.id,
                         "domain": "phase1",
-                        "paths": ["0", "1"],
+                        "paths": ["s:0", "s:1"],
                         "force": True,
+                        "override_reason": OVERRIDE_REASON,
                     },
                 ],
             },
@@ -234,8 +248,8 @@ class TestPathsExpansion:
 
         # Verify both operations were executed for the correct task
         reloaded = manager.load_task(task.id)
-        assert reloaded.subtasks[0].completed is True
-        assert reloaded.subtasks[1].completed is True
+        assert reloaded.steps[0].completed is True
+        assert reloaded.steps[1].completed is True
 
     def test_paths_mixed_operations(self, tmp_path):
         """Test mix of paths and single path operations."""
@@ -251,8 +265,8 @@ class TestPathsExpansion:
                 "intent": "batch",
                 "task": task.id,
                 "operations": [
-                    {"intent": "done", "paths": ["0", "1"], "force": True},  # Expands to 2
-                    {"intent": "done", "path": "2", "force": True},  # Single path
+                    {"intent": "done", "paths": ["s:0", "s:1"], "force": True, "override_reason": OVERRIDE_REASON},  # Expands to 2
+                    {"intent": "done", "path": "s:2", "force": True, "override_reason": OVERRIDE_REASON},  # Single path
                 ],
             },
         )
@@ -264,9 +278,9 @@ class TestPathsExpansion:
 
         # Verify all subtasks were updated
         reloaded = manager.load_task(task.id)
-        assert reloaded.subtasks[0].completed is True
-        assert reloaded.subtasks[1].completed is True
-        assert reloaded.subtasks[2].completed is True
+        assert reloaded.steps[0].completed is True
+        assert reloaded.steps[1].completed is True
+        assert reloaded.steps[2].completed is True
 
     def test_paths_empty_array(self, tmp_path):
         """Test that empty paths array is handled gracefully."""
@@ -274,7 +288,9 @@ class TestPathsExpansion:
         tasks_dir.mkdir()
         manager = TaskManager(tasks_dir=tasks_dir)
 
-        task = manager.create_task(title="Test Task", priority="MEDIUM")
+        plan = manager.create_plan("Empty Paths Plan")
+        manager.save_task(plan, skip_sync=True)
+        task = manager.create_task(title="Test Task", priority="MEDIUM", parent=plan.id)
         task.description = "Test"
         manager.save_task(task)
 
@@ -284,7 +300,7 @@ class TestPathsExpansion:
                 "intent": "batch",
                 "task": task.id,
                 "operations": [
-                    {"intent": "done", "paths": [], "force": True},  # Empty paths
+                    {"intent": "done", "paths": [], "force": True, "override_reason": OVERRIDE_REASON},  # Empty paths
                     {"intent": "context"},  # This should still run
                 ],
             },
@@ -301,12 +317,14 @@ class TestPathsExpansion:
         tasks_dir.mkdir()
         manager = TaskManager(tasks_dir=tasks_dir)
 
-        task = manager.create_task(title="Test Task", priority="MEDIUM")
+        plan = manager.create_plan("Security Plan")
+        manager.save_task(plan, skip_sync=True)
+        task = manager.create_task(title="Test Task", priority="MEDIUM", parent=plan.id)
         task.description = "Test"
         manager.save_task(task)
 
         # Create paths that exceed MAX_ARRAY_LENGTH when expanded
-        large_paths = [str(i) for i in range(MAX_ARRAY_LENGTH + 1)]
+        large_paths = [f"s:{i}" for i in range(MAX_ARRAY_LENGTH + 1)]
 
         resp = handle_batch(
             manager,
@@ -314,15 +332,14 @@ class TestPathsExpansion:
                 "intent": "batch",
                 "task": task.id,
                 "operations": [
-                    {"intent": "done", "paths": large_paths, "force": True},
+                    {"intent": "done", "paths": large_paths, "force": True, "override_reason": OVERRIDE_REASON},
                 ],
             },
         )
 
         assert resp.success is False
-        assert resp.error is not None
-        assert resp.error.code == "TOO_MANY_OPERATIONS_AFTER_EXPANSION"
-        assert "expansion" in resp.error.message.lower()
+        assert resp.error_code == "TOO_MANY_OPERATIONS_AFTER_EXPANSION"
+        assert "expansion" in (resp.error_message or "").lower()
 
     def test_single_path_unchanged(self, tmp_path):
         """Test that single 'path' field still works as before."""
@@ -338,7 +355,7 @@ class TestPathsExpansion:
                 "intent": "batch",
                 "task": task.id,
                 "operations": [
-                    {"intent": "done", "path": "0", "force": True},  # Single path
+                    {"intent": "done", "path": "s:0", "force": True, "override_reason": OVERRIDE_REASON},  # Single path
                 ],
             },
         )
@@ -349,7 +366,7 @@ class TestPathsExpansion:
 
         # Verify subtask was updated
         reloaded = manager.load_task(task.id)
-        assert reloaded.subtasks[0].completed is True
+        assert reloaded.steps[0].completed is True
 
 
 class TestPathsExpansionEdgeCases:
@@ -361,7 +378,9 @@ class TestPathsExpansionEdgeCases:
         tasks_dir.mkdir()
         manager = TaskManager(tasks_dir=tasks_dir)
 
-        task = manager.create_task(title="Test Task", priority="MEDIUM")
+        plan = manager.create_plan("Non-list Plan")
+        manager.save_task(plan, skip_sync=True)
+        task = manager.create_task(title="Test Task", priority="MEDIUM", parent=plan.id)
         task.description = "Test"
         manager.save_task(task)
 
@@ -381,7 +400,7 @@ class TestPathsExpansionEdgeCases:
         assert resp.result["total"] == 1
 
     def test_paths_numeric_converted_to_string(self, tmp_path):
-        """Test that numeric paths are converted to strings."""
+        """Numeric paths are rejected (paths must be explicit strings)."""
         tasks_dir = tmp_path / ".tasks"
         tasks_dir.mkdir()
         manager = TaskManager(tasks_dir=tasks_dir)
@@ -394,19 +413,13 @@ class TestPathsExpansionEdgeCases:
                 "intent": "batch",
                 "task": task.id,
                 "operations": [
-                    {"intent": "done", "paths": [0, 1], "force": True},  # Numeric paths
+                    {"intent": "done", "paths": [0, 1], "force": True, "override_reason": OVERRIDE_REASON},  # Numeric paths
                 ],
             },
         )
 
-        assert resp.success is True
-        assert resp.result["total"] == 2
-        assert resp.result["completed"] == 2
-
-        # Verify subtasks were updated (paths were converted to strings)
-        reloaded = manager.load_task(task.id)
-        assert reloaded.subtasks[0].completed is True
-        assert reloaded.subtasks[1].completed is True
+        assert resp.success is False
+        assert resp.error_code == "INVALID_PATH"
 
     def test_paths_with_both_path_and_paths(self, tmp_path):
         """Test that paths field takes precedence over path field."""
@@ -424,9 +437,10 @@ class TestPathsExpansionEdgeCases:
                 "operations": [
                     {
                         "intent": "done",
-                        "path": "2",  # This should be ignored
-                        "paths": ["0", "1"],  # This should take precedence
+                        "path": "s:2",  # This should be ignored
+                        "paths": ["s:0", "s:1"],  # This should take precedence
                         "force": True,
+                        "override_reason": OVERRIDE_REASON,
                     },
                 ],
             },
@@ -437,9 +451,9 @@ class TestPathsExpansionEdgeCases:
 
         # Verify only paths from 'paths' were updated
         reloaded = manager.load_task(task.id)
-        assert reloaded.subtasks[0].completed is True
-        assert reloaded.subtasks[1].completed is True
-        assert reloaded.subtasks[2].completed is False  # Not updated
+        assert reloaded.steps[0].completed is True
+        assert reloaded.steps[1].completed is True
+        assert reloaded.steps[2].completed is False  # Not updated
 
     def test_paths_atomic_mode(self, tmp_path):
         """Test paths expansion works correctly in atomic mode."""
@@ -456,7 +470,7 @@ class TestPathsExpansionEdgeCases:
                 "task": task.id,
                 "atomic": True,
                 "operations": [
-                    {"intent": "done", "paths": ["0", "1"], "force": True},
+                    {"intent": "done", "paths": ["s:0", "s:1"], "force": True, "override_reason": OVERRIDE_REASON},
                 ],
             },
         )
@@ -467,5 +481,5 @@ class TestPathsExpansionEdgeCases:
 
         # Verify both subtasks were updated
         reloaded = manager.load_task(task.id)
-        assert reloaded.subtasks[0].completed is True
-        assert reloaded.subtasks[1].completed is True
+        assert reloaded.steps[0].completed is True
+        assert reloaded.steps[1].completed is True

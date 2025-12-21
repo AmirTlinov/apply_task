@@ -1,15 +1,13 @@
 import {
   LayoutList,
   LayoutGrid,
+  ListTodo,
   Clock,
   BarChart3,
   Settings,
   FolderOpen,
-  PanelLeftClose,
-  PanelLeftOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { Link } from "@tanstack/react-router";
 
 interface NavItem {
@@ -20,80 +18,42 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { to: "/", label: "Tasks", icon: LayoutList, shortcut: "g l" },
+  { to: "/plans", label: "Plans", icon: LayoutList, shortcut: "g l" },
+  { to: "/", label: "Tasks", icon: ListTodo, shortcut: "g t" },
   { to: "/board", label: "Board", icon: LayoutGrid, shortcut: "g b" },
-  { to: "/timeline", label: "Timeline", icon: Clock, shortcut: "g t" },
+  { to: "/timeline", label: "Timeline", icon: Clock, shortcut: "g i" },
   { to: "/dashboard", label: "Dashboard", icon: BarChart3, shortcut: "g d" },
 ];
 
 interface SidebarProps {
-  projectName?: string;
-  collapsed?: boolean;
-  onToggle?: () => void;
+  className?: string;
+  onNavigate?: () => void;
 }
 
 export function Sidebar({
-  projectName,
-  collapsed = false,
-  onToggle,
+  className,
+  onNavigate,
 }: SidebarProps) {
+  const collapsed = true;
   return (
     <aside
       className={cn(
-        "flex h-full flex-col shrink-0 border-r border-border bg-background-subtle transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] overflow-hidden",
-        collapsed ? "w-[64px]" : "w-[240px]"
+        "flex h-full flex-col shrink-0 border-r border-border bg-background-subtle transition-all duration-300 ease-sidebar overflow-hidden",
+        "w-[var(--density-sidebar-collapsed-w)]",
+        className
       )}
     >
       {/* Header */}
       <div
         className={cn(
-          "flex items-center gap-3 min-h-[64px] border-b border-border",
-          collapsed ? "px-3 justify-center" : "px-4"
+          "flex items-center gap-3 min-h-[var(--density-sidebar-header-min-h)] border-b border-border",
+          "px-3 justify-center"
         )}
       >
         {/* Logo */}
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-blue-600 text-white shadow-sm shadow-blue-500/20">
           <span className="font-bold text-[13px] tracking-tight">AT</span>
         </div>
-
-        {!collapsed && (
-          <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
-            <span className="truncate font-semibold text-[15px] leading-tight text-foreground tracking-tight">
-              Apply Task
-            </span>
-            {projectName && (
-              <span className="truncate text-xs text-foreground-muted mt-0.5">
-                {projectName}
-              </span>
-            )}
-          </div>
-        )}
-
-        {!collapsed && onToggle && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggle}
-            className="h-8 w-8 text-foreground-muted hover:text-foreground"
-            title="Collapse sidebar"
-          >
-            <PanelLeftClose className="h-[18px] w-[18px]" />
-          </Button>
-        )}
-
-        {collapsed && onToggle && (
-          <div className="absolute left-[60px] top-[22px] z-50">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={onToggle}
-              className="h-6 w-6 rounded-md border-border bg-background shadow-sm hover:bg-background-hover"
-              title="Expand sidebar"
-            >
-              <PanelLeftOpen className="h-3.5 w-3.5 text-foreground-muted" />
-            </Button>
-          </div>
-        )}
       </div>
 
       {/* Navigation */}
@@ -103,6 +63,7 @@ export function Sidebar({
             key={item.to}
             item={item}
             collapsed={collapsed}
+            onNavigate={onNavigate}
           />
         ))}
       </nav>
@@ -110,12 +71,14 @@ export function Sidebar({
       {/* Footer */}
       <div className="p-2 border-t border-border space-y-0.5">
         <NavButton
-          item={{ to: "/projects", label: "Projects", icon: FolderOpen }}
+          item={{ to: "/projects", label: "Projects", icon: FolderOpen, shortcut: "g p" }}
           collapsed={collapsed}
+          onNavigate={onNavigate}
         />
         <NavButton
-          item={{ to: "/settings", label: "Settings", icon: Settings }}
+          item={{ to: "/settings", label: "Settings", icon: Settings, shortcut: "g s" }}
           collapsed={collapsed}
+          onNavigate={onNavigate}
         />
       </div>
     </aside>
@@ -125,14 +88,16 @@ export function Sidebar({
 interface NavButtonProps {
   item: NavItem;
   collapsed: boolean;
+  onNavigate?: () => void;
 }
 
-function NavButton({ item, collapsed }: NavButtonProps) {
+function NavButton({ item, collapsed, onNavigate }: NavButtonProps) {
   const Icon = item.icon;
 
   return (
     <Link
       to={item.to}
+      onClick={() => onNavigate?.()}
       title={collapsed ? item.label : undefined}
       activeProps={{
         className: "bg-primary-subtle text-primary"
@@ -142,7 +107,7 @@ function NavButton({ item, collapsed }: NavButtonProps) {
       }}
       className={cn(
         "group relative flex w-full items-center gap-3 rounded-lg text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary",
-        collapsed ? "justify-center px-2 py-2.5" : "px-3 py-2.5"
+        collapsed ? "justify-center px-2 py-2" : "px-3 py-2"
       )}
     >
       {({ isActive }) => (
@@ -164,7 +129,7 @@ function NavButton({ item, collapsed }: NavButtonProps) {
             <>
               <span className="flex-1 truncate text-left">{item.label}</span>
               {item.shortcut && (
-                <kbd className="inline-flex h-5 items-center rounded border border-border bg-background px-1.5 font-mono text-[10px] font-medium text-foreground-subtle opacity-100">
+                <kbd className="inline-flex h-5 items-center rounded border border-border bg-background px-1.5 font-mono text-[10px] font-medium text-foreground-subtle opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                   {item.shortcut}
                 </kbd>
               )}

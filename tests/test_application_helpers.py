@@ -1,4 +1,3 @@
-import json
 from typing import List
 
 import pytest
@@ -13,8 +12,7 @@ from core.desktop.devtools.application.context import (
     save_last_task,
 )
 from core.desktop.devtools.application.recommendations import next_recommendations, quick_overview, suggest_tasks
-from core.desktop.devtools.interface.cli_io import structured_error, structured_response, validation_response
-from core.task_detail import TaskDetail
+from core import TaskDetail
 
 
 def _make_task(task_id: str, *, status: str = "TODO", priority: str = "MEDIUM", progress: int = 0, blocked: bool = False, deps: List[str] | None = None) -> TaskDetail:
@@ -120,21 +118,3 @@ def test_effective_lang_env(monkeypatch):
     monkeypatch.setattr(i18n, "get_user_lang", lambda: "zz")
     assert i18n.effective_lang() == "en"
 
-
-def test_structured_response_variants(capsys):
-    rc = structured_response("cmd", message="hello", payload={"a": 1}, summary="done", exit_code=3)
-    assert rc == 3
-    body = json.loads(capsys.readouterr().out)
-    assert body["command"] == "cmd"
-    assert body["summary"] == "done"
-    assert body["payload"]["a"] == 1
-    err_rc = structured_error("cmd", "fail", payload={"x": 2})
-    err_body = json.loads(capsys.readouterr().out)
-    assert err_rc == 1
-    assert err_body["status"] == "ERROR"
-    assert err_body["payload"]["x"] == 2
-    val_rc = validation_response("cmd", False, "bad", payload={"check": "x"})
-    val_body = json.loads(capsys.readouterr().out)
-    assert val_rc == 1
-    assert val_body["status"] == "ERROR"
-    assert val_body["payload"]["mode"] == "validate-only"

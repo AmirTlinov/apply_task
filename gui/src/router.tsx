@@ -1,6 +1,9 @@
 import { createRouter } from '@tanstack/react-router'
 import { Route as rootRoute } from './routes/__root'
 import { Route as indexRoute } from './routes/index'
+import { Route as plansRoute } from './routes/plans'
+import { Route as planRoute } from './routes/plan'
+import { Route as taskRoute } from './routes/task'
 import { Route as boardRoute } from './routes/board'
 import { Route as timelineRoute } from './routes/timeline'
 import { Route as dashboardRoute } from './routes/dashboard'
@@ -10,6 +13,9 @@ import { Route as settingsRoute } from './routes/settings'
 // Build the route tree
 const routeTree = rootRoute.addChildren([
     indexRoute,
+    plansRoute,
+    planRoute,
+    taskRoute,
     boardRoute,
     timelineRoute,
     dashboardRoute,

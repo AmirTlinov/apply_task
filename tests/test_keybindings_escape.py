@@ -14,6 +14,9 @@ def test_escape_binding_is_eager(tmp_path):
     assert all(b.eager() if callable(b.eager) else bool(b.eager) for b in esc_bindings)
 
 
-def test_escape_does_not_wait_for_sequences(tmp_path):
+def test_escape_does_not_wait_for_sequences(tmp_path, monkeypatch):
+    monkeypatch.delenv("APPLY_TASK_TUI_TTIMEOUTLEN", raising=False)
     tui = TaskTrackerTUI(tasks_dir=tmp_path / ".tasks")
     assert tui.app.key_bindings.timeout == 0
+    # prompt_toolkit defaults to ~0.5s; we tune this down so Esc feels instant.
+    assert tui.app.ttimeoutlen <= 0.1

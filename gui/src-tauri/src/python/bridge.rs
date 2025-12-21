@@ -6,7 +6,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -15,12 +15,17 @@ use tokio::sync::Mutex;
 
 use super::protocol::{JsonRpcRequest, JsonRpcResponse};
 
+const STORAGE_MODE_GLOBAL: u8 = 0;
+const STORAGE_MODE_LOCAL: u8 = 1;
+
 /// Python bridge for communicating with apply_task backend
 pub struct PythonBridge {
     /// Python subprocess handle
     process: Arc<Mutex<Option<BridgeProcess>>>,
     /// Request ID counter
     request_id: AtomicU64,
+    /// Storage mode for backend process
+    storage_mode: AtomicU8,
     /// Apply_task package root (for finding Python scripts)
     apply_task_root: PathBuf,
     /// User's working directory (for project detection in Python)
@@ -80,11 +85,37 @@ impl PythonBridge {
         Self {
             process: Arc::new(Mutex::new(None)),
             request_id: AtomicU64::new(1),
+            storage_mode: AtomicU8::new(STORAGE_MODE_GLOBAL),
             apply_task_root,
             user_cwd,
             python_path,
             initialized: Arc::new(Mutex::new(false)),
         }
+    }
+
+    pub fn storage_mode_str(&self) -> &'static str {
+        if self.storage_mode.load(Ordering::Relaxed) == STORAGE_MODE_LOCAL {
+            "local"
+        } else {
+            "global"
+        }
+    }
+
+    pub async fn set_storage_mode(&self, mode: &str) -> Result<bool> {
+        let normalized = mode.trim().to_lowercase();
+        let next = match normalized.as_str() {
+            "global" => STORAGE_MODE_GLOBAL,
+            "local" => STORAGE_MODE_LOCAL,
+            _ => return Err(anyhow!("Invalid storage mode: {}", mode)),
+        };
+
+        let previous = self.storage_mode.swap(next, Ordering::SeqCst);
+        if previous == next {
+            return Ok(false);
+        }
+
+        self.shutdown().await?;
+        Ok(true)
     }
 
     /// Spawn the Python subprocess if not already running
@@ -102,23 +133,26 @@ impl PythonBridge {
         // Find apply_task entry point
         let args = self.find_apply_task()?;
         log::info!("Found apply_task args: {:?}", args);
+        let use_local_storage = self.storage_mode.load(Ordering::Relaxed) == STORAGE_MODE_LOCAL;
 
-        // Build command based on what we found
-        let mut cmd = if args.first().map(|s| s.as_str()) == Some("-m") {
-            // Module mode: python3 -m module
-            let mut c = Command::new(&self.python_path);
-            c.args(&args);
+        // Always spawn through Python to avoid relying on executable bits (+x).
+        // This keeps GUI deterministic across platforms/filesystem permissions.
+        let mut cmd = Command::new(&self.python_path);
+        if args.first().map(|s| s.as_str()) == Some("-m") {
+            // Module mode: python3 -m core.desktop.devtools.interface.mcp_server
+            cmd.args(&args);
             log::info!("Running: {} {:?}", self.python_path, args);
-            c
         } else {
-            // Script mode: /path/to/apply_task mcp
-            // The script is executable, run it directly
-            let executable = args.first().ok_or_else(|| anyhow!("No executable found"))?;
-            let mut c = Command::new(executable);
-            c.arg("mcp");
-            log::info!("Running: {} mcp", executable);
-            c
-        };
+            // Script mode: python3 /path/to/apply_task mcp
+            let script = args.first().ok_or_else(|| anyhow!("No entrypoint found"))?;
+            cmd.arg(script);
+            cmd.arg("mcp");
+            log::info!("Running: {} {} mcp", self.python_path, script);
+        }
+
+        if use_local_storage {
+            cmd.arg("--local");
+        }
 
         // Set PYTHONPATH to apply_task package root (for imports)
         cmd.env("PYTHONPATH", &self.apply_task_root);
@@ -373,6 +407,7 @@ impl PythonBridge {
             let _ = process.child.wait();
         }
 
+        *self.initialized.lock().await = false;
         Ok(())
     }
 

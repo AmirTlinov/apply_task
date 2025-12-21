@@ -1,109 +1,133 @@
 /**
- * New Task Modal - Create new task form
+ * New Item Modal
+ *
+ * Canonical model: Plans → Tasks → Steps.
+ * - Plan: PLAN-### (contract + plan checklist)
+ * - Task: TASK-### under a Plan (nested steps)
  */
 
-import { useState, useCallback, useEffect } from "react";
-import { X, Plus, Loader2 } from "lucide-react";
-import { createTask, getSubtasksTemplate } from "@/lib/tauri";
-import type { Namespace } from "@/types/task";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Loader2, Plus } from "lucide-react";
+import { aiIntent, createEntity } from "@/lib/tauri";
+import type { ContextData } from "@/types/api";
+import type { Namespace, Plan } from "@/types/task";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 
 interface NewTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   onTaskCreated?: () => void;
+  // Kept for compatibility with callers (project picker UI).
   namespaces?: Namespace[];
   selectedNamespace?: string | null;
   defaultNamespace?: string | null;
 }
 
-type DraftSubtask = {
-  title: string;
-  criteria: string[];
-  tests: string[];
-  blockers: string[];
-};
+type CreateKind = "plan" | "task";
 
-function normalizeListInput(value: string): string[] {
-  return value
-    .split(/[\n;]+/g)
-    .map((v) => v.trim())
-    .filter(Boolean);
+function isPlan(value: unknown): value is Plan {
+  const obj = (value ?? {}) as Record<string, unknown>;
+  return typeof obj.id === "string" && obj.kind === "plan";
 }
 
 export function NewTaskModal({
   isOpen,
   onClose,
   onTaskCreated,
-  namespaces = [],
-  selectedNamespace = null,
-  defaultNamespace = null,
 }: NewTaskModalProps) {
+  const [kind, setKind] = useState<CreateKind>("task");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [domain, setDomain] = useState("");
-  const [priority, setPriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "CRITICAL">("MEDIUM");
-  const [tagsText, setTagsText] = useState("");
-  const [namespace, setNamespace] = useState("");
-  const [subtasks, setSubtasks] = useState<DraftSubtask[]>([]);
-  const [isTemplateLoading, setIsTemplateLoading] = useState(false);
+  const [context, setContext] = useState("");
+  const [contract, setContract] = useState("");
+  const [parentPlanId, setParentPlanId] = useState("");
+
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(false);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [discardOpen, setDiscardOpen] = useState(false);
+
+  const isDirty = useMemo(() => {
+    return (
+      title.trim().length > 0 ||
+      description.trim().length > 0 ||
+      context.trim().length > 0 ||
+      contract.trim().length > 0 ||
+      (kind === "task" && parentPlanId.trim().length > 0)
+    );
+  }, [contract, context, description, kind, parentPlanId, title]);
+
+  const resetForm = useCallback(() => {
+    setKind("task");
+    setTitle("");
+    setDescription("");
+    setContext("");
+    setContract("");
+    setParentPlanId("");
+    setError(null);
+  }, []);
+
+  const closeNow = useCallback(() => {
+    resetForm();
+    onClose();
+  }, [onClose, resetForm]);
+
+  const requestClose = useCallback(() => {
+    if (isSubmitting) return;
+    if (isDirty) {
+      setDiscardOpen(true);
+      return;
+    }
+    closeNow();
+  }, [closeNow, isDirty, isSubmitting]);
 
   useEffect(() => {
     if (!isOpen) return;
-    const initial =
-      selectedNamespace ||
-      defaultNamespace ||
-      (namespaces.length === 1 ? namespaces[0].namespace : "");
-    setNamespace(initial);
-  }, [isOpen, selectedNamespace, defaultNamespace, namespaces]);
-
-  const handleLoadTemplate = useCallback(async () => {
-    setIsTemplateLoading(true);
     setError(null);
-    try {
-      const count = Math.max(3, subtasks.length || 3);
-      const response = await getSubtasksTemplate(count);
-      if (!response.success) {
-        throw new Error(response.error || "Failed to load template");
+    setIsLoadingPlans(true);
+    (async () => {
+      try {
+        const resp = await aiIntent<ContextData>("context", { include_all: true, compact: true });
+        const rawPlans = Array.isArray(resp.result?.plans) ? resp.result.plans : [];
+        const nextPlans = rawPlans.filter(isPlan);
+        setPlans(nextPlans);
+        if (nextPlans.length === 0) {
+          setKind("plan");
+          setParentPlanId("");
+        } else if (!parentPlanId) {
+          setParentPlanId(nextPlans[0].id);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load plans");
+      } finally {
+        setIsLoadingPlans(false);
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const payload = (response.result as any)?.payload;
-      const template = payload?.template;
-      if (!Array.isArray(template)) {
-        throw new Error("Invalid template format");
-      }
-      setSubtasks(
-        template.map((t: any) => ({
-          title: String(t.title || ""),
-          criteria: Array.isArray(t.criteria) ? t.criteria.map(String) : [],
-          tests: Array.isArray(t.tests) ? t.tests.map(String) : [],
-          blockers: Array.isArray(t.blockers) ? t.blockers.map(String) : [],
-        }))
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setIsTemplateLoading(false);
-    }
-  }, [subtasks.length]);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
-  const handleAddSubtask = useCallback(() => {
-    setSubtasks((prev) => [
-      ...prev,
-      { title: "", criteria: [], tests: [], blockers: [] },
-    ]);
-  }, []);
-
-  const handleRemoveSubtask = useCallback((index: number) => {
-    setSubtasks((prev) => prev.filter((_, i) => i !== index));
-  }, []);
+  const canCreateTask = plans.length > 0 && parentPlanId.startsWith("PLAN-");
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!title.trim()) {
       setError("Title is required");
+      return;
+    }
+    if (kind === "task" && !canCreateTask) {
+      setError("Select a parent plan first");
       return;
     }
 
@@ -111,618 +135,175 @@ export function NewTaskModal({
     setError(null);
 
     try {
-      const tags = normalizeListInput(tagsText.replace(/,/g, "\n"));
-      const sanitizedSubtasks = subtasks
-        .map((st) => ({
-          title: st.title.trim(),
-          criteria: st.criteria.map((c) => c.trim()).filter(Boolean),
-          tests: st.tests.map((t) => t.trim()).filter(Boolean),
-          blockers: st.blockers.map((b) => b.trim()).filter(Boolean),
-        }))
-        .filter((st) => st.title.length > 0);
-
-      const response = await createTask({
+      const resp = await createEntity({
         title: title.trim(),
-        parent: "ROOT",
+        kind,
+        parent: kind === "task" ? parentPlanId : undefined,
         description: description.trim() || undefined,
-        priority,
-        tags: tags.length ? tags : undefined,
-        subtasks: sanitizedSubtasks.length ? sanitizedSubtasks : undefined,
-        domain: domain.trim() || undefined,
-        namespace: namespace.trim() || undefined,
+        context: context.trim() || undefined,
+        contract: kind === "plan" ? (contract.trim() || undefined) : undefined,
       });
-
-      if (response.success) {
-        // Reset form
-        setTitle("");
-        setDescription("");
-        setDomain("");
-        setPriority("MEDIUM");
-        setTagsText("");
-        setSubtasks([]);
-        onClose();
-        onTaskCreated?.();
-      } else {
-        setError(response.error || "Failed to create task");
+      if (!resp.success) {
+        setError(resp.error || "Failed to create");
+        return;
       }
+      closeNow();
+      onTaskCreated?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setIsSubmitting(false);
     }
-  }, [title, description, domain, priority, tagsText, subtasks, namespace, onClose, onTaskCreated]);
-
-  const handleClose = useCallback(() => {
-    if (!isSubmitting) {
-      setTitle("");
-      setDescription("");
-      setDomain("");
-      setPriority("MEDIUM");
-      setTagsText("");
-      setSubtasks([]);
-      setError(null);
-      onClose();
-    }
-  }, [isSubmitting, onClose]);
+  }, [canCreateTask, closeNow, contract, context, description, kind, onTaskCreated, parentPlanId, title]);
 
   if (!isOpen) return null;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
-      onClick={handleClose}
-    >
-      <div
-        style={{
-          backgroundColor: "var(--color-background)",
-          borderRadius: "12px",
-          width: "480px",
-          maxWidth: "90vw",
-          maxHeight: "90vh",
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "16px 20px",
-            borderBottom: "1px solid var(--color-border)",
-          }}
-        >
-          <h2
-            style={{
-              fontSize: "16px",
-              fontWeight: 600,
-              color: "var(--color-foreground)",
-            }}
-          >
-            New Task
-          </h2>
-          <button
-            onClick={handleClose}
-            disabled={isSubmitting}
-            style={{
-              padding: "4px",
-              borderRadius: "4px",
-              border: "none",
-              backgroundColor: "transparent",
-              cursor: isSubmitting ? "not-allowed" : "pointer",
-              opacity: isSubmitting ? 0.5 : 1,
-            }}
-          >
-            <X style={{ width: "18px", height: "18px", color: "var(--color-foreground-muted)" }} />
-          </button>
-        </div>
+    <>
+      <Dialog open={isOpen} onOpenChange={(open) => !open && requestClose()}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="h-4 w-4 text-primary" />
+              Create {kind === "plan" ? "Plan" : "Task"}
+            </DialogTitle>
+          </DialogHeader>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} style={{ flex: 1, overflow: "auto" }}>
-          <div
-            style={{
-              padding: "20px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "16px",
-            }}
-          >
-            {/* Error message */}
-            {error && (
-              <div
-                style={{
-                  padding: "12px",
-                  backgroundColor: "var(--color-status-fail-subtle)",
-                  borderRadius: "8px",
-                  fontSize: "13px",
-                  color: "var(--color-status-fail)",
-                }}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className={kind === "task" ? "rounded-md bg-background px-3 py-1 text-xs font-semibold" : "rounded-md px-3 py-1 text-xs font-semibold text-foreground-muted hover:bg-background-hover"}
+                onClick={() => setKind("task")}
+                disabled={isSubmitting}
               >
+                Task
+              </button>
+              <button
+                type="button"
+                className={kind === "plan" ? "rounded-md bg-background px-3 py-1 text-xs font-semibold" : "rounded-md px-3 py-1 text-xs font-semibold text-foreground-muted hover:bg-background-hover"}
+                onClick={() => setKind("plan")}
+                disabled={isSubmitting}
+              >
+                Plan
+              </button>
+            </div>
+
+            {kind === "task" && (
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wider text-foreground-subtle">
+                  Parent plan
+                </div>
+                {isLoadingPlans ? (
+                  <div className="flex items-center gap-2 text-sm text-foreground-muted">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading plans…
+                  </div>
+                ) : plans.length === 0 ? (
+                  <div className="text-sm text-foreground-muted">
+                    No plans yet. Create a plan first, then add tasks under it.
+                  </div>
+                ) : (
+                  <select
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={parentPlanId}
+                    onChange={(e) => setParentPlanId(e.target.value)}
+                    disabled={isSubmitting}
+                  >
+                    {plans.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.id} — {p.title}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wider text-foreground-subtle">
+                Title
+              </div>
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Short, specific name" />
+            </div>
+
+            {kind === "plan" && (
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wider text-foreground-subtle">
+                  Contract (optional)
+                </div>
+                <Textarea
+                  value={contract}
+                  onChange={(e) => setContract(e.target.value)}
+                  rows={6}
+                  placeholder="Intent, constraints, definition of done…"
+                />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wider text-foreground-subtle">
+                Description (optional)
+              </div>
+              <Textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={4}
+                placeholder="Short overview"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wider text-foreground-subtle">
+                Context (optional)
+              </div>
+              <Textarea
+                value={context}
+                onChange={(e) => setContext(e.target.value)}
+                rows={6}
+                placeholder="Links, constraints, decisions…"
+              />
+            </div>
+
+            {error && (
+              <div className="rounded-md border border-status-fail/40 bg-status-fail/10 px-3 py-2 text-sm text-status-fail">
                 {error}
               </div>
             )}
 
-            {/* Title */}
-            <div>
-              <label
-                htmlFor="task-title"
-                style={{
-                  display: "block",
-                  fontSize: "12px",
-                  fontWeight: 500,
-                  color: "var(--color-foreground-muted)",
-                  marginBottom: "6px",
-                }}
-              >
-                Title <span style={{ color: "var(--color-status-fail)" }}>*</span>
-              </label>
-              <input
-                id="task-title"
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Enter task title..."
-                disabled={isSubmitting}
-                autoFocus
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--color-border)",
-                  backgroundColor: "var(--color-background)",
-                  fontSize: "14px",
-                  color: "var(--color-foreground)",
-                  outline: "none",
-                }}
-              />
-            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={requestClose} disabled={isSubmitting}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSubmitting || (kind === "task" && !canCreateTask)}>
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating…
+                  </>
+                ) : (
+                  "Create"
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-            {/* Description */}
-            <div>
-              <label
-                htmlFor="task-description"
-                style={{
-                  display: "block",
-                  fontSize: "12px",
-                  fontWeight: 500,
-                  color: "var(--color-foreground-muted)",
-                  marginBottom: "6px",
-                }}
-              >
-                Description
-              </label>
-              <textarea
-                id="task-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe the task..."
-                disabled={isSubmitting}
-                rows={3}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--color-border)",
-                  backgroundColor: "var(--color-background)",
-                  fontSize: "14px",
-                  color: "var(--color-foreground)",
-                  outline: "none",
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                }}
-              />
-            </div>
-
-            {/* Domain */}
-            <div>
-              <label
-                htmlFor="task-domain"
-                style={{
-                  display: "block",
-                  fontSize: "12px",
-                  fontWeight: 500,
-                  color: "var(--color-foreground-muted)",
-                  marginBottom: "6px",
-                }}
-              >
-                Domain
-              </label>
-              <input
-                id="task-domain"
-                type="text"
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-                placeholder="e.g., frontend, backend, infra..."
-                disabled={isSubmitting}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--color-border)",
-                  backgroundColor: "var(--color-background)",
-                  fontSize: "14px",
-                  color: "var(--color-foreground)",
-                  outline: "none",
-                }}
-              />
-            </div>
-
-            {/* Priority */}
-            <div>
-              <label
-                htmlFor="task-priority"
-                style={{
-                  display: "block",
-                  fontSize: "12px",
-                  fontWeight: 500,
-                  color: "var(--color-foreground-muted)",
-                  marginBottom: "6px",
-                }}
-              >
-                Priority
-              </label>
-              <select
-                id="task-priority"
-                value={priority}
-                onChange={(e) => setPriority(e.target.value as typeof priority)}
-                disabled={isSubmitting}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--color-border)",
-                  backgroundColor: "var(--color-background)",
-                  fontSize: "14px",
-                  color: "var(--color-foreground)",
-                  outline: "none",
-                }}
-              >
-                <option value="LOW">LOW</option>
-                <option value="MEDIUM">MEDIUM</option>
-                <option value="HIGH">HIGH</option>
-                <option value="CRITICAL">CRITICAL</option>
-              </select>
-            </div>
-
-            {/* Tags */}
-            <div>
-              <label
-                htmlFor="task-tags"
-                style={{
-                  display: "block",
-                  fontSize: "12px",
-                  fontWeight: 500,
-                  color: "var(--color-foreground-muted)",
-                  marginBottom: "6px",
-                }}
-              >
-                Tags (comma / newline separated)
-              </label>
-              <input
-                id="task-tags"
-                type="text"
-                value={tagsText}
-                onChange={(e) => setTagsText(e.target.value)}
-                placeholder="e.g., ui, mcp, infra"
-                disabled={isSubmitting}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--color-border)",
-                  backgroundColor: "var(--color-background)",
-                  fontSize: "14px",
-                  color: "var(--color-foreground)",
-                  outline: "none",
-                }}
-              />
-            </div>
-
-            {/* Namespace */}
-            {namespaces.length > 0 && (
-              <div>
-                <label
-                  htmlFor="task-namespace"
-                  style={{
-                    display: "block",
-                    fontSize: "12px",
-                    fontWeight: 500,
-                    color: "var(--color-foreground-muted)",
-                    marginBottom: "6px",
-                  }}
-                >
-                  Project / Namespace
-                </label>
-                <select
-                  id="task-namespace"
-                  value={namespace}
-                  onChange={(e) => setNamespace(e.target.value)}
-                  disabled={isSubmitting}
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: "8px",
-                    border: "1px solid var(--color-border)",
-                    backgroundColor: "var(--color-background)",
-                    fontSize: "14px",
-                    color: "var(--color-foreground)",
-                    outline: "none",
-                  }}
-                >
-                  <option value="">Current project</option>
-                  {namespaces.map((ns) => (
-                    <option key={ns.namespace} value={ns.namespace}>
-                      {ns.namespace} ({ns.task_count})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* Subtasks */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: "var(--color-foreground)",
-                  }}
-                >
-                  Subtasks
-                </label>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    type="button"
-                    onClick={handleLoadTemplate}
-                    disabled={isSubmitting || isTemplateLoading}
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--color-border)",
-                      backgroundColor: "transparent",
-                      fontSize: "12px",
-                      cursor: isSubmitting || isTemplateLoading ? "not-allowed" : "pointer",
-                      opacity: isSubmitting || isTemplateLoading ? 0.6 : 1,
-                    }}
-                  >
-                    {isTemplateLoading ? "Loading template..." : "Load template"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleAddSubtask}
-                    disabled={isSubmitting}
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--color-border)",
-                      backgroundColor: "transparent",
-                      fontSize: "12px",
-                      cursor: isSubmitting ? "not-allowed" : "pointer",
-                      opacity: isSubmitting ? 0.6 : 1,
-                    }}
-                  >
-                    Add subtask
-                  </button>
-                </div>
-              </div>
-
-              {subtasks.length === 0 && (
-                <div style={{ fontSize: "12px", color: "var(--color-foreground-muted)" }}>
-                  No subtasks yet. Add manually or load template.
-                </div>
-              )}
-
-              {subtasks.map((st, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "8px",
-                    padding: "12px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "8px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 600 }}>
-                      #{idx + 1}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveSubtask(idx)}
-                      disabled={isSubmitting}
-                      style={{
-                        padding: "4px 6px",
-                        borderRadius: "6px",
-                        border: "1px solid var(--color-border)",
-                        backgroundColor: "transparent",
-                        fontSize: "11px",
-                        cursor: isSubmitting ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-
-                  <input
-                    type="text"
-                    value={st.title}
-                    onChange={(e) =>
-                      setSubtasks((prev) =>
-                        prev.map((p, i) => (i === idx ? { ...p, title: e.target.value } : p))
-                      )
-                    }
-                    placeholder="Subtask title..."
-                    disabled={isSubmitting}
-                    style={{
-                      width: "100%",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--color-border)",
-                      backgroundColor: "var(--color-background)",
-                      fontSize: "13px",
-                      color: "var(--color-foreground)",
-                      outline: "none",
-                    }}
-                  />
-
-                  <textarea
-                    value={st.criteria.join("\n")}
-                    onChange={(e) =>
-                      setSubtasks((prev) =>
-                        prev.map((p, i) =>
-                          i === idx ? { ...p, criteria: normalizeListInput(e.target.value) } : p
-                        )
-                      )
-                    }
-                    placeholder="Success criteria (one per line)..."
-                    rows={2}
-                    disabled={isSubmitting}
-                    style={{
-                      width: "100%",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--color-border)",
-                      backgroundColor: "var(--color-background)",
-                      fontSize: "13px",
-                      color: "var(--color-foreground)",
-                      outline: "none",
-                      resize: "vertical",
-                      fontFamily: "inherit",
-                    }}
-                  />
-
-                  <textarea
-                    value={st.tests.join("\n")}
-                    onChange={(e) =>
-                      setSubtasks((prev) =>
-                        prev.map((p, i) =>
-                          i === idx ? { ...p, tests: normalizeListInput(e.target.value) } : p
-                        )
-                      )
-                    }
-                    placeholder="Tests (commands/assertions)..."
-                    rows={2}
-                    disabled={isSubmitting}
-                    style={{
-                      width: "100%",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--color-border)",
-                      backgroundColor: "var(--color-background)",
-                      fontSize: "13px",
-                      color: "var(--color-foreground)",
-                      outline: "none",
-                      resize: "vertical",
-                      fontFamily: "inherit",
-                    }}
-                  />
-
-                  <textarea
-                    value={st.blockers.join("\n")}
-                    onChange={(e) =>
-                      setSubtasks((prev) =>
-                        prev.map((p, i) =>
-                          i === idx ? { ...p, blockers: normalizeListInput(e.target.value) } : p
-                        )
-                      )
-                    }
-                    placeholder="Blockers/dependencies..."
-                    rows={2}
-                    disabled={isSubmitting}
-                    style={{
-                      width: "100%",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--color-border)",
-                      backgroundColor: "var(--color-background)",
-                      fontSize: "13px",
-                      color: "var(--color-foreground)",
-                      outline: "none",
-                      resize: "vertical",
-                      fontFamily: "inherit",
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div
-            style={{
-              padding: "16px 20px",
-              borderTop: "1px solid var(--color-border)",
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: "12px",
-            }}
-          >
-            <button
-              type="button"
-              onClick={handleClose}
-              disabled={isSubmitting}
-              style={{
-                padding: "10px 16px",
-                borderRadius: "8px",
-                border: "1px solid var(--color-border)",
-                backgroundColor: "transparent",
-                fontSize: "13px",
-                fontWeight: 500,
-                color: "var(--color-foreground)",
-                cursor: isSubmitting ? "not-allowed" : "pointer",
-                opacity: isSubmitting ? 0.5 : 1,
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting || !title.trim()}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "10px 16px",
-                borderRadius: "8px",
-                border: "none",
-                backgroundColor: "var(--color-primary)",
-                fontSize: "13px",
-                fontWeight: 500,
-                color: "white",
-                cursor: isSubmitting || !title.trim() ? "not-allowed" : "pointer",
-                opacity: isSubmitting || !title.trim() ? 0.7 : 1,
-              }}
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 style={{ width: "14px", height: "14px", animation: "spin 1s linear infinite" }} />
-                  Creating...
-                </>
-              ) : (
-                <>
-                  <Plus style={{ width: "14px", height: "14px" }} />
-                  Create Task
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      <ConfirmDialog
+        isOpen={discardOpen}
+        title="Discard changes?"
+        description="You have unsaved edits."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        danger
+        onCancel={() => setDiscardOpen(false)}
+        onConfirm={() => {
+          setDiscardOpen(false);
+          closeNow();
+        }}
+      />
+    </>
   );
 }
+

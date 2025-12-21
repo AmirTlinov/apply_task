@@ -1,5 +1,6 @@
 import { createRoute } from '@tanstack/react-router'
 import { Route as rootRoute } from './__root'
+import { SettingsView } from '@/features/settings/components/SettingsView'
 
 export const Route = createRoute({
     getParentRoute: () => rootRoute,
@@ -8,5 +9,5 @@ export const Route = createRoute({
 })
 
 function Settings() {
-    return <div className="p-4">Settings View (Coming Soon)</div>
+    return <SettingsView />
 }

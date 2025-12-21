@@ -1,665 +1,552 @@
 /**
- * Tauri API client wrapper
+ * Canonical Tauri bridge for apply_task GUI.
  *
- * Provides type-safe invoke wrappers for Rust commands.
- * Falls back to mock data when running in browser (not in Tauri).
+ * Single source of truth:
+ * - All backend mutations go through AI intents (`ai_intent` → `tasks_<intent>`).
+ * - Frontend types match Python serializers (plan_to_dict/task_to_dict/step_to_dict).
  */
 
-import type { Task, TaskListItem, TaskStatus } from "@/types/task";
+import type { AIResponse, ContextData, MirrorData, ResumeData } from "@/types/api";
+import type { Plan, PlanListItem, StorageInfo, Task, TaskListItem, TaskStatus, Step } from "@/types/task";
 
 // Check if we're running inside Tauri (Tauri 2.0 uses __TAURI_INTERNALS__)
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-const DEBUG = import.meta.env.DEV;
-const debugLog = (...args: unknown[]) => {
-  if (DEBUG) {
-    // eslint-disable-next-line no-console
-    console.log(...args);
-  }
-};
-const debugError = (...args: unknown[]) => {
-  if (DEBUG) {
-    // eslint-disable-next-line no-console
-    console.error(...args);
-  }
-};
-
-// Dynamic import for Tauri API (only when available)
 let tauriInvoke: typeof import("@tauri-apps/api/core").invoke | null = null;
-
-// Store the promise to ensure we wait for import completion
 const tauriInitPromise: Promise<void> = isTauri
   ? import("@tauri-apps/api/core").then((mod) => {
-    tauriInvoke = mod.invoke;
-    debugLog("[Tauri] API initialized successfully");
-  })
+      tauriInvoke = mod.invoke;
+    })
   : Promise.resolve();
 
-// Mock data for browser development (mutable for status updates)
-const MOCK_TASKS: TaskListItem[] = [
-  {
-    id: "TASK-001",
-    title: "Implement user authentication system",
-    status: "DONE",
-    progress: 75,
-    subtask_count: 4,
-    completed_count: 3,
-    tags: ["auth", "security"],
-    domain: "backend",
-    updated_at: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    id: "TASK-002",
-    title: "Design dashboard UI components",
-    status: "ACTIVE",
-    progress: 40,
-    subtask_count: 6,
-    completed_count: 2,
-    tags: ["ui", "design"],
-    domain: "frontend",
-    updated_at: new Date(Date.now() - 7200000).toISOString(),
-  },
-  {
-    id: "TASK-003",
-    title: "Setup CI/CD pipeline",
-    status: "TODO",
-    progress: 20,
-    subtask_count: 5,
-    completed_count: 1,
-    tags: ["devops", "automation"],
-    domain: "infra",
-    updated_at: new Date(Date.now() - 86400000).toISOString(),
-  },
-];
-
-// Full mock task details for tasks_show
-function getMockTaskDetail(taskId: string): Task | null {
-  const listItem = MOCK_TASKS.find((t) => t.id === taskId);
-  if (!listItem) return null;
-
-  // Return full task with subtasks based on task ID
-  const subtasksByTask: Record<string, Task["subtasks"]> = {
-    "TASK-001": [
-      {
-        title: "Set up JWT token generation and validation",
-        success_criteria: ["Tokens expire after 24h", "Refresh token mechanism"],
-        tests: ["jest auth.test.ts"],
-        blockers: [],
-        completed: true,
-        subtasks: [
-          {
-            title: "Implement access token generation",
-            success_criteria: ["Uses RS256 algorithm", "Contains user claims"],
-            tests: ["Unit test token payload"],
-            blockers: [],
-            completed: true,
-          },
-          {
-            title: "Implement refresh token storage",
-            success_criteria: ["Store in Redis", "Rotate on use"],
-            tests: ["Integration test with Redis"],
-            blockers: [],
-            completed: true,
-          },
-        ],
-      },
-      {
-        title: "Create login endpoint with rate limiting",
-        success_criteria: ["Max 5 attempts per minute", "Return proper errors"],
-        tests: ["Rate limit test", "Invalid creds test"],
-        blockers: ["Redis connection required"],
-        completed: false,
-        subtasks: [
-          {
-            title: "Validate credentials against database",
-            success_criteria: ["bcrypt comparison", "Timing-safe"],
-            tests: ["Password validation test"],
-            blockers: [],
-            completed: true,
-          },
-          {
-            title: "Implement rate limiter middleware",
-            success_criteria: ["Use sliding window", "Per-IP tracking"],
-            tests: ["Load test rate limiter"],
-            blockers: ["Redis connection required"],
-            completed: false,
-          },
-        ],
-      },
-      {
-        title: "Integrate Google OAuth2 provider",
-        success_criteria: ["Popup flow", "Account linking"],
-        tests: ["E2E OAuth flow"],
-        blockers: ["Google API credentials"],
-        completed: false,
-      },
-    ],
-    "TASK-002": [
-      {
-        title: "Create base component library",
-        success_criteria: ["Button, Input, Card components"],
-        tests: ["Storybook visual tests"],
-        blockers: [],
-        completed: true,
-      },
-      {
-        title: "Build dashboard layout",
-        success_criteria: ["Responsive grid", "Sidebar navigation"],
-        tests: ["Layout snapshot tests"],
-        blockers: [],
-        completed: true,
-      },
-      {
-        title: "Implement chart widgets",
-        success_criteria: ["Line, Bar, Pie charts"],
-        tests: ["Chart rendering tests"],
-        blockers: [],
-        completed: false,
-      },
-    ],
-    "TASK-003": [
-      {
-        title: "Configure GitHub Actions workflow",
-        success_criteria: ["Run on push", "Matrix builds"],
-        tests: ["Workflow syntax validation"],
-        blockers: [],
-        completed: true,
-      },
-      {
-        title: "Set up Docker build stage",
-        success_criteria: ["Multi-stage build", "Layer caching"],
-        tests: ["Build time benchmark"],
-        blockers: ["Docker Hub credentials"],
-        completed: false,
-      },
-    ],
-  };
-
-  return {
-    id: listItem.id,
-    title: listItem.title,
-    description: `Full description for ${listItem.title}. This task involves multiple subtasks and has specific acceptance criteria.`,
-    status: listItem.status,
-    parent: "ROOT",
-    tests: ["npm run test", "npm run e2e"],
-    risks: ["Potential blockers from dependencies"],
-    tags: listItem.tags || [],
-    domain: listItem.domain,
-    priority: listItem.status === "TODO" ? "HIGH" : "NORMAL",
-    progress: listItem.progress,
-    created_at: new Date(Date.now() - 7 * 86400000).toISOString(),
-    updated_at: listItem.updated_at,
-    subtasks: subtasksByTask[taskId] || [],
-  };
+function extractAIError(raw: unknown): string | null {
+  const obj = (raw ?? {}) as Record<string, unknown>;
+  const err = (obj.error ?? null) as Record<string, unknown> | null;
+  const msg = typeof err?.message === "string" ? err.message : null;
+  return msg && msg.trim().length > 0 ? msg : null;
 }
 
-/**
- * Invoke wrapper that uses Tauri API when available, mock otherwise
- */
-async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  // Wait for Tauri API to be initialized (resolves immediately if not in Tauri)
-  debugLog(`[invoke] Starting cmd=${cmd}, isTauri=${isTauri}, tauriInvoke=${!!tauriInvoke}`);
+async function invokeCommand<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   await tauriInitPromise;
-  debugLog(`[invoke] After init promise, isTauri=${isTauri}, tauriInvoke=${!!tauriInvoke}`);
-
-  if (isTauri && tauriInvoke) {
-    debugLog(`[Tauri] invoke: ${cmd}`, args);
-    try {
-      const result = await tauriInvoke<T>(cmd, args);
-      debugLog(`[Tauri] invoke result for ${cmd}:`, result);
-      return result;
-    } catch (err) {
-      debugError(`[Tauri] invoke error for ${cmd}:`, err);
-      throw err;
-    }
+  if (!isTauri || !tauriInvoke) {
+    throw new Error(`Tauri command not available in browser mode: ${command}`);
   }
-
-  // Mock responses for browser development
-  debugLog(`[Mock] invoke: ${cmd}`, args);
-
-  switch (cmd) {
-    case "tasks_list":
-      return {
-        success: true,
-        tasks: MOCK_TASKS,
-        total: MOCK_TASKS.length,
-      } as T;
-
-    case "tasks_storage":
-      return {
-        success: true,
-        intent: "storage",
-        result: {
-          global_storage: "/home/mock/.tasks",
-          global_exists: true,
-          local_storage: "/mock/project/.tasks",
-          local_exists: false,
-          current_storage: "/home/mock/.tasks/apply_task",
-          current_namespace: "apply_task",
-          namespaces: [
-            {
-              namespace: "apply_task",
-              path: "/home/mock/.tasks/apply_task",
-              task_count: MOCK_TASKS.length,
-            },
-            {
-              namespace: "other_project",
-              path: "/home/mock/.tasks/other_project",
-              task_count: 5,
-            },
-            {
-              namespace: "demo_project",
-              path: "/home/mock/.tasks/demo_project",
-              task_count: 12,
-            },
-          ],
-        },
-      } as T;
-
-    case "tasks_show": {
-      const taskDetail = getMockTaskDetail(args?.task_id as string);
-      return {
-        success: !!taskDetail,
-        task: taskDetail,
-        error: taskDetail ? undefined : "Task not found",
-      } as T;
-    }
-
-    case "tasks_update_status": {
-      const { task_id, status } = args as { task_id: string; status: TaskStatus };
-      const taskIndex = MOCK_TASKS.findIndex((t) => t.id === task_id);
-      if (taskIndex >= 0) {
-        // Update mock data
-        MOCK_TASKS[taskIndex] = {
-          ...MOCK_TASKS[taskIndex],
-          status,
-          progress: status === "DONE" ? 100 : status === "ACTIVE" ? 50 : 0,
-          updated_at: new Date().toISOString(),
-        };
-        debugLog(`[Mock] Updated task ${task_id} status to ${status}`);
-        return {
-          success: true,
-          intent: "update_status",
-          result: { task_id, status },
-        } as T;
-      }
-      return {
-        success: false,
-        error: `Task ${task_id} not found`,
-      } as T;
-    }
-
-    case "tasks_create": {
-      const { title, domain, namespace, tags, subtasks } = args as {
-        title: string;
-        domain?: string;
-        namespace?: string;
-        tags?: string[];
-        subtasks?: unknown[];
-      };
-      const newId = `TASK-${String(MOCK_TASKS.length + 1).padStart(3, "0")}`;
-      const uiId = namespace ? `${namespace}/${newId}` : newId;
-      const newTask: TaskListItem = {
-        id: uiId,
-        task_id: newId,
-        title,
-        status: "TODO",
-        progress: 0,
-        subtask_count: Array.isArray(subtasks) ? subtasks.length : 0,
-        completed_count: 0,
-        tags: tags || [],
-        domain: domain || "general",
-        namespace,
-        updated_at: new Date().toISOString(),
-      };
-      MOCK_TASKS.unshift(newTask); // Add to beginning
-      debugLog(`[Mock] Created task ${newId}: ${title}`);
-      return {
-        success: true,
-        intent: "create",
-        result: { taskId: newId, task: newTask },
-      } as T;
-    }
-
-    case "tasks_template_subtasks": {
-      const { count } = args as { count?: number };
-      const n = Math.max(3, count ?? 3);
-      const template = Array.from({ length: n }, (_v, i) => ({
-        title: `Result ${i + 1}: describe measurable outcome`,
-        criteria: ["Define measurable success criteria"],
-        tests: ["Add relevant tests"],
-        blockers: ["List blockers/dependencies"],
-      }));
-      return {
-        success: true,
-        intent: "template_subtasks",
-        result: {
-          success: true,
-          payload: { type: "subtasks", count: n, template },
-        },
-      } as T;
-    }
-
-    case "tasks_send_signal": {
-      const { signal, message } = args as { signal: string; message?: string };
-      return {
-        success: true,
-        intent: "send_signal",
-        result: { success: true, signal, message: message || "" },
-      } as T;
-    }
-
-    case "tasks_delete": {
-      const { task_id } = args as { task_id: string };
-      const taskIndex = MOCK_TASKS.findIndex((t) => t.id === task_id);
-      if (taskIndex >= 0) {
-        MOCK_TASKS.splice(taskIndex, 1);
-        debugLog(`[Mock] Deleted task ${task_id}`);
-        return {
-          success: true,
-          intent: "delete",
-          result: { task_id, deleted: true },
-        } as T;
-      }
-      return {
-        success: false,
-        error: `Task ${task_id} not found`,
-      } as T;
-    }
-
-    default:
-      return {
-        success: true,
-        intent: cmd,
-        result: { message: "Mock response" },
-      } as T;
-  }
+  return tauriInvoke<T>(command, args ?? {});
 }
 
-/** Task list response from Rust */
-interface TaskListResponse {
+export interface BackendStorageModeResponse {
+  success: boolean;
+  mode: "global" | "local";
+  restarted: boolean;
+  error?: string;
+}
+
+export async function setBackendStorageMode(mode: "global" | "local"): Promise<BackendStorageModeResponse> {
+  if (!isTauri) {
+    return { success: true, mode, restarted: false };
+  }
+  const resp = await invokeCommand<{ success: boolean; mode: string; restarted: boolean; error?: string }>(
+    "backend_set_storage_mode",
+    { mode }
+  );
+  return {
+    success: Boolean(resp?.success),
+    mode: resp?.mode === "local" ? "local" : "global",
+    restarted: Boolean(resp?.restarted),
+    error: resp?.error,
+  };
+}
+
+export async function aiIntent<T = unknown>(intent: string, params?: Record<string, unknown>): Promise<AIResponse<T>> {
+  if (!isTauri) {
+    // Minimal browser mock: return empty context to keep UI usable in dev.
+    const mock: AIResponse<T> = {
+      success: true,
+      intent,
+      result: {} as T,
+      warnings: [],
+      context: {},
+      suggestions: [],
+      meta: {},
+      error: null,
+      timestamp: new Date().toISOString(),
+    };
+    return mock;
+  }
+  return invokeCommand<AIResponse<T>>("ai_intent", { intent, params: params ?? {} });
+}
+
+export interface TaskListResponse {
   success: boolean;
   tasks: TaskListItem[];
   total: number;
   error?: string;
 }
 
-/** Task detail response from Rust */
-interface TaskResponse {
-  success: boolean;
-  task?: Task;
-  error?: string;
-}
-
-/** AI intent response from Rust */
-interface AIIntentResponse {
-  success: boolean;
-  intent: string;
-  result?: unknown;
-  suggestions?: string[];
-  error?: string;
-}
-
-/**
- * Get list of tasks
- */
 export async function listTasks(params?: {
   domain?: string;
   status?: string;
-  compact?: boolean;
-  namespace?: string | null;
-  allNamespaces?: boolean;
-}): Promise<TaskListResponse> {
-  return invoke<TaskListResponse>("tasks_list", {
-    domain: params?.domain,
-    status: params?.status,
-    compact: params?.compact ?? true,
-    namespace: params?.namespace ?? undefined,
-    // Support both camelCase and snake_case for Tauri argument mapping
-    allNamespaces: params?.allNamespaces ?? false,
-    all_namespaces: params?.allNamespaces ?? false,
-  });
-}
-
-/**
- * Get task details
- * @param taskId - The task ID (e.g., "TASK-001")
- * @param domain - Optional domain path within namespace (e.g., "core/api")
- * @param namespace - Optional namespace folder (e.g., "idea_h") for cross-namespace lookup
- */
-export async function showTask(taskId: string, domain?: string, namespace?: string): Promise<TaskResponse> {
-  return invoke<TaskResponse>("tasks_show", {
-    taskId,
-    task_id: taskId,
-    domain,
-    namespace,
-  });
-}
-
-/**
- * Get current context for AI session
- */
-export async function getContext(params?: {
-  compact?: boolean;
-  includeAll?: boolean;
-}): Promise<AIIntentResponse> {
-  return invoke<AIIntentResponse>("tasks_context", {
-    compact: params?.compact ?? true,
-    includeAll: params?.includeAll ?? false,
-  });
-}
-
-/**
- * Execute AI intent
- */
-export async function executeIntent(
-  intent: string,
-  params?: Record<string, unknown>
-): Promise<AIIntentResponse> {
-  return invoke<AIIntentResponse>("ai_intent", { intent, params });
-}
-
-/**
- * Create a new task
- */
-export async function createTask(params: {
-  title: string;
-  description?: string;
-  priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   parent?: string;
-  tags?: string[];
-  subtasks?: Array<{
-    title: string;
-    criteria?: string[];
-    tests?: string[];
-    blockers?: string[];
-  }>;
-  domain?: string;
-  phase?: string;
-  component?: string;
-  context?: string;
-  namespace?: string;
-}): Promise<AIIntentResponse> {
-  return invoke<AIIntentResponse>("tasks_create", params);
-}
-
-/**
- * Update task status
- * @param taskId - The task ID (e.g., "TASK-001")
- * @param status - New status
- * @param domain - Optional namespace for cross-namespace operations
- */
-export async function updateTaskStatus(
-  taskId: string,
-  status: TaskStatus,
-  domain?: string,
-  namespace?: string
-): Promise<AIIntentResponse> {
-  return invoke<AIIntentResponse>("tasks_update_status", {
-    taskId,
-    task_id: taskId,
-    status,
-    domain,
-    namespace,
+  compact?: boolean;
+}): Promise<TaskListResponse> {
+  const resp = await aiIntent<ContextData>("context", {
+    include_all: true,
+    compact: params?.compact ?? true,
+    tasks_parent: params?.parent,
   });
+  if (!resp.success) {
+    return { success: false, tasks: [], total: 0, error: extractAIError(resp) || "Failed to load tasks" };
+  }
+  const all = Array.isArray(resp.result?.tasks) ? resp.result.tasks : [];
+  let tasks = all.filter((t): t is TaskListItem => (t as TaskListItem).kind === "task");
+
+  const statusFilter = String(params?.status || "").trim().toUpperCase();
+  if (statusFilter) {
+    tasks = tasks.filter((t) => String(t.status_code || t.status).toUpperCase() === statusFilter);
+  }
+
+  const domain = String(params?.domain || "").trim();
+  if (domain) {
+    tasks = tasks.filter((t) => (t.domain || "").startsWith(domain));
+  }
+
+  return { success: true, tasks, total: tasks.length };
 }
 
-export async function completeCheckpoint(params: {
-  taskId: string;
-  path: string;
-  checkpoint: "criteria" | "tests" | "blockers";
-  note: string;
-  domain?: string;
-  namespace?: string;
-}): Promise<AIIntentResponse> {
-  return invoke<AIIntentResponse>("tasks_checkpoint", {
-    task_id: params.taskId,
+export interface PlanListResponse {
+  success: boolean;
+  plans: PlanListItem[];
+  total: number;
+  error?: string;
+}
+
+export async function listPlans(params?: { domain?: string; compact?: boolean }): Promise<PlanListResponse> {
+  const resp = await aiIntent<ContextData>("context", {
+    include_all: true,
+    compact: params?.compact ?? true,
+    domain: params?.domain,
+  });
+  if (!resp.success) {
+    return { success: false, plans: [], total: 0, error: extractAIError(resp) || "Failed to load plans" };
+  }
+  const all = Array.isArray(resp.result?.plans) ? resp.result.plans : [];
+  const plans = all.filter((p): p is PlanListItem => (p as PlanListItem).kind === "plan");
+  return { success: true, plans, total: plans.length };
+}
+
+export async function mirrorList(params: {
+  task?: string;
+  plan?: string;
+  path?: string;
+  kind?: "step" | "task";
+  stepId?: string;
+  taskNodeId?: string;
+  limit?: number;
+}): Promise<{ success: boolean; data?: MirrorData; error?: string }> {
+  const resp = await aiIntent<MirrorData>("mirror", {
+    task: params.task,
+    plan: params.plan,
     path: params.path,
-    checkpoint: params.checkpoint,
-    note: params.note,
-    domain: params.domain,
-    namespace: params.namespace,
+    kind: params.kind,
+    step_id: params.stepId,
+    task_node_id: params.taskNodeId,
+    limit: params.limit,
   });
+  if (!resp.success) {
+    return { success: false, error: extractAIError(resp) || "Failed to load mirror list" };
+  }
+  return { success: true, data: resp.result as MirrorData };
 }
 
-/**
- * Define or update criteria/tests/blockers for a subtask
- */
-export async function defineSubtask(params: {
-	  taskId: string;
-	  path: string;
-	  title?: string;
-	  criteria?: string[];
-	  tests?: string[];
-	  blockers?: string[];
-	  domain?: string;
-	  namespace?: string;
-}): Promise<AIIntentResponse> {
-	  return executeIntent("define", {
-	    task: params.taskId,
-	    path: params.path,
-	    title: params.title,
-	    criteria: params.criteria,
-	    tests: params.tests,
-	    blockers: params.blockers,
-	    domain: params.domain,
-	    namespace: params.namespace,
-	  });
+export interface StorageResponse {
+  success: boolean;
+  storage?: StorageInfo;
+  error?: string;
 }
 
-/**
- * Delete a subtask at path
- */
-export async function deleteSubtask(params: {
+export async function getStorage(): Promise<StorageResponse> {
+  const resp = await aiIntent<StorageInfo>("storage");
+  if (!resp.success) {
+    return { success: false, error: extractAIError(resp) || "Failed to load storage" };
+  }
+  return { success: true, storage: resp.result as unknown as StorageInfo };
+}
+
+export interface TaskResponse {
+  success: boolean;
+  task?: Task;
+  checkpoint_status?: { pending: string[]; ready: string[] };
+  timeline?: unknown[];
+  error?: string;
+}
+
+export async function showTask(taskId: string): Promise<TaskResponse> {
+  const resp = await aiIntent<ResumeData>("resume", { task: taskId, events_limit: 50 });
+  if (!resp.success) {
+    return { success: false, error: extractAIError(resp) || "Failed to load task" };
+  }
+  const task = resp.result?.task as unknown as Task | undefined;
+  const checkpoint_status = resp.result?.checkpoint_status as unknown as { pending: string[]; ready: string[] } | undefined;
+  const timeline = resp.result?.timeline as unknown[] | undefined;
+  return { success: Boolean(task), task, checkpoint_status, timeline, error: task ? undefined : "Task not found" };
+}
+
+export async function resumeEntity(id: string): Promise<{ success: boolean; plan?: Plan; task?: Task; error?: string }> {
+  const resp = await aiIntent<ResumeData>("resume", { task: id, events_limit: 50 });
+  if (!resp.success) {
+    return { success: false, error: extractAIError(resp) || "Failed to resume" };
+  }
+  return {
+    success: true,
+    plan: (resp.result?.plan as unknown as Plan | undefined) ?? undefined,
+    task: (resp.result?.task as unknown as Task | undefined) ?? undefined,
+  };
+}
+
+export async function createEntity(params: {
+  title: string;
+  kind: "plan" | "task";
+  parent?: string;
+  priority?: "LOW" | "MEDIUM" | "HIGH";
+  description?: string;
+  context?: string;
+  contract?: string;
+  steps?: unknown[];
+}): Promise<{ success: boolean; plan?: Plan; task?: Task; error?: string }> {
+  const resp = await aiIntent<Record<string, unknown>>("create", {
+    title: params.title,
+    kind: params.kind,
+    parent: params.parent,
+    priority: params.priority,
+    description: params.description,
+    context: params.context,
+    contract: params.contract,
+    steps: params.steps,
+  });
+  if (!resp.success) {
+    return { success: false, error: extractAIError(resp) || "Failed to create" };
+  }
+  const plan = (resp.result?.plan as unknown as Plan | undefined) ?? undefined;
+  const task = (resp.result?.task as unknown as Task | undefined) ?? undefined;
+  return { success: true, plan, task };
+}
+
+export async function updateTaskStatus(taskId: string, status: TaskStatus): Promise<{ success: boolean; error?: string }> {
+  const resp = await aiIntent("complete", { task: taskId, status });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to update status" };
+  return { success: true };
+}
+
+export async function deleteTask(taskId: string): Promise<{ success: boolean; error?: string }> {
+  const resp = await aiIntent("delete", { task: taskId });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to delete task" };
+  return { success: true };
+}
+
+export async function editTask(params: {
+  taskId: string;
+  description?: string;
+  context?: string;
+  tags?: string[];
+  priority?: "LOW" | "MEDIUM" | "HIGH";
+  dependsOn?: string[];
+  newDomain?: string;
+}): Promise<{ success: boolean; result?: unknown; error?: string }> {
+  const resp = await aiIntent("edit", {
+    task: params.taskId,
+    description: params.description,
+    context: params.context,
+    tags: params.tags,
+    priority: params.priority,
+    depends_on: params.dependsOn,
+    new_domain: params.newDomain,
+  });
+  if (!resp.success) return { success: false, result: resp.result, error: extractAIError(resp) || "Failed to edit" };
+  return { success: true, result: resp.result };
+}
+
+export async function setStepCompleted(params: {
   taskId: string;
   path: string;
-  domain?: string;
-  namespace?: string;
-}): Promise<AIIntentResponse> {
-  return executeIntent("delete", {
+  completed: boolean;
+  force?: boolean;
+}): Promise<{ success: boolean; error?: string }> {
+  const resp = await aiIntent("progress", {
     task: params.taskId,
     path: params.path,
-    domain: params.domain,
-    namespace: params.namespace,
+    completed: params.completed,
+    force: params.force ?? false,
   });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to update step" };
+  return { success: true };
 }
 
-/**
- * Toggle subtask completion
- */
-export async function toggleSubtask(
-  taskId: string,
-  path: string,
-  completed: boolean,
-  domain?: string,
-  namespace?: string
-): Promise<AIIntentResponse> {
-  return executeIntent("progress", {
-    task: taskId,
-    path,
-    completed,
-    domain,
-    namespace,
+export async function addStepNote(params: { taskId: string; path: string; note: string }): Promise<{ success: boolean; error?: string }> {
+  const resp = await aiIntent("note", { task: params.taskId, path: params.path, note: params.note });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to add note" };
+  return { success: true };
+}
+
+export async function setStepBlocked(params: {
+  taskId: string;
+  path: string;
+  blocked: boolean;
+  reason?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const resp = await aiIntent("block", { task: params.taskId, path: params.path, blocked: params.blocked, reason: params.reason });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to update blocked state" };
+  return { success: true };
+}
+
+export async function addTaskNode(params: {
+  taskId: string;
+  parentStep: string;
+  title: string;
+  status?: string;
+  priority?: "LOW" | "MEDIUM" | "HIGH";
+  description?: string;
+  context?: string;
+  successCriteria?: string[];
+  dependencies?: string[];
+  nextSteps?: string[];
+  problems?: string[];
+  risks?: string[];
+  blocked?: boolean;
+  blockers?: string[];
+  statusManual?: boolean;
+}): Promise<{ success: boolean; error?: string }> {
+  const resp = await aiIntent("task_add", {
+    task: params.taskId,
+    parent_step: params.parentStep,
+    title: params.title,
+    status: params.status,
+    priority: params.priority,
+    description: params.description,
+    context: params.context,
+    success_criteria: params.successCriteria,
+    dependencies: params.dependencies,
+    next_steps: params.nextSteps,
+    problems: params.problems,
+    risks: params.risks,
+    blocked: params.blocked,
+    blockers: params.blockers,
+    status_manual: params.statusManual,
   });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to add task node" };
+  return { success: true };
 }
 
-/**
- * Get storage info
- */
-export async function getStorage(): Promise<AIIntentResponse> {
-  return invoke<AIIntentResponse>("tasks_storage");
+export async function updateTaskNode(params: {
+  taskId: string;
+  path: string;
+  title?: string;
+  status?: string;
+  priority?: "LOW" | "MEDIUM" | "HIGH";
+  description?: string;
+  context?: string;
+  successCriteria?: string[];
+  dependencies?: string[];
+  nextSteps?: string[];
+  problems?: string[];
+  risks?: string[];
+  blocked?: boolean;
+  blockers?: string[];
+  statusManual?: boolean;
+}): Promise<{ success: boolean; error?: string }> {
+  const resp = await aiIntent("task_define", {
+    task: params.taskId,
+    path: params.path,
+    title: params.title,
+    status: params.status,
+    priority: params.priority,
+    description: params.description,
+    context: params.context,
+    success_criteria: params.successCriteria,
+    dependencies: params.dependencies,
+    next_steps: params.nextSteps,
+    problems: params.problems,
+    risks: params.risks,
+    blocked: params.blocked,
+    blockers: params.blockers,
+    status_manual: params.statusManual,
+  });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to update task node" };
+  return { success: true };
 }
 
-/**
- * Get AI session status (current op / plan / recent history)
- */
-export async function getAIStatus(): Promise<AIIntentResponse> {
-  return invoke<AIIntentResponse>("tasks_ai_status");
+export async function deleteTaskNode(params: { taskId: string; path: string }): Promise<{ success: boolean; error?: string }> {
+  const resp = await aiIntent("task_delete", { task: params.taskId, path: params.path });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to delete task node" };
+  return { success: true };
 }
 
-/**
- * Get subtasks template from backend
- */
-export async function getSubtasksTemplate(count = 3): Promise<AIIntentResponse> {
-  return invoke<AIIntentResponse>("tasks_template_subtasks", { count });
+export async function verifyStep(params: {
+  taskId: string;
+  path: string;
+  criteriaNote?: string;
+  testsNote?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const checkpoints: Record<string, unknown> = {};
+  if (params.criteriaNote !== undefined) {
+    checkpoints.criteria = { confirmed: true, note: params.criteriaNote };
+  }
+  if (params.testsNote !== undefined) {
+    checkpoints.tests = { confirmed: true, note: params.testsNote };
+  }
+  const resp = await aiIntent("verify", { task: params.taskId, path: params.path, checkpoints });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to verify" };
+  return { success: true };
 }
 
-/**
- * Send user signal to AI (pause/resume/stop/skip/message)
- */
-export async function sendAISignal(
-  signal: "pause" | "resume" | "stop" | "skip" | "message",
-  message?: string
-): Promise<AIIntentResponse> {
-  return invoke<AIIntentResponse>("tasks_send_signal", { signal, message });
+export async function verifyCheckpoint(params: {
+  taskId: string;
+  kind: "step" | "task" | "plan" | "task_detail";
+  path?: string;
+  stepId?: string;
+  taskNodeId?: string;
+  checkpoint: "criteria" | "tests";
+  confirmed: boolean;
+  note?: string;
+}): Promise<{ success: boolean; plan?: Plan; task?: Task; step?: Step; error?: string }> {
+  const checkpoints: Record<string, unknown> = {
+    [params.checkpoint]: { confirmed: params.confirmed, note: params.note ?? "" },
+  };
+  const resp = await aiIntent<Record<string, unknown>>("verify", {
+    task: params.taskId,
+    kind: params.kind,
+    path: params.path,
+    step_id: params.stepId,
+    task_node_id: params.taskNodeId,
+    checkpoints,
+  });
+  if (!resp.success) {
+    return { success: false, error: extractAIError(resp) || "Failed to verify" };
+  }
+  const result = resp.result as Record<string, unknown>;
+  return {
+    success: true,
+    plan: result.plan as Plan | undefined,
+    task: result.task as Task | undefined,
+    step: result.step as Step | undefined,
+  };
 }
 
-/**
- * Resume session with context
- */
-export async function resumeSession(taskId?: string): Promise<AIIntentResponse> {
-  return executeIntent("resume", { task: taskId });
+export async function defineStep(params: {
+  taskId: string;
+  path: string;
+  title?: string;
+  successCriteria?: string[];
+  tests?: string[];
+  blockers?: string[];
+}): Promise<{ success: boolean; error?: string }> {
+  const resp = await aiIntent("define", {
+    task: params.taskId,
+    path: params.path,
+    title: params.title,
+    success_criteria: params.successCriteria,
+    tests: params.tests,
+    blockers: params.blockers,
+  });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to update step" };
+  return { success: true };
 }
 
-/**
- * Get task history/timeline
- */
-export async function getHistory(params?: {
-  taskId?: string;
+export async function deleteStep(params: { taskId: string; path: string }): Promise<{ success: boolean; error?: string }> {
+  const resp = await aiIntent("delete", { task: params.taskId, path: params.path });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to delete step" };
+  return { success: true };
+}
+
+export async function updatePlan(params: {
+  planId: string;
+  doc?: string;
+  steps?: string[];
+  current?: number;
+  advance?: boolean;
+}): Promise<{ success: boolean; plan?: Plan; error?: string }> {
+  const resp = await aiIntent<{ plan?: Plan }>("plan", {
+    plan: params.planId,
+    doc: params.doc,
+    steps: params.steps,
+    current: params.current,
+    advance: params.advance ?? false,
+  });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to update plan" };
+  return { success: true, plan: (resp.result?.plan as unknown as Plan | undefined) ?? undefined };
+}
+
+export async function updateContract(params: { planId: string; current: string }): Promise<{ success: boolean; plan?: Plan; error?: string }> {
+  const resp = await aiIntent<{ plan?: Plan }>("contract", { plan: params.planId, current: params.current });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to update contract" };
+  return { success: true, plan: (resp.result?.plan as unknown as Plan | undefined) ?? undefined };
+}
+
+export interface OperationHistoryEntry {
+  id: string;
+  intent: string;
+  task_id?: string;
+  timestamp?: number;
+  datetime?: string;
+  undone?: boolean;
+}
+
+export interface OperationHistoryState {
+  operations: OperationHistoryEntry[];
+  can_undo: boolean;
+  can_redo: boolean;
+}
+
+export async function getOperationHistory(params?: { limit?: number }): Promise<{ success: boolean; history?: OperationHistoryState; error?: string }> {
+  const resp = await aiIntent<{ operations?: OperationHistoryEntry[]; can_undo?: boolean; can_redo?: boolean }>("history", {
+    limit: params?.limit ?? 50,
+  });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to load history" };
+  return {
+    success: true,
+    history: {
+      operations: Array.isArray(resp.result?.operations) ? resp.result.operations : [],
+      can_undo: Boolean(resp.result?.can_undo),
+      can_redo: Boolean(resp.result?.can_redo),
+    },
+  };
+}
+
+export async function undoLastOperation(): Promise<{ success: boolean; undo?: unknown; error?: string }> {
+  const resp = await aiIntent("undo");
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to undo" };
+  return { success: true, undo: resp.result };
+}
+
+export async function redoLastOperation(): Promise<{ success: boolean; redo?: unknown; error?: string }> {
+  const resp = await aiIntent("redo");
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to redo" };
+  return { success: true, redo: resp.result };
+}
+
+export interface TaskTimelineEventRecord {
+  timestamp: string;
+  event_type: string;
+  actor?: string;
+  target?: string;
+  data?: Record<string, unknown>;
+}
+
+export async function getTaskTimelineEvents(params: {
+  taskId: string;
   limit?: number;
-  format?: "json" | "markdown";
-}): Promise<AIIntentResponse> {
-  return executeIntent("history", {
-    task: params?.taskId,
-    limit: params?.limit,
-    format: params?.format,
-  });
+}): Promise<{ success: boolean; events?: TaskTimelineEventRecord[]; error?: string }> {
+  const resp = await aiIntent<ResumeData>("resume", { task: params.taskId, events_limit: params.limit ?? 50 });
+  if (!resp.success) return { success: false, error: extractAIError(resp) || "Failed to load timeline" };
+  const events = (resp.result?.timeline as unknown as TaskTimelineEventRecord[] | undefined) ?? [];
+  return { success: true, events: Array.isArray(events) ? events : [] };
 }
 
-/**
- * Open a project folder
- * In Tauri: Opens native folder picker
- * In browser: Shows a prompt for path input
- */
 export async function openProject(): Promise<{ success: boolean; path?: string; error?: string }> {
-  await tauriInitPromise;
-
-  if (isTauri && tauriInvoke) {
-    return tauriInvoke<{ success: boolean; path?: string; error?: string }>("open_project");
-  }
-
-  // Mock for browser - use prompt
-  const path = window.prompt("Enter project folder path:", "/path/to/project");
-  if (path) {
-    debugLog(`[Mock] Opening project: ${path}`);
-    return { success: true, path };
-  }
-  return { success: false, error: "Cancelled" };
+  const path = window.prompt("Enter project folder path:", "");
+  if (!path) return { success: false, error: "Cancelled" };
+  return { success: true, path };
 }
 
-/**
- * Open a local path in the system file manager (Tauri) or new tab (browser).
- */
 export async function openPath(path: string): Promise<{ success: boolean; error?: string }> {
   if (!path) return { success: false, error: "No path provided" };
   try {
@@ -673,18 +560,4 @@ export async function openPath(path: string): Promise<{ success: boolean; error?
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Failed to open path" };
   }
-}
-
-/**
- * Delete a task
- * @param taskId - The task ID (e.g., "TASK-001")
- * @param domain - Optional namespace for cross-namespace operations
- */
-export async function deleteTask(taskId: string, domain?: string, namespace?: string): Promise<AIIntentResponse> {
-  return invoke<AIIntentResponse>("tasks_delete", {
-    taskId,
-    task_id: taskId,
-    domain,
-    namespace,
-  });
 }

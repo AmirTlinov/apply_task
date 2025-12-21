@@ -1,574 +1,289 @@
 # Apply Task AI Intents Reference
 
-Complete reference for the JSON-based AI interface (`apply_task ai`).
+Complete reference for the canonical intent API exposed via MCP tools (`tasks_<intent>`).
 
 ## Overview
 
-The AI interface provides a structured JSON API for AI agents and automation tools. All requests follow the pattern:
+The intent API is a deterministic JSON surface designed for AI agents and automation.
 
-```bash
-apply_task ai '{"intent": "...", ...}'
-```
+In MCP, intents are exposed as tools named `tasks_<intent>` and map 1:1 to the intent payloads described below.
 
-## Response Format
+### Canonical model
 
-All responses are JSON with consistent structure:
+- **Plan**: `PLAN-###` (`TaskDetail.kind = "plan"`) stores:
+  - `contract` (text)
+  - plan checklist: `plan_doc`, `plan_steps[]`, `plan_current`
+- **Task**: `TASK-###` (`TaskDetail.kind = "task"`, `parent = PLAN-###`) stores:
+  - nested **steps** tree (`TaskDetail.steps[]`)
+- **Step**: node inside a task; each step can hold a **Plan** with **Tasks**, and each task holds **Steps**.
+  - checkpoints: `criteria` (explicit), `tests` (explicit OR auto-confirmed when empty at creation)
+  - `blockers[]` are **data only** (not a checkpoint)
+
+### Path format
+
+Paths are typed segments:
+- **Step path**: `"s:0"` or `"s:0.t:1.s:2"`
+- **Task path** (inside a step plan): `"s:0.t:1"`
+Stable node ids:
+- **step_id**: `STEP-XXXXXXXX`
+- **task_node_id**: `NODE-XXXXXXXX`
+
+## Response format
+
+Every intent returns `AIResponse`:
 
 ```json
 {
-  "success": true|false,
+  "success": true,
   "intent": "context",
-  "result": { ... },
-  "suggestions": ["next action 1", "next action 2"],
-  "recovery_hint": { ... }  // on errors
+  "result": { "..." : "..." },
+  "warnings": [],
+  "suggestions": [],
+  "context": {},
+  "error": null,
+  "timestamp": "2025-12-18T21:33:41.489384+00:00"
 }
 ```
 
-## Intent Reference
+On failure: `success=false` and `error={code,message,recovery?}`.
+
+## Intents
 
 ### context
 
-Get current working context for AI session initialization.
+Get global context snapshot.
 
-**Request:**
 ```json
-{
-  "intent": "context",
-  "task": "TASK-001",       // optional: specific task (default: last task)
-  "include_all": true,      // optional: include all tasks
-  "compact": true,          // optional: minimal output
-  "format": "markdown"      // optional: "json" or "markdown"
-}
+{"intent":"context","include_all":true,"compact":true}
 ```
 
-**Response includes:**
-- Current task details with subtask status
-- Checkpoint completion state
-- Blocked dependencies
-- Suggested next actions
-
-**Use case:** Start of AI session, getting current state.
-
----
+Result includes `counts`, `by_status`, and (when `include_all=true`) `plans[]` and `tasks[]`.
 
 ### resume
 
-Restore AI session context with timeline and dependencies. Designed for AI agents resuming work after context loss.
+Load a specific `plan`/`task` (or `.last` fallback) with optional timeline.
 
-**Request:**
 ```json
-{
-  "intent": "resume",
-  "task": "TASK-001",       // optional: specific task
-  "events_limit": 20        // optional: limit timeline events
-}
+{"intent":"resume","task":"TASK-001","events_limit":20}
 ```
 
-**Response:**
-```json
-{
-  "success": true,
-  "intent": "resume",
-  "result": {
-    "task": { ... },        // full task with subtasks
-    "timeline": [ ... ],    // recent events
-    "dependencies": {
-      "depends_on": ["TASK-001", "TASK-002"],
-      "blocked_by": ["TASK-001"],  // incomplete deps
-      "blocking": ["TASK-005"]     // tasks waiting for this
-    },
-    "checkpoint_status": {
-      "pending": ["0", "1.0"],     // subtask paths needing checkpoints
-      "ready": ["2"]              // subtasks ready for completion
-    }
-  },
-  "suggestions": [ ... ]
-}
-```
-
-**Use case:** Resume work after break, context window refresh.
-
----
+Returns either `result.plan` or `result.task`. For tasks also returns `result.checkpoint_status`.
 
 ### create
 
-Create a new task programmatically.
+Create a plan or a task.
 
-**Request:**
+Create a plan:
+```json
+{"intent":"create","kind":"plan","title":"Release v1","contract":"..."}
+```
+
+Create a task under a plan:
 ```json
 {
-  "intent": "create",
-  "title": "Task title #tag",
-  "parent": "ROOT",
-  "description": "Detailed description",
-  "tags": ["ui", "mcp"],            // optional
-  "subtasks": [
-    {
-      "title": "Subtask one",
-      "criteria": ["criterion"],
-      "tests": ["test command"],
-      "blockers": ["blocker"]
-    }
-  ],
-  "domain": "core/api",           // optional
-  "phase": "sprint-1",            // optional
-  "component": "auth",            // optional
-  "context": "Any additional context", // optional
-  "namespace": "owner_repo",      // optional: store in another namespace
-  "idempotency_key": "unique-123", // optional: prevent duplicates
-  "dry_run": true                  // optional: validate only
+  "intent":"create",
+  "kind":"task",
+  "parent":"PLAN-001",
+  "title":"Ship OAuth",
+  "description":"...",
+  "steps":[
+    {"title":"Wire login flow","success_criteria":["..."],"tests":["pytest -q"],"blockers":["..."]}
+  ]
 }
 ```
 
-**Use case:** Automated task creation, decomposition results.
-
----
+Notes:
+- If `kind` is omitted: defaults to `"plan"` unless `parent` is set (then `"task"`).
+- `dry_run=true` validates without writing files.
 
 ### decompose
 
-Add subtasks to an existing task.
+Append nested steps to an existing task.
 
-**Request:**
 ```json
-{
-  "intent": "decompose",
-  "task": "TASK-001",
-  "subtasks": [
-    {
-      "title": "New subtask",
-      "criteria": ["criterion"],
-      "tests": ["test"],
-      "blockers": ["blocker"]
-    }
-  ]
-}
+{"intent":"decompose","task":"TASK-001","parent":"s:0.t:1","steps":[{"title":"...","success_criteria":["..."]}]}
 ```
-
-**Use case:** Breaking down tasks, adding work items.
-
----
 
 ### define
 
-Define/overwrite subtask fields (criteria/tests/blockers).
+Update a step at `path` (title / success_criteria / tests / blockers).
 
-**Request:**
 ```json
-{
-  "intent": "define",
-  "task": "TASK-001",
-  "path": "0",                  // required: subtask path
-  "criteria": ["criterion 1"],  // optional
-  "tests": ["pytest -q ..."],   // optional
-  "blockers": ["blocker"]       // optional
-}
+{"intent":"define","task":"TASK-001","path":"s:0.t:1.s:2","tests":["pytest -q"]}
 ```
-
-**Use case:** Setting acceptance criteria/tests/blockers for a subtask.
-
----
 
 ### verify
 
-Verify checkpoint completion on a subtask.
+Confirm checkpoints (`criteria` and/or `tests`) for any checkpointable node.
 
-**Request:**
 ```json
-{
-  "intent": "verify",
-  "task": "TASK-001",
-  "path": "0",              // subtask index or path (e.g., "0.1")
-  "checkpoints": {
-    "criteria": {"done": true, "note": "Verified criteria"},
-    "tests": {"done": true, "note": "Tests passed"},
-    "blockers": {"done": true, "note": "Blockers resolved"}
-  }
-}
+{"intent":"verify","task":"TASK-001","path":"s:0","checkpoints":{"criteria":{"confirmed":true,"note":"ok"}}}
 ```
 
-**Use case:** Recording evidence of checkpoint completion.
+Target kinds:
+- `kind: "step"` (default) → step at `path` or `step_id`
+- `kind: "task"` → task node at `path` or `task_node_id`
+- `kind: "plan"` → nested plan owned by step at `path` or `step_id`
+- `kind: "task_detail"` → root task/plan (no path)
 
----
-
-### done
-
-Mark subtask as complete.
-
-**Request:**
-```json
-{
-  "intent": "done",
-  "task": "TASK-001",
-  "path": "0",
-  "note": "Completion notes",   // optional
-  "force": true                  // optional: skip verification
-}
-```
-
-**Requirements:** All checkpoints (criteria, tests, blockers) must be verified unless `force: true`.
-
-**Use case:** Completing subtasks after all checkpoints verified.
-
----
+Optional evidence (step only):
+- `checks[]` / `attachments[]` / `verification_outcome`
 
 ### progress
 
-Toggle subtask completion status.
+Set step completion (respects checkpoints unless `force=true`).
 
-**Request:**
 ```json
-{
-  "intent": "progress",
-  "task": "TASK-001",
-  "path": "0",
-  "completed": true
-}
+{"intent":"progress","task":"TASK-001","path":"s:0","completed":true,"force":false}
 ```
 
-**Use case:** Quick status toggle, undo completion.
+### done
 
----
+Unified “verify + done” style completion (optional `note` is saved as a progress note first).
+
+```json
+{"intent":"done","task":"TASK-001","path":"s:0","force":false,"note":"done"}
+```
+
+### note
+
+Add a progress note to a step (does not complete it).
+
+```json
+{"intent":"note","task":"TASK-001","path":"s:0.t:1.s:2","note":"Implemented parsing"}
+```
+
+### block
+
+Toggle step `blocked` state (separate from `blockers[]` list).
+
+```json
+{"intent":"block","task":"TASK-001","path":"s:0","blocked":true,"reason":"Waiting for access"}
+```
+
+### task_add
+
+Add a task node inside a step plan:
+
+```json
+{"intent":"task_add","task":"TASK-001","parent_step":"s:0","title":"Split integration work"}
+```
+
+### task_define
+
+Update a task node inside a step plan:
+
+```json
+{"intent":"task_define","task":"TASK-001","path":"s:0.t:1","status":"ACTIVE","priority":"HIGH"}
+```
+
+### task_delete
+
+Delete a task node inside a step plan:
+
+```json
+{"intent":"task_delete","task":"TASK-001","path":"s:0.t:1"}
+```
+
+### edit
+
+Edit task/plan notes/meta fields (no step mutations).
+
+```json
+{"intent":"edit","task":"TASK-001","context":"...","tags":["a","b"],"depends_on":["TASK-002"]}
+```
+
+### contract
+
+Set/clear a plan contract.
+
+```json
+{"intent":"contract","plan":"PLAN-001","current":"..."}
+```
 
 ### plan
 
-Set or advance a human-visible execution plan for transparency.
+Update plan checklist (`doc`, `steps`, `current`) and/or `advance=true`.
 
-**Request:**
 ```json
-{
-  "intent": "plan",
-  "task": "TASK-001",
-  "steps": ["Step 1", "Step 2"], // optional: replace full plan
-  "current": 0,                 // optional: set current step index
-  "advance": true,              // optional: advance current step by 1
-  "clear": false                // optional: clear plan when true
-}
+{"intent":"plan","plan":"PLAN-001","steps":["Design","Implement","Verify"],"current":1}
 ```
 
-**Use case:** Keep humans synced with AI work plan in GUI/TUI.
+### mirror
 
----
+Export a compact plan slice for a plan/task (exactly one `in_progress` item).
 
-### delete
-
-Delete a task or subtask.
-
-**Request:**
 ```json
-{
-  "intent": "delete",
-  "task": "TASK-001",       // delete entire task
-  "path": "0"               // optional: delete specific subtask
-}
+{"intent":"mirror","task":"TASK-001","limit":7}
 ```
 
-**Use case:** Cleanup, removing obsolete items.
+Optional subtree targeting:
+```json
+{"intent":"mirror","task":"TASK-001","path":"s:0","kind":"step"}
+```
 
----
+Result fields:
+- `scope`: `{task_id, kind, path?}`
+- `items[]`: `{kind, path?, id?, task_id?, title, status, progress, children_done, children_total}`
+- `summary`: `{total, completed, in_progress, pending}`
 
 ### complete
 
-Complete an entire task (all subtasks done → task status DONE).
+Set plan/task status (`TODO|ACTIVE|DONE`). For plans: requires checklist completion unless `force=true`.
 
-**Request:**
 ```json
-{
-  "intent": "complete",
-  "task": "TASK-001",
-  "status": "DONE"          // optional: explicit status
-}
+{"intent":"complete","task":"TASK-001","status":"DONE","force":false}
 ```
 
-**Requirements:** All subtasks must be completed.
+### delete
 
-**Use case:** Finalizing task after all work done.
+Delete a whole item:
+```json
+{"intent":"delete","task":"TASK-001"}
+```
 
----
+Delete a step node:
+```json
+{"intent":"delete","task":"TASK-001","path":"s:0.t:1.s:2"}
+```
 
 ### batch
 
-Execute multiple operations atomically.
+Execute multiple intents in order (optionally `atomic=true`).
 
-**Request:**
 ```json
 {
-  "intent": "batch",
-  "task": "TASK-001",       // default task for operations
-  "atomic": true,           // rollback all on any failure
-  "operations": [
-    {"intent": "decompose", "subtasks": [...]},
-    {"intent": "verify", "path": "0", "checkpoints": {...}},
-    {"intent": "progress", "path": "1", "completed": true}
+  "intent":"batch",
+  "atomic":true,
+  "task":"TASK-001",
+  "operations":[
+    {"intent":"note","path":"s:0","note":"..."},
+    {"intent":"verify","path":"s:0","checkpoints":{"criteria":{"confirmed":true}}}
   ]
 }
 ```
 
-**Response:**
+### undo / redo
+
+Undo/redo last reversible operation (when available).
+
 ```json
-{
-  "success": true,
-  "intent": "batch",
-  "result": {
-    "results": [
-      {"intent": "decompose", "success": true, ...},
-      {"intent": "verify", "success": true, ...},
-      {"intent": "progress", "success": true, ...}
-    ],
-    "all_succeeded": true
-  }
-}
+{"intent":"undo"}
+{"intent":"redo"}
 ```
-
-**Use case:** Complex updates that must succeed or fail together.
-
----
-
-### undo
-
-Undo the last operation.
-
-**Request:**
-```json
-{
-  "intent": "undo"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "intent": "undo",
-  "result": {
-    "undone": {
-      "intent": "done",
-      "task": "TASK-001",
-      "path": "0"
-    }
-  }
-}
-```
-
-**Use case:** Reverting mistakes, exploring changes.
-
----
-
-### redo
-
-Redo an undone operation.
-
-**Request:**
-```json
-{
-  "intent": "redo"
-}
-```
-
-**Use case:** Re-applying undone changes.
-
----
 
 ### history
 
-View operation history or task event timeline.
+Return recent operation history (optionally as markdown).
 
-**Request (operation history):**
 ```json
-{
-  "intent": "history",
-  "limit": 20
-}
+{"intent":"history","task":"TASK-001","format":"markdown"}
 ```
-
-**Request (task timeline):**
-```json
-{
-  "intent": "history",
-  "task": "TASK-001",
-  "format": "markdown"      // optional: "json" or "markdown"
-}
-```
-
-**Use case:** Reviewing changes, debugging, audit trail.
-
----
 
 ### storage
 
-Get storage configuration information.
-
-**Request:**
-```json
-{
-  "intent": "storage"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "intent": "storage",
-  "result": {
-    "tasks_dir": "/home/user/.tasks/project",
-    "namespace": "owner_repo",
-    "source": "git_remote",
-    "task_count": 15
-  }
-}
-```
-
-**Use case:** Debugging storage issues, configuration verification.
-
----
-
-### migrate
-
-Migrate local `.tasks/` to global `~/.tasks/<namespace>/` storage.
-
-**Request:**
-```json
-{
-  "intent": "migrate"
-}
-```
-
-**Request with specific project:**
-```json
-{
-  "intent": "migrate",
-  "project_dir": "/path/to/project",
-  "dry_run": true
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "intent": "migrate",
-  "result": {
-    "migrated": true,
-    "message": "Successfully migrated tasks",
-    "from": "/project/.tasks",
-    "to": "/home/user/.tasks/owner_repo",
-    "namespace": "owner_repo"
-  }
-}
-```
-
-**Use case:** Migrating existing projects from local to global storage.
-
----
-
-## Common Patterns
-
-### AI Session Start
+Return resolved storage info (global/local/current + namespaces).
 
 ```json
-{"intent": "context", "compact": true}
+{"intent":"storage"}
 ```
-
-### Resume After Break
-
-```json
-{"intent": "resume"}
-```
-
-### Create and Decompose
-
-```json
-{
-  "intent": "batch",
-  "atomic": true,
-  "operations": [
-    {
-      "intent": "create",
-      "title": "New feature",
-      "parent": "ROOT",
-      "description": "...",
-      "tests": ["..."],
-      "risks": ["..."]
-    },
-    {
-      "intent": "decompose",
-      "subtasks": [...]
-    }
-  ]
-}
-```
-
-### Complete Subtask with Evidence
-
-```json
-{
-  "intent": "batch",
-  "task": "TASK-001",
-  "atomic": true,
-  "operations": [
-    {
-      "intent": "verify",
-      "path": "0",
-      "checkpoints": {
-        "criteria": {"done": true, "note": "Metrics verified: 92%"},
-        "tests": {"done": true, "note": "pytest: 45 passed"},
-        "blockers": {"done": true, "note": "All resolved"}
-      }
-    },
-    {
-      "intent": "done",
-      "path": "0"
-    }
-  ]
-}
-```
-
-### Dry Run Validation
-
-```json
-{
-  "intent": "create",
-  "title": "Test task",
-  "dry_run": true,
-  ...
-}
-```
-
-### Idempotent Create
-
-```json
-{
-  "intent": "create",
-  "title": "Task",
-  "idempotency_key": "feature-auth-v1",
-  ...
-}
-```
-
-## Error Handling
-
-Errors include recovery hints:
-
-```json
-{
-  "success": false,
-  "intent": "done",
-  "error": {
-    "code": "CHECKPOINT_NOT_VERIFIED",
-    "message": "Criteria checkpoint not verified",
-    "recoverable": true
-  },
-  "recovery_hint": {
-    "intent": "verify",
-    "path": "0",
-    "checkpoints": {"criteria": {"done": true, "note": "..."}}
-  }
-}
-```
-
-Common error codes:
-- `TASK_NOT_FOUND` — Task doesn't exist
-- `SUBTASK_NOT_FOUND` — Invalid subtask path
-- `CHECKPOINT_NOT_VERIFIED` — Missing checkpoint confirmation
-- `VALIDATION_ERROR` — Invalid input data
-- `INTERNAL_ERROR` — Unexpected error

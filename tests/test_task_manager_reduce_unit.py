@@ -79,7 +79,7 @@ def test_apply_context_filters_and_models():
     filtered = tui_loader.apply_context_filters(tasks, "p", "c")
     assert len(filtered) == 1
 
-    built = tui_loader.build_task_models(filtered, lambda det, st, prog, subs: (det.status, st, prog, subs))
+    built = tui_loader.build_task_models(filtered, lambda det, st, prog, subs, total: (det.status, st, prog, subs, total))
     assert built[0][1].name == "DONE"
 
 

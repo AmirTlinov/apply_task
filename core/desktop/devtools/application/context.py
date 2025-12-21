@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from core.desktop.devtools.interface.i18n import translate
+from core.desktop.devtools.interface.tasks_dir_resolver import resolve_project_root
 
 
 def _sanitize_domain(domain: Optional[str]) -> str:
@@ -14,15 +15,49 @@ def _sanitize_domain(domain: Optional[str]) -> str:
     return candidate.as_posix()
 
 
+def _last_file_candidates() -> List[Path]:
+    """Return candidate locations for `.last` pointer.
+
+    Prefer the project root for stability across subdirectories.
+    Fallback to CWD for non-git contexts (or when root cannot be resolved).
+    """
+    candidates: List[Path] = []
+    try:
+        candidates.append((resolve_project_root() / ".last").resolve())
+    except Exception:
+        pass
+    candidates.append(Path(".last").resolve())
+
+    seen: set[str] = set()
+    unique: List[Path] = []
+    for p in candidates:
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(p)
+    return unique
+
+
 def save_last_task(task_id: str, domain: str = "") -> None:
-    Path(".last").write_text(f"{task_id}@{domain}", encoding="utf-8")
+    for candidate in _last_file_candidates():
+        try:
+            candidate.write_text(f"{task_id}@{domain}", encoding="utf-8")
+            return
+        except Exception:
+            continue
 
 
 def get_last_task() -> Tuple[Optional[str], Optional[str]]:
-    last = Path(".last")
-    if not last.exists():
+    last_path: Optional[Path] = None
+    for candidate in _last_file_candidates():
+        if candidate.exists():
+            last_path = candidate
+            break
+    if not last_path:
         return None, None
-    raw = last.read_text(encoding="utf-8").strip()
+
+    raw = last_path.read_text(encoding="utf-8").strip()
     if "@" in raw:
         tid, domain = raw.split("@", 1)
         return tid or None, domain or None
@@ -35,9 +70,11 @@ def normalize_task_id(raw: str) -> str:
     # SEC: Prevent path traversal attacks
     if ".." in value or "/" in value or "\\" in value:
         raise ValueError(f"Invalid task_id: contains forbidden characters: {raw}")
-    if re.match(r"^TASK-\d+$", value):
-        num = int(value.split("-")[1])
-        return f"TASK-{num:03d}"
+    m = re.match(r"^(TASK|PLAN)-(\d+)$", value)
+    if m:
+        prefix, num_raw = m.group(1), m.group(2)
+        num = int(num_raw)
+        return f"{prefix}-{num:03d}"
     if value.isdigit():
         return f"TASK-{int(value):03d}"
     return value

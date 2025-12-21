@@ -26,6 +26,10 @@
     --muted: 210 40% 96.1%;
     --muted-foreground: 215.4 16.3% 46.9%;
 
+    /* Foreground nuance (used by Tailwind tokens) */
+    --foreground-muted: var(--muted-foreground);
+    --foreground-subtle: 215.4 16.3% 56.9%;
+
     /* Accent */
     --accent: 210 40% 96.1%;
     --accent-foreground: 222.2 47.4% 11.2%;
@@ -42,6 +46,17 @@
     /* Radius */
     --radius: 0.5rem;
 
+    /* Density / Layout (comfortable defaults) */
+    --density-shell-px: 16px; /* app chrome padding (Header + page top bars) */
+    --density-header-py: 8px;
+    --density-header-min-h: 52px;
+    --density-page-pad: 16px;
+    --density-page-gap: 16px;
+    --density-card-pad: 14px;
+    --density-sidebar-w: 216px;
+    --density-sidebar-collapsed-w: 64px;
+    --density-sidebar-header-min-h: 56px;
+
     /* Custom Background Layers for nuances */
     --background-subtle: 210 20% 98%;
     --background-muted: 220 14% 96%;
@@ -53,60 +68,99 @@
     --status-done: 142.1 76.2% 36.3%;
     --status-warn: 38 92% 50%;
     --status-fail: 0 84.2% 60.2%;
+
+    /* Semantic alias used across UI (OK = DONE green) */
+    --status-ok: var(--status-done);
   }
 
-  /* Flagship Dark Mode - Deep Blue/Slate tint, not pure black */
+  /* Flagship Dark Mode - Neutral graphite, not pure black */
   .dark {
     /* Base */
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    --background: 220 12% 10%;
+    --foreground: 210 20% 96%;
 
-    /* Component Backgrounds */
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    /* Component Backgrounds (elevation) */
+    --card: 220 12% 12%;
+    --card-foreground: 210 20% 96%;
+    --popover: 220 12% 12%;
+    --popover-foreground: 210 20% 96%;
 
     /* Primary */
     --primary: 217.2 91.2% 59.8%;
     --primary-foreground: 222.2 47.4% 11.2%;
 
     /* Secondary */
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 220 10% 16%;
+    --secondary-foreground: 210 20% 96%;
 
     /* Muted */
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 220 10% 16%;
+    --muted-foreground: 220 10% 65%;
+
+    /* Foreground nuance (used by Tailwind tokens) */
+    --foreground-muted: var(--muted-foreground);
+    --foreground-subtle: 220 10% 72%;
 
     /* Accent */
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 220 10% 18%;
+    --accent-foreground: 210 20% 96%;
 
     /* Destructive */
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 40%;
+    --destructive-foreground: 210 20% 96%;
 
     /* Borders & Inputs */
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+    --border: 220 10% 18%;
+    --input: 220 10% 18%;
+    --ring: 217.2 91.2% 59.8%;
 
     /* Custom Background Layers for nuances */
-    --background-subtle: 223 47% 11%; /* Slightly lighter than bg */
-    --background-muted: 217 33% 18%; /* Even lighter */
-    --background-hover: 217 33% 20%;
+    --background-subtle: 220 12% 12%; /* Slightly lighter than bg */
+    --background-muted: 220 10% 15%; /* Even lighter */
+    --background-hover: 220 10% 18%;
 
     /* Status Colors (Dark HSL) */
-    --status-todo: 217 33% 18%;
+    --status-todo: 220 10% 16%;
     --status-active: 217.2 91.2% 59.8%;
-    --status-done: 142 71% 45%;
-    --status-warn: 48 96% 53%;
-    --status-fail: 0 84.2% 60.2%;
+    --status-done: 142 65% 42%;
+    --status-warn: 48 92% 54%;
+    --status-fail: 0 84% 58%;
+
+    /* Semantic alias used across UI (OK = DONE green) */
+    --status-ok: var(--status-done);
+
+    /* Density / Layout */
+    --density-shell-px: 16px;
+    --density-header-py: 8px;
+    --density-header-min-h: 52px;
+    --density-page-pad: 16px;
+    --density-page-gap: 16px;
+    --density-card-pad: 14px;
+    --density-sidebar-w: 216px;
+    --density-sidebar-collapsed-w: 64px;
+    --density-sidebar-header-min-h: 56px;
   }
 }
 
 @layer base {
+  html {
+    font-size: 14px;
+  }
+
+  html[data-compact="true"] {
+    font-size: 13px;
+
+    --density-shell-px: 10px;
+    --density-header-py: 5px;
+    --density-header-min-h: 46px;
+    --density-page-pad: 10px;
+    --density-page-gap: 10px;
+    --density-card-pad: 10px;
+    --density-sidebar-w: 200px;
+    --density-sidebar-collapsed-w: 56px;
+    --density-sidebar-header-min-h: 52px;
+  }
+
   * {
     @apply border-border;
   }
@@ -117,6 +171,48 @@
 
 /* Utilities for scrollbars */
 @layer utilities {
+  @keyframes skeleton-shimmer {
+    0% {
+      background-position: 100% 0;
+    }
+    100% {
+      background-position: -100% 0;
+    }
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--background-muted)) 0%,
+      hsl(var(--background-hover)) 50%,
+      hsl(var(--background-muted)) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.2s ease-in-out infinite;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--foreground-subtle) / 0.35);
+    background-clip: content-box;
+  }
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }

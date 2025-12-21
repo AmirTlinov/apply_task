@@ -4,78 +4,32 @@
 
 import { useState } from "react";
 import { CheckCircle2, AlertTriangle, Info, X } from "lucide-react";
-import { create } from "zustand";
+import { cn } from "@/lib/utils";
+import { useToastStore, type Toast, type ToastType } from "@/components/common/toast";
 
-export type ToastType = "success" | "error" | "info" | "warning";
-
-interface Toast {
-  id: string;
-  message: string;
-  type: ToastType;
-  duration?: number;
-}
-
-interface ToastStore {
-  toasts: Toast[];
-  addToast: (message: string, type?: ToastType, duration?: number) => void;
-  removeToast: (id: string) => void;
-}
-
-export const useToastStore = create<ToastStore>((set) => ({
-  toasts: [],
-  addToast: (message, type = "info", duration = 3000) => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    set((state) => ({
-      toasts: [...state.toasts, { id, message, type, duration }],
-    }));
-
-    if (duration > 0) {
-      setTimeout(() => {
-        set((state) => ({
-          toasts: state.toasts.filter((t) => t.id !== id),
-        }));
-      }, duration);
-    }
-  },
-  removeToast: (id) => {
-    set((state) => ({
-      toasts: state.toasts.filter((t) => t.id !== id),
-    }));
-  },
-}));
-
-// Helper function to show toasts
-export const toast = {
-  success: (message: string, duration?: number) =>
-    useToastStore.getState().addToast(message, "success", duration),
-  error: (message: string, duration?: number) =>
-    useToastStore.getState().addToast(message, "error", duration),
-  info: (message: string, duration?: number) =>
-    useToastStore.getState().addToast(message, "info", duration),
-  warning: (message: string, duration?: number) =>
-    useToastStore.getState().addToast(message, "warning", duration),
-};
-
-const typeConfig: Record<ToastType, { icon: typeof Info; color: string; bg: string }> = {
+const typeConfig: Record<
+  ToastType,
+  { icon: typeof Info; iconClassName: string; badgeClassName: string }
+> = {
   success: {
     icon: CheckCircle2,
-    color: "var(--color-status-ok)",
-    bg: "var(--color-status-ok-subtle)",
+    iconClassName: "text-status-ok",
+    badgeClassName: "bg-status-ok/10",
   },
   error: {
     icon: AlertTriangle,
-    color: "var(--color-status-fail)",
-    bg: "var(--color-status-fail-subtle)",
+    iconClassName: "text-status-fail",
+    badgeClassName: "bg-status-fail/10",
   },
   warning: {
     icon: AlertTriangle,
-    color: "var(--color-status-warn)",
-    bg: "var(--color-status-warn-subtle)",
+    iconClassName: "text-status-warn",
+    badgeClassName: "bg-status-warn/10",
   },
   info: {
     icon: Info,
-    color: "var(--color-primary)",
-    bg: "var(--color-primary-subtle)",
+    iconClassName: "text-primary",
+    badgeClassName: "bg-primary/10",
   },
 };
 
@@ -91,62 +45,32 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
 
   return (
     <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "12px",
-        padding: "12px 16px",
-        backgroundColor: "var(--color-background)",
-        borderRadius: "10px",
-        boxShadow: "var(--shadow-lg)",
-        border: "1px solid var(--color-border)",
-        minWidth: "280px",
-        maxWidth: "400px",
-        animation: isExiting
-          ? "toast-exit 200ms ease-out forwards"
-          : "toast-enter 200ms ease-out",
-      }}
+      className={cn(
+        "flex min-w-[280px] max-w-[400px] items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-lg",
+        isExiting
+          ? "animate-out fade-out slide-out-to-right-2 duration-200"
+          : "animate-in fade-in slide-in-from-right-2 duration-200"
+      )}
     >
       <div
-        style={{
-          width: "28px",
-          height: "28px",
-          borderRadius: "6px",
-          backgroundColor: config.bg,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-        }}
+        className={cn(
+          "flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
+          config.badgeClassName
+        )}
       >
-        <Icon style={{ width: "16px", height: "16px", color: config.color }} />
+        <Icon className={cn("h-4 w-4", config.iconClassName)} />
       </div>
       <span
-        style={{
-          flex: 1,
-          fontSize: "13px",
-          fontWeight: 500,
-          color: "var(--color-foreground)",
-          lineHeight: 1.4,
-        }}
+        className="flex-1 text-sm font-medium leading-snug text-foreground"
       >
         {toast.message}
       </span>
       <button
         onClick={handleClose}
-        style={{
-          padding: "4px",
-          borderRadius: "4px",
-          border: "none",
-          backgroundColor: "transparent",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-        }}
+        className="flex shrink-0 items-center justify-center rounded-md p-1 text-foreground-subtle transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        aria-label="Close toast"
       >
-        <X style={{ width: "14px", height: "14px", color: "var(--color-foreground-subtle)" }} />
+        <X className="h-3.5 w-3.5" />
       </button>
     </div>
   );
@@ -159,19 +83,10 @@ export function ToastContainer() {
 
   return (
     <div
-      style={{
-        position: "fixed",
-        bottom: "24px",
-        right: "24px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "8px",
-        zIndex: 9999,
-        pointerEvents: "none",
-      }}
+      className="pointer-events-none fixed bottom-6 right-6 z-[9999] flex flex-col gap-2"
     >
       {toasts.map((t) => (
-        <div key={t.id} style={{ pointerEvents: "auto" }}>
+        <div key={t.id} className="pointer-events-auto">
           <ToastItem toast={t} onClose={() => removeToast(t.id)} />
         </div>
       ))}

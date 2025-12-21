@@ -1,6 +1,7 @@
 """Status bar builder for TaskTrackerTUI."""
 
 import time
+from pathlib import Path
 from typing import List, Tuple
 
 from prompt_toolkit.formatted_text import FormattedText
@@ -31,7 +32,18 @@ def build_status_text(tui) -> FormattedText:
 
     def back_handler(event):
         if event.event_type == MouseEventType.MOUSE_UP and event.button == MouseButton.LEFT:
-            tui.exit_detail_view()
+            navigate_back = getattr(tui, "navigate_back", None)
+            if callable(navigate_back):
+                navigate_back()
+            else:  # pragma: no cover - legacy fallback
+                if getattr(tui, "detail_mode", False):
+                    tui.exit_detail_view()
+                else:
+                    fast = getattr(tui, "return_to_projects_fast", None)
+                    if callable(fast):
+                        fast()
+                    else:
+                        tui.return_to_projects()
             return None
         return NotImplemented
 
@@ -42,12 +54,48 @@ def build_status_text(tui) -> FormattedText:
         return NotImplemented
 
     parts: List[Tuple[str, str]] = []
-    if getattr(tui, "detail_mode", False):
+    project_mode = bool(getattr(tui, "project_mode", True))
+    if getattr(tui, "detail_mode", False) or not project_mode:
         parts.append(("class:header.bigicon", f"{tui._t('BTN_BACK')} ", back_handler))
+    if not project_mode:
+        project_name = str(getattr(tui, "last_project_name", "") or "").strip()
+        if not project_name:
+            path = getattr(tui, "current_project_path", None) or getattr(tui, "tasks_dir", None)
+            if path:
+                try:
+                    project_name = Path(str(path)).name
+                except Exception:
+                    project_name = ""
+        if project_name:
+            if len(project_name) > 32:
+                project_name = project_name[:31] + "…"
+            parts.extend(
+                [
+                    ("class:text.dim", f"{tui._t('TABLE_HEADER_PROJECT')}: "),
+                    ("class:header", project_name),
+                    ("class:text.dim", " | "),
+                ]
+            )
+        plan_title = str(getattr(tui, "plan_filter_title", "") or "").strip()
+        if plan_title:
+            if len(plan_title) > 32:
+                plan_title = plan_title[:31] + "…"
+            parts.extend(
+                [
+                    ("class:text.dim", f"{tui._t('TABLE_HEADER_PLAN', fallback='Plan')}: "),
+                    ("class:header", plan_title),
+                    ("class:text.dim", " | "),
+                ]
+            )
 
+    if project_mode:
+        count_key = "STATUS_PROJECTS_COUNT"
+    else:
+        section = getattr(tui, "project_section", "tasks") or "tasks"
+        count_key = "STATUS_PLANS_COUNT" if section == "plans" else "STATUS_TASKS_COUNT"
     parts.extend(
         [
-            ("class:text.dim", f"{tui._t('STATUS_TASKS_COUNT', count=total)} | "),
+            ("class:text.dim", f"{tui._t(count_key, count=total)} | "),
             ("class:icon.check", str(ok)),
             ("class:text.dim", "/"),
             ("class:icon.warn", str(warn)),
@@ -55,6 +103,17 @@ def build_status_text(tui) -> FormattedText:
             ("class:icon.fail", str(fail)),
         ]
     )
+    query = (getattr(tui, "search_query", "") or "").strip()
+    if query:
+        cursor = "▏" if getattr(tui, "search_mode", False) else ""
+        preview = (query[:24] + "…") if len(query) > 25 else query
+        parts.extend(
+            [
+                ("class:text.dim", " | "),
+                ("class:icon.info", f"{tui._t('SEARCH_ICON', fallback='⌕')} "),
+                ("class:header", f"{preview}{cursor}"),
+            ]
+        )
     filter_style = "class:icon.warn" if filter_flash_active else "class:header"
     parts.extend(
         [

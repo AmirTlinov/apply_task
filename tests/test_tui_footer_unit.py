@@ -28,16 +28,17 @@ class DummyTUI(SimpleNamespace):
 
 
 def test_build_footer_text_basic():
-    tui = DummyTUI(horizontal_offset=0)
+    tui = DummyTUI(horizontal_offset=0, filtered_tasks=["TASK"])
     result = build_footer_text(tui)
     text = "".join(fragment for _, fragment in result)
     assert "DOMAIN" in text
-    assert "Duration" in text
-    assert "Legend" in text
+    assert "FOOTER_DURATION" in text
+    assert "FOOTER_TIME" in text
+    assert "Legend" not in text
 
 
 def test_build_footer_text_with_offset():
-    tui = DummyTUI(horizontal_offset=5)
+    tui = DummyTUI(horizontal_offset=5, filtered_tasks=["TASK"])
     result = build_footer_text(tui)
     text = "".join(fragment for _, fragment in result)
-    assert "OFFSET_LABEL" in text or "Legend" in text
+    assert "DESCRIPTION" in text

@@ -54,11 +54,56 @@ def _handle_detail_click(tui, mouse_event):
         return None
     if not getattr(tui, "current_task_detail", None):
         return True
+
+    # Detail tab bar click (hitboxes are computed by the renderer).
+    if mouse_event.event_type == MouseEventType.MOUSE_UP and mouse_event.button == MouseButton.LEFT:
+        hitboxes = getattr(tui, "_detail_tab_hitboxes", None)
+        if isinstance(hitboxes, dict):
+            try:
+                y = int(getattr(mouse_event.position, "y", -1))
+                x = int(getattr(mouse_event.position, "x", -1))
+            except Exception:
+                y = -1
+                x = -1
+            if y == int(hitboxes.get("y", -2)):
+                for start, end, tab_id in list(hitboxes.get("ranges", []) or []):
+                    try:
+                        if int(start) <= x < int(end):
+                            current = getattr(tui, "detail_tab", "overview") or "overview"
+                            if tab_id != current:
+                                tui.detail_tab = tab_id
+                                if tab_id != "overview":
+                                    getattr(tui, "detail_tab_scroll_offsets", {}).setdefault(tab_id, 0)
+                            tui.force_render()
+                            return True
+                    except Exception:
+                        continue
+                # Click on the tab bar line, but not on a tab.
+                return True
+
     idx = tui._subtask_index_from_y(mouse_event.position.y)
-    if idx is None or not getattr(tui, "detail_flat_subtasks", None):
+    if idx is None:
+        return True
+
+    detail = getattr(tui, "current_task_detail", None)
+    if detail and getattr(detail, "kind", "task") == "plan" and getattr(tui, "detail_tab", "overview") == "overview":
+        plan_tasks = tui._plan_detail_tasks() if hasattr(tui, "_plan_detail_tasks") else []
+        if not plan_tasks:
+            return True
+        idx = max(0, min(idx, len(plan_tasks) - 1))
+        if getattr(tui, "detail_selected_index", None) == idx:
+            if hasattr(tui, "_open_selected_plan_task_detail"):
+                tui._open_selected_plan_task_detail()
+        else:
+            tui.detail_selected_index = idx
+            tui.detail_selected_task_id = getattr(plan_tasks[idx], "id", None)
+            tui.force_render()
+        return True
+
+    if not getattr(tui, "detail_flat_subtasks", None):
         return True
     idx = max(0, min(idx, len(tui.detail_flat_subtasks) - 1))
-    path = tui.detail_flat_subtasks[idx][0]
+    path = tui.detail_flat_subtasks[idx].key
     if getattr(tui, "detail_selected_index", None) == idx:
         tui.show_subtask_details(path)
     else:

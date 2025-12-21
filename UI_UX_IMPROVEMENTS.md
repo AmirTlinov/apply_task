@@ -2,7 +2,7 @@
 
 ## Summary
 
-The TUI now clamps the task table to the terminal width: columns shrink and reflow without breaking borders, keeping Stat, Title, Progress, and Subtasks visible down to tight viewports.
+The TUI now clamps the task table to the terminal width: columns shrink and reflow without breaking borders, keeping Stat, Title, Progress, and Steps visible down to tight viewports.
 
 ## Responsive layout system
 
@@ -13,12 +13,12 @@ The TUI now clamps the task table to the terminal width: columns shrink and refl
 |----------------|-------------------------------------------------------|
 | < 56 chars     | Stat, Title                                           |
 | 56–71          | Stat, Title, Progress                                 |
-| 72–89          | Stat, Title, Progress, Subtasks (compact)             |
-| 90–109         | Stat, Title, Progress, Subtasks (balanced)            |
-| 110–139        | Stat, Title, Progress, Subtasks (roomy)               |
-| ≥ 140          | Stat, Title, Progress, Subtasks (wide)                |
+| 72–89          | Stat, Title, Progress, Steps (compact)                |
+| 90–109         | Stat, Title, Progress, Steps (balanced)               |
+| 110–139        | Stat, Title, Progress, Steps (roomy)                  |
+| ≥ 140          | Stat, Title, Progress, Steps (wide)                   |
 
-Subtasks remain visible down to 72 px thanks to the compact layout .
+Steps remain visible down to 72 px thanks to the compact layout.
 
 ## Task list refactor
 
@@ -28,7 +28,7 @@ Subtasks remain visible down to 72 px thanks to the compact layout .
 - `_get_status_info` centralizes icons/colors.
 - `_apply_scroll` trims content by the horizontal offset.
 - Width calculator distributes the remaining budget to flexible columns without exceeding the terminal size.
-- Numeric columns (progress, subtasks) honor the longest values and stay within the viewport.
+- Numeric columns (progress, steps) honor the longest values and stay within the viewport.
 - Layout transitions are smooth; no abrupt jumps.
 
 ## Detail view width
@@ -96,7 +96,7 @@ Detail View Width     ✓
 
 ## Compatibility
 
-- CLI commands unchanged.
+- No CLI surface: UX is TUI-first; MCP remains the canonical automation surface.
 - Themes and keyboard shortcuts work as before.
 - `.task` files are backward compatible.
 - Best viewed at ≥72 columns (full columns), graceful fallback below.

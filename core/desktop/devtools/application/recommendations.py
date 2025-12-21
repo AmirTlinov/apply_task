@@ -1,6 +1,6 @@
 from typing import Callable, Dict, List, Optional, Tuple
 
-from core.task_detail import TaskDetail
+from core import TaskDetail
 
 TaskSerializer = Callable[[TaskDetail], Dict[str, object]]
 TaskRemember = Callable[[str, str], None]

@@ -1,11 +1,11 @@
-"""Helpers to load and filter tasks for TaskTrackerTUI."""
+"""Helpers to load and filter steps for the TUI."""
 
 from typing import Callable, List, Tuple
 
-from core.desktop.devtools.application.task_manager import TaskManager
+from core.desktop.devtools.application.task_manager import TaskManager, _flatten_steps
 from core.desktop.devtools.interface.i18n import translate
-from core import TaskDetail, Status
-from core.status import task_status_code, task_status_label
+from core import Status, TaskDetail
+from core.status import normalize_status_code, status_label
 
 
 _STATUS_SORT_ORDER = {"ACTIVE": 0, "TODO": 1, "DONE": 2}
@@ -24,7 +24,7 @@ def _status_token(task: object) -> str:
 
 def _status_code_safe(raw: str) -> str:
     try:
-        return task_status_code(raw)
+        return normalize_status_code(raw)
     except ValueError:
         return raw
 
@@ -37,11 +37,11 @@ def load_tasks_snapshot(manager: TaskManager, domain_filter: str, current_filter
         items = [
             t
             for t in items
-            if _status_code_safe(task_status_label(_status_token(t))) == wanted
+            if _status_code_safe(status_label(_status_token(t))) == wanted
         ]
 
     def _key(task: TaskDetail) -> tuple[int, int]:
-        code = _status_code_safe(task_status_label(_status_token(task)))
+        code = _status_code_safe(status_label(_status_token(task)))
         order = _STATUS_SORT_ORDER.get(code, 99)
         progress = int(getattr(task, "progress", 0) or 0)
         return order, progress
@@ -81,9 +81,11 @@ def build_task_models(details: List[TaskDetail], factory: Callable) -> List:
         calc_progress = det.calculate_progress() if hasattr(det, "calculate_progress") else int(getattr(det, "progress", 0) or 0)
         blocked = bool(getattr(det, "blocked", False))
         derived_status = Status.DONE if calc_progress == 100 and not blocked else Status.from_string(_status_token(det))
-        subtasks = getattr(det, "subtasks", []) or []
-        subtasks_completed = sum(1 for st in subtasks if getattr(st, "completed", False))
-        tasks.append(factory(det, derived_status, calc_progress, subtasks_completed))
+        steps = getattr(det, "steps", []) or []
+        flat = list(_flatten_steps(list(steps)))
+        steps_total = len(flat)
+        steps_completed = sum(1 for _, st in flat if getattr(st, "completed", False))
+        tasks.append(factory(det, derived_status, calc_progress, steps_completed, steps_total))
     return tasks
 
 

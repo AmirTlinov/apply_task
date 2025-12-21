@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listTasks, getStorage, updateTaskStatus as apiUpdateTaskStatus, deleteTask as apiDeleteTask } from "@/lib/tauri";
 import type { TaskListItem, TaskStatus, Namespace, StorageInfo } from "@/types/task";
-import { toast } from "@/components/common/Toast";
+import { toast } from "@/components/common/toast";
+import { getApiTaskIdFromUiTaskId } from "@/lib/taskId";
 
 interface UseTasksResult {
   tasks: TaskListItem[];
@@ -34,36 +35,12 @@ export function useTasks(params?: UseTasksParams): UseTasksResult {
         domain: params?.domain,
         status: params?.status,
         compact: true,
-        namespace: params?.namespace ?? undefined,
-        allNamespaces: params?.allNamespaces ?? false,
       });
       if (!response.success) {
         throw new Error(response.error || "Failed to load tasks");
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return response.tasks.map((t: any) => {
-        const taskId = t.id || t.task_id;
-        // Use namespace for unique key (namespace is the storage folder)
-        // Domain is the internal task categorization
-        const namespace = t.namespace || "";
-        const uniqueId = namespace ? `${namespace}/${taskId}` : taskId;
-        return {
-          id: uniqueId,
-          // Keep original task_id for API calls
-          task_id: taskId,
-          title: t.title,
-          status: t.status || "TODO",
-          progress: t.progress || 0,
-          subtask_count: t.subtask_count || t.subtasks?.length || 0,
-          completed_count: t.completed_count || 0,
-          // Keep both domain (task category) and namespace (storage location)
-          domain: t.domain || "",
-          namespace: namespace,
-          tags: t.tags,
-          updated_at: t.updated_at,
-        };
-      }) as TaskListItem[];
-    },
+      return response.tasks as TaskListItem[];
+      },
   });
 
   // Storage Query
@@ -74,31 +51,18 @@ export function useTasks(params?: UseTasksParams): UseTasksResult {
       if (!response.success) {
         throw new Error(response.error || "Failed to load storage info");
       }
-      // MCP returns { success, result: StorageInfo, context, suggestions }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = response.result as any;
-      // Handle both direct StorageInfo and nested { result: StorageInfo }
-      if (data && typeof data === "object" && "namespaces" in data) {
-        return data as StorageInfo;
+      if (!response.storage) {
+        throw new Error("Storage response missing payload");
       }
-      if (data && typeof data === "object" && "result" in data) {
-        return data.result as StorageInfo;
-      }
-      throw new Error("Invalid storage response format");
+      return response.storage as StorageInfo;
     },
   });
 
   // Mutations
   const updateStatusMutation = useMutation({
     mutationFn: async ({ taskId, newStatus }: { taskId: string; newStatus: TaskStatus }) => {
-      // taskId here is the UI id (namespace/TASK-XXX), need to find the actual task_id and namespace
-      const tasks = queryClient.getQueryData<TaskListItem[]>(queryKey) || [];
-      const task = tasks.find((t) => t.id === taskId);
-      const actualTaskId = task?.task_id || taskId.split("/").pop() || taskId;
-      const namespace = task?.namespace;
-      const domain = task?.domain;
-
-      const response = await apiUpdateTaskStatus(actualTaskId, newStatus, domain, namespace);
+      const actualTaskId = getApiTaskIdFromUiTaskId(taskId);
+      const response = await apiUpdateTaskStatus(actualTaskId, newStatus);
       if (!response.success) throw new Error(response.error);
       return response;
     },
@@ -134,19 +98,13 @@ export function useTasks(params?: UseTasksParams): UseTasksResult {
 
 	  const deleteMutation = useMutation({
 	    mutationFn: async (taskId: string) => {
-      // taskId here is the UI id (namespace/TASK-XXX), need to find the actual task_id and namespace
-      const tasks = queryClient.getQueryData<TaskListItem[]>(queryKey) || [];
-      const task = tasks.find((t) => t.id === taskId);
-      const actualTaskId = task?.task_id || taskId.split("/").pop() || taskId;
-      // Pass namespace as domain for cross-namespace operations
-      const namespace = task?.namespace;
-
-      const response = await apiDeleteTask(actualTaskId, task?.domain, namespace);
+      const actualTaskId = getApiTaskIdFromUiTaskId(taskId);
+      const response = await apiDeleteTask(actualTaskId);
       if (!response.success) throw new Error(response.error);
 	      return response;
 	    },
 	    onSuccess: () => {
-	      toast.success("Task deleted");
+      toast.success("Task deleted");
 	    },
 	    onMutate: async (taskId) => {
       await queryClient.cancelQueries({ queryKey });

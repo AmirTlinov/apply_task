@@ -9,7 +9,8 @@ def render_settings_panel(tui) -> FormattedText:
     options = tui._settings_options()
     if not options:
         return FormattedText([("class:text.dim", tui._t("SETTINGS_UNAVAILABLE"))])
-    width = max(70, min(110, tui.get_terminal_width() - 4))
+    # Flagship density: match detail views and use the available terminal width.
+    width = max(20, tui.get_terminal_width() - 2)
     inner_width = max(30, width - 2)
     max_label = max(len(opt["label"]) for opt in options)
     label_width = max(14, min(inner_width - 12, max_label + 2))

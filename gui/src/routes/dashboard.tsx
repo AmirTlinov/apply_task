@@ -13,7 +13,11 @@ export const Route = createRoute({
 
 function Dashboard() {
     const { searchQuery } = useUIStore()
-    const { tasks, isLoading, projectName } = useTasks({ allNamespaces: true })
+    const { selectedNamespace } = useUIStore()
+    const { tasks, isLoading, projectName } = useTasks({
+        namespace: selectedNamespace,
+        allNamespaces: selectedNamespace === null,
+    })
 
     // Filter tasks by search query
     const filteredTasks = tasks.filter(t =>
@@ -23,7 +27,7 @@ function Dashboard() {
     )
 
     return (
-        <div className="h-full w-full overflow-hidden bg-background">
+        <div className="flex flex-1 w-full min-h-0 flex-col overflow-hidden bg-background">
             <DashboardView
                 tasks={filteredTasks}
                 isLoading={isLoading}

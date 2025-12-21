@@ -1,6 +1,7 @@
 import pytest
-from core import SubTask, TaskDetail
+from core import Step, TaskDetail
 from core.desktop.devtools.interface import edit_handlers
+from core.desktop.devtools.interface.tui_detail_tree import DetailNodeEntry
 
 
 class DummyManager:
@@ -9,6 +10,9 @@ class DummyManager:
 
     def save_task(self, task):
         self.saved = True
+
+    def load_task(self, task_id: str, domain: str = "", skip_sync: bool = False):  # pragma: no cover - stub
+        return None
 
 
 class DummyTui:
@@ -27,6 +31,7 @@ class DummyTui:
         self.detail_selected_index = 0
         self.detail_selected_path = ""
         self.loaded = False
+        self.navigation_stack = []
 
     def _t(self, key, **kwargs):
         return key
@@ -46,20 +51,29 @@ class DummyTui:
     def _bootstrap_git(self, target: str):
         self.bootstrap_target = target
 
-    def _get_subtask_by_path(self, path: str):
-        for p, st, *_ in self.detail_flat_subtasks:
-            if p == path:
-                return st
+    def _get_step_by_path(self, path: str):
+        for entry in self.detail_flat_subtasks:
+            if getattr(entry, "key", None) == path:
+                return getattr(entry, "node", None)
         return None
 
     def load_tasks(self, preserve_selection=False, selected_task_file=None, skip_sync=False):
         self.loaded = True
 
+    def _get_root_task_context(self):
+        detail = self.current_task_detail
+        return (detail.id if detail else "", getattr(detail, "domain", "") if detail else "", "")
+
+    def _list_editor_persist_root(self, root_task_id: str, root_domain: str, root_detail):
+        self.manager.save_task(root_detail)
+        self.task_details_cache[root_task_id] = root_detail
+        self.load_tasks(preserve_selection=True, skip_sync=True)
+
 
 def make_detail_with_subtask():
-    st = SubTask(False, "old", ["a"], ["b"], ["c"])
+    st = Step(False, "old", ["a"], ["b"], ["c"])
     detail = TaskDetail(id="T-1", title="Main", status="TODO")
-    detail.subtasks = [st]
+    detail.steps = [st]
     return detail, st
 
 
@@ -131,7 +145,9 @@ def test_handle_task_edit_updates_subtask_and_saves():
     tui = DummyTui()
     detail, st = make_detail_with_subtask()
     tui.current_task_detail = detail
-    tui.detail_flat_subtasks = [("0", st, 0, False, False)]
+    tui.detail_flat_subtasks = [
+        DetailNodeEntry(key="s:0", kind="step", node=st, level=0, collapsed=False, has_children=False, parent_key=None)
+    ]
     tui.detail_selected_index = 0
     handled = edit_handlers.handle_task_edit(tui, "subtask_title", "new title", 0)
     assert handled
@@ -145,9 +161,11 @@ def test_handle_task_edit_updates_criterion_with_selected_path():
     tui = DummyTui()
     detail, st = make_detail_with_subtask()
     tui.current_task_detail = detail
-    tui.detail_flat_subtasks = [("0", st, 0, False, False)]
+    tui.detail_flat_subtasks = [
+        DetailNodeEntry(key="s:0", kind="step", node=st, level=0, collapsed=False, has_children=False, parent_key=None)
+    ]
     tui.detail_selected_index = 0
-    tui.detail_selected_path = "0"
+    tui.detail_selected_path = "s:0"
     handled = edit_handlers.handle_task_edit(tui, "criterion", "c-upd", 0)
     assert handled
     assert st.success_criteria[0] == "c-upd"
@@ -218,8 +236,10 @@ def test_path_helpers_use_selected_path_first():
     tui = DummyTui()
     detail, st = make_detail_with_subtask()
     tui.current_task_detail = detail
-    tui.detail_flat_subtasks = [("0", st, 0, False, False)]
+    tui.detail_flat_subtasks = [
+        DetailNodeEntry(key="s:0", kind="step", node=st, level=0, collapsed=False, has_children=False, parent_key=None)
+    ]
     tui.detail_selected_index = 0
-    tui.detail_selected_path = "0"
+    tui.detail_selected_path = "s:0"
     handled = edit_handlers.handle_task_edit(tui, "subtask_title", "keep", 0)
     assert handled

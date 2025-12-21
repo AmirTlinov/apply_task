@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from core.desktop.devtools.application.task_manager import TaskManager
-    from core.subtask import SubTask
+    from core.step import Step
     from core.task_detail import TaskDetail
 
 
@@ -19,8 +19,8 @@ class CheckpointMixin:
     task_details_cache: Dict[str, "TaskDetail"]
     navigation_stack: List[Tuple[str, str, int]]
 
-    def _get_subtask_by_path(self, path: str) -> Optional["SubTask"]:
-        """Get subtask stub - implemented by main class."""
+    def _get_step_by_path(self, path: str) -> Optional["Step"]:
+        """Get selected step stub - implemented by main class."""
         raise NotImplementedError
 
     def _get_root_task_context(self) -> Tuple[str, str, str]:
@@ -43,6 +43,10 @@ class CheckpointMixin:
         """Force render stub - implemented by main class."""
         raise NotImplementedError
 
+    def _step_to_task_detail(self, step: "Step", root_task_id: str, path_prefix: str) -> "TaskDetail":
+        """Convert a nested step to a TaskDetail-like view model (implemented by main class)."""
+        raise NotImplementedError
+
     def enter_checkpoint_mode(self) -> None:
         """Enter checkpoint editing mode for current subtask."""
         self.checkpoint_mode = True
@@ -56,53 +60,70 @@ class CheckpointMixin:
         self.force_render()
 
     def toggle_checkpoint_state(self) -> None:
-        """Toggle the selected checkpoint (criteria/tests/blockers)."""
+        """Toggle the selected checkpoint (criteria/tests)."""
         from core.desktop.devtools.application.context import save_last_task
-        from core.desktop.devtools.application.task_manager import _find_subtask_by_path
-        from core.task_detail import subtask_to_task_detail
+        from core.desktop.devtools.application.task_manager import _find_step_by_path
+        from core.desktop.devtools.application.task_manager import _find_task_by_path
+        from core.desktop.devtools.interface.tui_detail_tree import canonical_path, node_kind
 
-        if not self.current_task_detail or not getattr(self, "detail_selected_path", ""):
+        if not self.current_task_detail:
             return
-        path = self.detail_selected_path
-        subtask = self._get_subtask_by_path(path)
-        if not subtask:
-            return
+        detail = self.current_task_detail
 
-        checkpoints = ["criteria", "tests", "blockers"]
+        checkpoints = ["criteria", "tests"]
         if 0 <= self.checkpoint_selected_index < len(checkpoints):
             key = checkpoints[self.checkpoint_selected_index]
             current = False
-            if key == "criteria":
-                current = subtask.criteria_confirmed
-                subtask.criteria_confirmed = not current
-            elif key == "tests":
-                current = subtask.tests_confirmed
-                subtask.tests_confirmed = not current
-            elif key == "blockers":
-                current = subtask.blockers_resolved
-                subtask.blockers_resolved = not current
 
-            # Get root task context for nested navigation
-            root_task_id, root_domain, path_prefix = self._get_root_task_context()
+            target_kind = "task_detail" if getattr(detail, "kind", "task") == "plan" else ""
+            local_key = ""
+            target: object | None = None
+            full_path: str | None = None
 
-            # Build full path from root
-            if path_prefix:
-                full_path = f"{path_prefix}.{path}"
+            if target_kind == "task_detail":
+                target = detail
             else:
-                full_path = path
+                local_key = str(getattr(self, "detail_selected_path", "") or "")
+                if not local_key:
+                    return
+                node_k = node_kind(local_key)
+                canonical = canonical_path(local_key, node_k)
+                target_kind = node_k
+                # Resolve target in the current (possibly derived) detail model.
+                if node_k == "step":
+                    target = self._get_step_by_path(canonical)
+                elif node_k == "plan":
+                    st = self._get_step_by_path(canonical)
+                    target = getattr(st, "plan", None) if st else None
+                else:  # task node
+                    target, _, _ = _find_task_by_path(list(getattr(detail, "steps", []) or []), canonical)
+                if not target:
+                    return
+
+                # Build full path from root for persistence.
+                root_task_id, root_domain, path_prefix = self._get_root_task_context()
+                full_path = f"{path_prefix}.{canonical}" if path_prefix else canonical
+
+            if key == "criteria":
+                current = bool(getattr(target, "criteria_confirmed", False))
+            elif key == "tests":
+                current = bool(getattr(target, "tests_confirmed", False))
+
+            root_task_id, root_domain, path_prefix = self._get_root_task_context()
 
             # Save changes
             try:
-                top_level_index = int(full_path.split(".")[0])
-                self.manager.update_subtask_checkpoint(
+                ok, msg = self.manager.update_checkpoint(
                     root_task_id,
-                    top_level_index,
-                    key,
-                    not current,
-                    "",  # note
-                    root_domain,
+                    kind=target_kind,
+                    checkpoint=key,
+                    value=not current,
+                    note="",  # note
+                    domain=root_domain,
                     path=full_path,
                 )
+                if not ok:
+                    return
                 # Reload root task to get updated state
                 updated_root = self.manager.load_task(root_task_id, root_domain, skip_sync=True)
                 if updated_root:
@@ -114,13 +135,21 @@ class CheckpointMixin:
                         self.current_task_detail = updated_root
                     else:
                         # We're inside nested subtask - rebuild current view from updated root
-                        nested_subtask, _, _ = _find_subtask_by_path(updated_root.subtasks, path_prefix)
-                        if nested_subtask:
-                            new_detail = subtask_to_task_detail(nested_subtask, root_task_id, path_prefix)
-                            new_detail.domain = root_domain
-                            self.current_task_detail = new_detail
+                        derived = None
+                        if hasattr(self, "_derive_nested_detail"):
+                            derived = getattr(self, "_derive_nested_detail")(updated_root, root_task_id, path_prefix)
+                        else:
+                            nested_step, _, _ = _find_step_by_path(updated_root.steps, path_prefix)
+                            if nested_step:
+                                derived = self._step_to_task_detail(nested_step, root_task_id, path_prefix)
+                        if derived:
+                            derived.domain = root_domain
+                            self.current_task_detail = derived
 
-                    self._rebuild_detail_flat(path)
+                    if local_key:
+                        self._rebuild_detail_flat(local_key)
+                    else:
+                        self._rebuild_detail_flat()
 
                 # Update tasks list without resetting view state
                 self._update_tasks_list_silent(skip_sync=True)
@@ -131,7 +160,7 @@ class CheckpointMixin:
 
     def move_checkpoint_selection(self, delta: int) -> None:
         """Move checkpoint selection up/down."""
-        self.checkpoint_selected_index = max(0, min(self.checkpoint_selected_index + delta, 2))
+        self.checkpoint_selected_index = max(0, min(self.checkpoint_selected_index + delta, 1))
         self.force_render()
 
 

@@ -1,158 +1,223 @@
-/**
- * Task and SubTask types matching Python domain models
- * from core/task_detail.py
- */
-
-/** Task status enum */
+/** Canonical status codes from backend serializers. */
 export type TaskStatus = "TODO" | "ACTIVE" | "DONE";
 
-/** Phase 1: Subtask status enum */
-export type SubtaskStatus = "pending" | "in_progress" | "blocked" | "completed";
+/** Nested Step computed status. */
+export type StepStatus = "pending" | "in_progress" | "blocked" | "completed";
 
-/** Checkpoint state for subtasks */
-export interface CheckpointState {
-  done: boolean;
-  note?: string;
-  timestamp?: string;
+export interface VerificationCheck {
+  kind: string;
+  spec: string;
+  outcome: string;
+  observed_at?: string;
+  digest?: string;
+  preview?: string;
+  details?: Record<string, unknown>;
 }
 
-/** Subtask checkpoints */
-export interface SubtaskCheckpoints {
-  criteria: CheckpointState;
-  tests: CheckpointState;
-  blockers: CheckpointState;
+export interface Attachment {
+  kind: string;
+  path?: string;
+  uri?: string;
+  external_uri?: string;
+  size?: number;
+  digest?: string;
+  observed_at?: string;
+  meta?: Record<string, unknown>;
 }
 
-/** Subtask definition */
-export interface SubTask {
-  /** Subtask title (min 20 chars) */
+export interface TaskNode {
+  path: string;
+  id?: string;
   title: string;
-
-  /** Success criteria list (matches backend 'success_criteria' field) */
+  status: TaskStatus;
+  status_code: TaskStatus;
+  progress: number;
+  priority?: "LOW" | "MEDIUM" | "HIGH";
+  description?: string;
+  context?: string;
   success_criteria?: string[];
-
-  /** Test commands/assertions */
-  tests: string[];
-
-  /** Dependencies/blockers */
-  blockers: string[];
-
-  /** Checkpoint confirmations (from backend) */
+  tests?: string[];
   criteria_confirmed?: boolean;
   tests_confirmed?: boolean;
-  blockers_resolved?: boolean;
-  criteria_notes?: string[];
-  tests_notes?: string[];
-  blockers_notes?: string[];
   criteria_auto_confirmed?: boolean;
   tests_auto_confirmed?: boolean;
-  blockers_auto_resolved?: boolean;
-
-  /** Whether subtask is completed */
-  completed: boolean;
-
-  /** Checkpoint confirmations */
-  checkpoints?: SubtaskCheckpoints;
-
-  /** Nested subtasks (recursive) */
-  subtasks?: SubTask[];
-
-  /** Notes attached to subtask */
-  notes?: string[];
-
-  /** Path in tree (e.g., "0.1.2") */
-  path?: string;
-
-  /** Phase 1: Progress notes without completion */
-  progress_notes?: string[];
-
-  /** Phase 1: When work started (ISO timestamp) */
-  started_at?: string | null;
-
-  /** Phase 1: Whether subtask is blocked */
-  blocked?: boolean;
-
-  /** Phase 1: Reason for blocking */
-  block_reason?: string;
-
-  /** Phase 1: Computed status (pending → in_progress → blocked → completed) */
-  computed_status?: SubtaskStatus;
-}
-
-/** Full task definition */
-export interface Task {
-  /** Task ID (e.g., "TASK-001") */
-  id: string;
-
-  /** Task title with optional tags */
-  title: string;
-
-  /** Task description */
-  description: string;
-
-  /** Current status */
-  status: TaskStatus;
-
-  /** Parent task ID (or "ROOT") - may be null if no parent */
-  parent: string | null;
-
-  /** Test commands for the task - optional as MCP may not return it */
-  tests?: string[];
-
-  /** Known risks - optional as MCP may not return it */
+  criteria_notes?: string[];
+  tests_notes?: string[];
+  dependencies?: string[];
+  next_steps?: string[];
+  problems?: string[];
   risks?: string[];
-
-  /** List of subtasks - optional for minimal task views */
-  subtasks?: SubTask[];
-
-  /** Task dependencies */
-  depends_on?: string[];
-
-  /** Task tags */
-  tags?: string[];
-
-  /** Domain path (e.g., "core/api") */
-  domain?: string;
-
-  /** Sprint/phase */
-  phase?: string;
-
-  /** Component name */
-  component?: string;
-
-  /** Priority level */
-  priority?: "LOW" | "NORMAL" | "HIGH" | "CRITICAL";
-
-  /** Creation timestamp */
-  created_at?: string;
-
-  /** Last update timestamp */
-  updated_at?: string;
-
-  /** Progress percentage (0-100) */
-  progress?: number;
-
-  /** Notes/comments */
-  notes?: string[];
+  blocked?: boolean;
+  blockers?: string[];
+  status_manual?: boolean;
+  attachments?: Attachment[];
+  steps?: Step[];
 }
 
-/** Task list item (compact view) */
-export interface TaskListItem {
-  /** Unique ID for React (may include namespace prefix) */
+export interface StepPlan {
+  title: string;
+  doc: string;
+  attachments?: Attachment[];
+  success_criteria?: string[];
+  tests?: string[];
+  blockers?: string[];
+  criteria_confirmed?: boolean;
+  tests_confirmed?: boolean;
+  criteria_auto_confirmed?: boolean;
+  tests_auto_confirmed?: boolean;
+  criteria_notes?: string[];
+  tests_notes?: string[];
+  steps: string[];
+  current: number;
+  tasks?: TaskNode[];
+}
+
+/** Plan checklist stored on a Plan (PLAN-###). */
+export interface PlanChecklist {
+  steps: string[];
+  current: number;
+  doc: string;
+}
+
+/** Plan (TaskDetail(kind="plan")). */
+export interface Plan {
   id: string;
-  /** Original task ID for API calls */
-  task_id?: string;
+  kind: "plan";
+  title: string;
+  domain?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  tags?: string[];
+  description?: string;
+  contract?: string;
+  contract_versions_count?: number;
+  context?: string;
+  attachments?: Attachment[];
+  success_criteria?: string[];
+  tests?: string[];
+  blockers?: string[];
+  criteria_confirmed?: boolean;
+  tests_confirmed?: boolean;
+  criteria_auto_confirmed?: boolean;
+  tests_auto_confirmed?: boolean;
+  criteria_notes?: string[];
+  tests_notes?: string[];
+  plan: PlanChecklist;
+  project_remote_updated?: string | null;
+  events?: TaskEvent[];
+}
+
+/** Nested step node (recursive) from step_to_dict(). */
+export interface Step {
+  path: string;
+  id?: string;
+  title: string;
+  completed: boolean;
+  success_criteria: string[];
+  tests: string[];
+  blockers: string[];
+  attachments?: Attachment[];
+  verification_checks?: VerificationCheck[];
+  verification_outcome?: string;
+  criteria_confirmed: boolean;
+  tests_confirmed: boolean;
+  criteria_auto_confirmed?: boolean;
+  tests_auto_confirmed?: boolean;
+  criteria_notes: string[];
+  tests_notes: string[];
+  created_at?: string | null;
+  completed_at?: string | null;
+  progress_notes?: string[];
+  started_at?: string | null;
+  blocked?: boolean;
+  block_reason?: string;
+  computed_status?: StepStatus;
+  plan?: StepPlan;
+}
+
+/** Task (TaskDetail(kind="task")). */
+export interface Task {
+  id: string;
+  kind: "task";
   title: string;
   status: TaskStatus;
+  status_code: TaskStatus;
   progress: number;
-  subtask_count: number;
-  completed_count: number;
-  /** Task category/domain within namespace */
+  parent: string | null; // PLAN-### or null
+  priority?: "LOW" | "MEDIUM" | "HIGH";
   domain?: string;
-  /** Storage namespace (folder in ~/.tasks/) */
-  namespace?: string;
+  phase?: string;
+  component?: string;
+  tags?: string[];
+  assignee?: string;
+  blocked?: boolean;
+  blockers?: string[];
+  description?: string;
+  context?: string;
+  attachments?: Attachment[];
+  depends_on?: string[];
+  success_criteria?: string[];
+  tests?: string[];
+  criteria_confirmed?: boolean;
+  tests_confirmed?: boolean;
+  criteria_auto_confirmed?: boolean;
+  tests_auto_confirmed?: boolean;
+  criteria_notes?: string[];
+  tests_notes?: string[];
+  dependencies?: string[];
+  next_steps?: string[];
+  problems?: string[];
+  risks?: string[];
+  history?: string[];
+  created_at?: string | null;
+  updated_at?: string | null;
+  steps_count?: number;
+  steps?: Step[];
+  project_remote_updated?: string | null;
+  events?: TaskEvent[];
+}
+
+/** Compact task view used in context list (task_to_dict(compact=true)). */
+export interface TaskListItem {
+  id: string;
+  kind: "task";
+  title: string;
+  status: TaskStatus;
+  status_code: TaskStatus;
+  progress: number;
+  domain?: string;
+  parent?: string | null;
+  blocked?: boolean;
+  criteria_confirmed?: boolean;
+  tests_confirmed?: boolean;
+  criteria_auto_confirmed?: boolean;
+  tests_auto_confirmed?: boolean;
+  steps_count: number;
+  steps?: Array<
+    Pick<
+      Step,
+      "path" | "title" | "completed" | "criteria_confirmed" | "tests_confirmed" | "criteria_auto_confirmed" | "tests_auto_confirmed"
+    > & { ready?: boolean; needs?: string[]; status?: StepStatus; plan?: StepPlan }
+  >;
   tags?: string[];
   updated_at?: string;
+  namespace?: string;
+}
+
+/** Compact plan view used in context list (plan_to_dict(compact=True)). */
+export interface PlanListItem {
+  id: string;
+  kind: "plan";
+  title: string;
+  domain?: string;
+  contract_preview?: string;
+  contract_versions_count?: number;
+  plan_progress?: string;
+  plan_doc_preview?: string;
+  criteria_confirmed?: boolean;
+  tests_confirmed?: boolean;
+  criteria_auto_confirmed?: boolean;
+  tests_auto_confirmed?: boolean;
 }
 
 /** Task event for timeline */

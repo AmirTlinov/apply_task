@@ -9,17 +9,71 @@ export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 export const TaskPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 export type TaskPriority = z.infer<typeof TaskPrioritySchema>;
 
-export const SubtaskSchema = z.object({
-    title: z.string(),
-    criteria: z.array(z.string()).default([]),
-    tests: z.array(z.string()).default([]),
-    blockers: z.array(z.string()).default([]),
+export const TaskNodeSchema: z.ZodType<{
+    title: string;
+    status?: string;
+    priority?: string;
+    description?: string;
+    context?: string;
+    success_criteria?: string[];
+    dependencies?: string[];
+    next_steps?: string[];
+    problems?: string[];
+    risks?: string[];
+    blocked?: boolean;
+    blockers?: string[];
+    status_manual?: boolean;
+    steps?: unknown[];
+}> = z.lazy(() =>
+    z.object({
+        title: z.string(),
+        status: z.string().optional(),
+        priority: z.string().optional(),
+        description: z.string().optional(),
+        context: z.string().optional(),
+        success_criteria: z.array(z.string()).optional(),
+        dependencies: z.array(z.string()).optional(),
+        next_steps: z.array(z.string()).optional(),
+        problems: z.array(z.string()).optional(),
+        risks: z.array(z.string()).optional(),
+        blocked: z.boolean().optional(),
+        blockers: z.array(z.string()).optional(),
+        status_manual: z.boolean().optional(),
+        steps: z.array(z.lazy(() => StepSchema)).optional(),
+    })
+);
+
+export const StepPlanSchema = z.object({
+    title: z.string().optional(),
+    doc: z.string().optional(),
+    steps: z.array(z.string()).default([]),
+    current: z.number().default(0),
+    tasks: z.array(TaskNodeSchema).optional(),
 });
-export type Subtask = z.infer<typeof SubtaskSchema>;
+
+export const StepSchema: z.ZodType<{
+    title: string;
+    success_criteria: string[];
+    tests: string[];
+    blockers: string[];
+    completed?: boolean;
+    path?: string;
+    plan?: unknown;
+}> = z.lazy(() =>
+    z.object({
+        title: z.string(),
+        success_criteria: z.array(z.string()).default([]),
+        tests: z.array(z.string()).default([]),
+        blockers: z.array(z.string()).default([]),
+        completed: z.boolean().optional(),
+        path: z.string().optional(),
+        plan: StepPlanSchema.optional(),
+    })
+);
+export type Step = z.infer<typeof StepSchema>;
 
 export const TaskSchema = z.object({
-    id: z.string(), // This is the UUID
-    task_id: z.string(), // This is the ID-123 human readable ID
+    id: z.string(), // "TASK-###"
     title: z.string(),
     status: TaskStatusSchema,
     priority: TaskPrioritySchema.default("MEDIUM"),
@@ -27,14 +81,15 @@ export const TaskSchema = z.object({
     tags: z.array(z.string()).optional(),
     domain: z.string().optional(),
     namespace: z.string().optional(),
-    subtasks: z.array(SubtaskSchema).optional(),
-    created_at: z.string(),
-    updated_at: z.string(),
+    parent: z.string().nullable().optional(),
+    steps: z.array(StepSchema).optional(),
+    created_at: z.string().nullable().optional(),
+    updated_at: z.string().nullable().optional(),
     completed_at: z.string().nullable().optional(),
 
     // Computed/Frontend-only props from legacy type (might need review)
     progress: z.number().optional(),
-    subtask_count: z.number().optional(),
+    steps_count: z.number().optional(),
     completed_count: z.number().optional().default(0),
 });
 export type Task = z.infer<typeof TaskSchema>;
@@ -73,29 +128,27 @@ const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 let MOCK_TASKS: Task[] = [
     {
         id: "mock-1",
-        task_id: "TASK-1",
         title: "Setup Architecture",
         status: "DONE",
         priority: "HIGH",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         tags: ["infra", "arch"],
-        subtasks: [],
+        steps: [],
         completed_count: 0,
-        subtask_count: 0,
+        steps_count: 0,
     },
     {
         id: "mock-2",
-        task_id: "TASK-2",
         title: "Implement Router",
         status: "ACTIVE",
         priority: "CRITICAL",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         tags: ["ui", "feat"],
-        subtasks: [],
+        steps: [],
         completed_count: 0,
-        subtask_count: 0,
+        steps_count: 0,
     },
 ];
 

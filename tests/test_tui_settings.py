@@ -100,7 +100,7 @@ def test_status_bar_shows_sync(monkeypatch, tmp_path):
     tui = tasks.TaskTrackerTUI(tasks_dir=tasks_dir, theme=tasks.DEFAULT_THEME)
     text = tui.get_status_text()
     plain = _plain_text(text)
-    assert "Git Projects" in plain
+    assert "Git" in plain
 
 
 def test_status_bar_spinner(monkeypatch, tmp_path):

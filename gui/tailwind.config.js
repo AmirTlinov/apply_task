@@ -1,6 +1,8 @@
 /** @type {import('tailwindcss').Config} */
 import { fontFamily } from "tailwindcss/defaultTheme"
 
+const withAlpha = (variable) => `hsl(var(${variable}) / <alpha-value>)`
+
 export default {
   darkMode: ["class"],
   content: [
@@ -16,72 +18,78 @@ export default {
       },
     },
     extend: {
+      transitionTimingFunction: {
+        sidebar: "cubic-bezier(0.32,0.72,0,1)",
+      },
       colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
+        border: withAlpha("--border"),
+        input: withAlpha("--input"),
+        ring: withAlpha("--ring"),
         background: {
-          DEFAULT: "hsl(var(--background))",
-          subtle: "hsl(var(--background-subtle))",
-          muted: "hsl(var(--background-muted))",
-          hover: "hsl(var(--background-hover))",
+          DEFAULT: withAlpha("--background"),
+          subtle: withAlpha("--background-subtle"),
+          muted: withAlpha("--background-muted"),
+          hover: withAlpha("--background-hover"),
         },
         foreground: {
-          DEFAULT: "hsl(var(--foreground))",
-          muted: "hsl(var(--foreground-muted))",
-          subtle: "hsl(var(--foreground-subtle))",
+          DEFAULT: withAlpha("--foreground"),
+          muted: withAlpha("--foreground-muted"),
+          subtle: withAlpha("--foreground-subtle"),
         },
         primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
+          DEFAULT: withAlpha("--primary"),
+          foreground: withAlpha("--primary-foreground"),
           hover: "hsl(var(--primary) / 0.9)",
           subtle: "hsl(var(--primary) / 0.1)",
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
+          DEFAULT: withAlpha("--secondary"),
+          foreground: withAlpha("--secondary-foreground"),
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
+          DEFAULT: withAlpha("--destructive"),
+          foreground: withAlpha("--destructive-foreground"),
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
+          DEFAULT: withAlpha("--muted"),
+          foreground: withAlpha("--muted-foreground"),
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
+          DEFAULT: withAlpha("--accent"),
+          foreground: withAlpha("--accent-foreground"),
         },
         popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
+          DEFAULT: withAlpha("--popover"),
+          foreground: withAlpha("--popover-foreground"),
         },
         card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
+          DEFAULT: withAlpha("--card"),
+          foreground: withAlpha("--card-foreground"),
         },
         status: {
           todo: {
-            DEFAULT: "hsl(var(--status-todo))",
-            foreground: "hsl(var(--foreground))",
+            DEFAULT: withAlpha("--status-todo"),
+            foreground: withAlpha("--foreground"),
           },
           active: {
-            DEFAULT: "hsl(var(--status-active))",
-            foreground: "hsl(var(--primary-foreground))",
+            DEFAULT: withAlpha("--status-active"),
+            foreground: withAlpha("--primary-foreground"),
           },
           done: {
-            DEFAULT: "hsl(var(--status-done))",
+            DEFAULT: withAlpha("--status-done"),
+            foreground: "white",
+          },
+          ok: {
+            DEFAULT: withAlpha("--status-ok"),
             foreground: "white",
           },
           warn: {
-            DEFAULT: "hsl(var(--status-warn))",
+            DEFAULT: withAlpha("--status-warn"),
             foreground: "white",
           },
           fail: {
-            DEFAULT: "hsl(var(--status-fail))",
+            DEFAULT: withAlpha("--status-fail"),
             foreground: "white",
-            subtle: "hsl(var(--status-fail) / 0.1)",
           },
         }
       },

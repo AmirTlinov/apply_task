@@ -3,7 +3,7 @@
 ## Features
 
 - Horizontal scrolling lets you read long titles/descriptions without breaking the table layout.
-- Works in both the task list and detail/subtask views.
+- Works in both the task list and detail/steps views.
 - Only cell content moves; borders stay fixed.
 - Footer displays the active offset.
 
@@ -22,7 +22,7 @@ The maximum offset is 200 characters. Leaving detail mode automatically resets i
 - `self.horizontal_offset` stores the offset.
 - Rendering helpers trim the text slice before padding.
 - Columns remain aligned; formatting and colors are preserved.
-- Applies to: titles, descriptions, notes, subtasks, next steps, dependencies, success criteria, problems, and risks.
+- Applies to: titles, descriptions, notes, steps, next steps, dependencies, success criteria, problems, and risks.
 
 ```python
 # Example for task titles
@@ -35,7 +35,7 @@ cell = raw[:title_w].ljust(title_w)
 ## How to test
 
 ```
-./tasks.py tui
+apply_task tui
 Enter a task → press ] a few times → text shifts left.
 Press [ or Home to return.
 ```

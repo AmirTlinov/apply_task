@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from core.desktop.devtools.interface.cli_activity import read_activity_marker, ACTIVITY_TTL
+from core.desktop.devtools.interface.tui_detail_tree import canonical_path, first_child_key, plan_key
 
 
 def toggle_collapse_selected(tui) -> None:
@@ -20,59 +20,124 @@ def toggle_subtask_collapse(tui, expand: bool) -> None:
     entry = tui._selected_subtask_entry()
     if not entry:
         return
-    path, st, _, collapsed, has_children = entry
+    key = entry.key
+    collapsed = bool(getattr(entry, "collapsed", False))
+    has_children = bool(getattr(entry, "has_children", False))
+
     if not has_children:
-        if not expand and "." in path:
-            parent_path = ".".join(path.split(".")[:-1])
-            tui._select_subtask_by_path(parent_path)
-            tui._ensure_detail_selection_visible(len(tui.detail_flat_subtasks))
+        if not expand and getattr(entry, "parent_key", None):
+            tui._select_subtask_by_path(entry.parent_key)
             tui.force_render()
         return
+
     if expand:
         if collapsed:
-            tui.detail_collapsed.discard(path)
-            tui._rebuild_detail_flat(path)
-        else:
-            child_path = f"{path}.0" if st.children else path
-            tui._select_subtask_by_path(child_path)
-            tui._rebuild_detail_flat(child_path)
-    else:
-        if not collapsed:
-            tui.detail_collapsed.add(path)
-            tui._rebuild_detail_flat(path)
-        elif "." in path:
-            parent_path = ".".join(path.split(".")[:-1])
-            tui._select_subtask_by_path(parent_path)
-            tui._ensure_detail_selection_visible(len(tui.detail_flat_subtasks))
-            tui.force_render()
+            tui.detail_collapsed.discard(key)
+            tui._rebuild_detail_flat(key)
+            return
+        child = first_child_key(entry)
+        if child:
+            tui._select_subtask_by_path(child)
+            tui._rebuild_detail_flat(child)
+        return
+
+    # collapse
+    if not collapsed:
+        tui.detail_collapsed.add(key)
+        tui._rebuild_detail_flat(key)
+        return
+    parent = getattr(entry, "parent_key", None)
+    if parent:
+        tui._select_subtask_by_path(parent)
+        tui.force_render()
+
+
+def _iter_subtree_nodes(entry):
+    """Iterate nodes in the subtree rooted at entry (includes root), deterministic DFS."""
+    stack = [(entry.kind, entry.key, entry.node)]
+    while stack:
+        kind, key, node = stack.pop()
+        yield kind, key, node
+        if kind == "step":
+            plan = getattr(node, "plan", None)
+            if plan is not None:
+                stack.append(("plan", plan_key(key), plan))
+            continue
+        if kind == "plan":
+            plan = node
+            tasks = list(getattr(plan, "tasks", []) or [])
+            base = canonical_path(key, "plan")
+            for t_idx in reversed(range(len(tasks))):
+                stack.append(("task", f"{base}.t:{t_idx}", tasks[t_idx]))
+            continue
+        # task
+        task = node
+        steps = list(getattr(task, "steps", []) or [])
+        for s_idx in reversed(range(len(steps))):
+            stack.append(("step", f"{key}.s:{s_idx}", steps[s_idx]))
+
+
+def _has_children(kind: str, node) -> bool:
+    if kind == "step":
+        return getattr(node, "plan", None) is not None
+    if kind == "plan":
+        return bool(list(getattr(node, "tasks", []) or []))
+    if kind == "task":
+        return bool(list(getattr(node, "steps", []) or []))
+    return False
+
+
+def collapse_subtask_descendants(tui) -> None:
+    """Collapse all descendants of the selected node (keeps the node itself expanded)."""
+    entry = tui._selected_subtask_entry()
+    if not entry:
+        return
+    root_key = entry.key
+    first = True
+    changed = False
+    for kind, key, node in _iter_subtree_nodes(entry):
+        if first:
+            first = False
+            continue
+        if _has_children(kind, node) and key not in tui.detail_collapsed:
+            tui.detail_collapsed.add(key)
+            changed = True
+
+    if not changed:
+        return
+    if getattr(tui, "current_task_detail", None) and getattr(tui, "collapsed_by_task", None) is not None:
+        tui.collapsed_by_task[tui.current_task_detail.id] = set(tui.detail_collapsed)
+    tui._rebuild_detail_flat(root_key)
+    tui.force_render()
+
+
+def expand_subtask_descendants(tui) -> None:
+    """Expand the selected node and all its descendants."""
+    entry = tui._selected_subtask_entry()
+    if not entry:
+        return
+    root_key = entry.key
+    changed = False
+    for kind, key, node in _iter_subtree_nodes(entry):
+        if _has_children(kind, node) and key in tui.detail_collapsed:
+            tui.detail_collapsed.discard(key)
+            changed = True
+
+    if not changed:
+        return
+    if getattr(tui, "current_task_detail", None) and getattr(tui, "collapsed_by_task", None) is not None:
+        tui.collapsed_by_task[tui.current_task_detail.id] = set(tui.detail_collapsed)
+    tui._rebuild_detail_flat(root_key)
+    tui.force_render()
 
 
 def maybe_reload(tui, now: Optional[float] = None) -> None:
     from time import time
 
     ts = now if now is not None else time()
-    if ts - tui._last_check < 0.3:  # Reduced from 0.7s for faster CLI updates
+    if ts - tui._last_check < 0.3:
         return
     tui._last_check = ts
-
-    # Check for CLI activity marker
-    activity = read_activity_marker(getattr(tui, "tasks_dir", None))
-    if activity:
-        task_id = activity.get("task_id", "")
-        subtask_path = activity.get("subtask_path")
-        command = activity.get("command", "")
-        timestamp = activity.get("timestamp", 0)
-        # Store activity info for rendering
-        tui._cli_activity_task_id = task_id
-        tui._cli_activity_subtask_path = subtask_path
-        tui._cli_activity_command = command
-        tui._cli_activity_expires = timestamp + ACTIVITY_TTL
-    else:
-        # Clear expired activity
-        if ts > getattr(tui, "_cli_activity_expires", 0):
-            tui._cli_activity_task_id = None
-            tui._cli_activity_subtask_path = None
-            tui._cli_activity_command = None
 
     sig = tui.compute_signature()
     if sig == tui._last_signature:
@@ -81,9 +146,14 @@ def maybe_reload(tui, now: Optional[float] = None) -> None:
     prev_detail = tui.current_task_detail.id if (tui.detail_mode and tui.current_task_detail) else None
     prev_detail_path = tui.detail_selected_path
 
-    tui.load_tasks(preserve_selection=True, selected_task_file=selected_task_file, skip_sync=True)
+    # Newer TUI supports multiple within-project list sections (plans/tasks) and should
+    # reload the active section. Fallback to legacy load_tasks for unit stubs.
+    if hasattr(tui, "load_current_list"):
+        tui.load_current_list(preserve_selection=True, selected_task_file=selected_task_file, skip_sync=True)
+    else:  # pragma: no cover - compatibility with minimal test doubles
+        tui.load_tasks(preserve_selection=True, selected_task_file=selected_task_file, skip_sync=True)
     tui._last_signature = sig
-    tui.set_status_message(tui._t("STATUS_MESSAGE_CLI_UPDATED"), ttl=3)
+    tui.set_status_message(tui._t("STATUS_MESSAGE_EXTERNAL_UPDATED"), ttl=3)
 
     if prev_detail:
         for t in tui.tasks:
@@ -93,8 +163,13 @@ def maybe_reload(tui, now: Optional[float] = None) -> None:
             if prev_detail_path:
                 tui._select_subtask_by_path(prev_detail_path)
             items = tui.get_detail_items_count()
-            tui._ensure_detail_selection_visible(items)
             break
 
 
-__all__ = ["toggle_collapse_selected", "toggle_subtask_collapse", "maybe_reload"]
+__all__ = [
+    "toggle_collapse_selected",
+    "toggle_subtask_collapse",
+    "collapse_subtask_descendants",
+    "expand_subtask_descendants",
+    "maybe_reload",
+]
