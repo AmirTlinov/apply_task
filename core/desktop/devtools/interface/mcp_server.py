@@ -73,6 +73,30 @@ def _task_path_description() -> str:
     return "Task path inside a step plan (e.g. 's:0.t:1')."
 
 
+_COMMON_REQUEST_PROPERTIES: Dict[str, Any] = {
+    "expected_revision": {
+        "type": ["integer", "string"],
+        "description": "Optional optimistic concurrency precondition (etag-like). When provided for mutating intents, stale revisions are rejected with REVISION_MISMATCH.",
+    },
+    "expected_version": {
+        "type": ["integer", "string"],
+        "description": "Alias for expected_revision.",
+    },
+}
+
+
+def _augment_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Inject common optional fields into every tool schema (agent ergonomics)."""
+    out: Dict[str, Any] = dict(schema or {})
+    props = dict(out.get("properties") or {})
+    for key, spec in _COMMON_REQUEST_PROPERTIES.items():
+        props.setdefault(key, spec)
+    out["properties"] = props
+    out.setdefault("required", [])
+    out.setdefault("type", "object")
+    return out
+
+
 _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
     "context": {
         "description": "Get current context (plans, tasks, focus, suggestions).",
@@ -332,6 +356,34 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
             "required": ["task"],
         },
     },
+    "patch": {
+        "description": "Diff-oriented safe patch (set/unset/append/remove) for task_detail/step/task_node targets.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task id (TASK-### or PLAN-###)."},
+                "kind": {"type": "string", "description": "task_detail|step|task (default inferred)."},
+                "path": {"type": "string", "description": "Target path: step ('s:0...s:n') or task node ('s:0.t:1')."},
+                "step_id": {"type": "string", "description": "Stable step id (STEP-...)."},
+                "task_node_id": {"type": "string", "description": "Stable task node id (NODE-...)."},
+                "ops": {
+                    "type": "array",
+                    "description": "List of patch operations (set/unset/append/remove).",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "op": {"type": "string", "description": "set|unset|append|remove"},
+                            "field": {"type": "string"},
+                            "value": {},
+                        },
+                        "required": ["op", "field"],
+                    },
+                },
+                "dry_run": {"type": "boolean", "default": False, "description": "Validate and preview without writing."},
+            },
+            "required": ["task", "ops"],
+        },
+    },
     "note": {
         "description": "Add a progress note to a step path (does not complete it).",
         "schema": {
@@ -494,7 +546,7 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
     for tool_name, intent in sorted(TOOL_TO_INTENT.items(), key=lambda kv: kv[0]):
         spec = _TOOL_SPECS.get(intent) or {}
         description = str(spec.get("description") or f"Run apply_task AI intent '{intent}'.")
-        schema = spec.get("schema") or {"type": "object", "properties": {}, "required": []}
+        schema = _augment_schema(spec.get("schema") or {"type": "object", "properties": {}, "required": []})
         tools.append({"name": tool_name, "description": description, "inputSchema": schema})
     return tools
 

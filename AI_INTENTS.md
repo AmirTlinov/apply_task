@@ -55,6 +55,25 @@ Every intent returns `AIResponse`:
 
 On failure: `success=false` and `error={code,message,recovery?}`.
 
+## Optimistic concurrency (revision / expected_revision)
+
+Every stored `PLAN-###` / `TASK-###` file has a **monotonic integer** `revision` (etag-like). It is:
+
+- persisted in task file metadata
+- surfaced in `resume`, `radar` focus payloads, and task/plan serialization
+- incremented on every successful write (any mutating intent that saves the file)
+
+To prevent lost updates, mutating intents accept an optional precondition:
+
+```json
+{"expected_revision": 7}
+```
+
+Notes:
+- `expected_version` is accepted as an alias for `expected_revision`.
+- When `expected_revision` is present and stale, the operation fails with `error.code = "REVISION_MISMATCH"` and includes `result.current_revision` plus recovery suggestions (resume/radar → retry).
+- Read-only intents ignore `expected_revision` (but if provided it must be a valid integer).
+
 ## Intents
 
 ### focus_get
@@ -262,6 +281,47 @@ Edit task/plan notes/meta fields (no step mutations).
 
 ```json
 {"intent":"edit","task":"TASK-001","context":"...","tags":["a","b"],"depends_on":["TASK-002"]}
+```
+
+### patch
+
+Diff-oriented safe patch (field allowlist) for `task_detail` / `step` / `task` (task node).
+
+Operations:
+- `set` / `unset` for scalar fields
+- `set` / `unset` / `append` / `remove` for list fields
+
+Patch a root task/plan (`kind` inferred when omitted):
+```json
+{
+  "intent":"patch",
+  "task":"TASK-001",
+  "expected_revision": 3,
+  "ops":[{"op":"set","field":"description","value":"Updated"}]
+}
+```
+
+Patch structured contract data (plan/task detail only, allowlisted keys):
+```json
+{
+  "intent":"patch",
+  "task":"PLAN-001",
+  "kind":"task_detail",
+  "ops":[
+    {"op":"set","field":"contract_data.goal","value":"Ship v1 safely"},
+    {"op":"append","field":"contract_data.checks","value":"pytest -q"}
+  ]
+}
+```
+
+Patch a step:
+```json
+{"intent":"patch","task":"TASK-001","kind":"step","path":"s:0","ops":[{"op":"append","field":"blockers","value":"Waiting for access"}]}
+```
+
+Patch a task node inside a step plan:
+```json
+{"intent":"patch","task":"TASK-001","kind":"task","path":"s:0.t:1","ops":[{"op":"set","field":"status","value":"DONE"}]}
 ```
 
 ### contract
