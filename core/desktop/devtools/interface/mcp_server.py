@@ -108,6 +108,49 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
             "required": [],
         },
     },
+    "focus_get": {
+        "description": "Get current focus (.last pointer).",
+        "schema": {"type": "object", "properties": {}, "required": []},
+    },
+    "focus_set": {
+        "description": "Set focus (.last pointer).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Focus id (TASK-### or PLAN-###)."},
+                "domain": {"type": "string", "default": "", "description": "Optional domain for the focus pointer."},
+            },
+            "required": ["task"],
+        },
+    },
+    "focus_clear": {
+        "description": "Clear focus (.last pointer).",
+        "schema": {"type": "object", "properties": {}, "required": []},
+    },
+    "radar": {
+        "description": "Radar View: compact snapshot (Now/Why/Verify/Next/Blockers/Open checkpoints).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task id (TASK-###). Uses focus if omitted."},
+                "plan": {"type": "string", "description": "Plan id (PLAN-###). Uses focus if omitted."},
+                "limit": {"type": "integer", "default": 3, "description": "Max next suggestions to return (0..10)."},
+            },
+            "required": [],
+        },
+    },
+    "resume": {
+        "description": "Load a specific plan/task (or focus) with optional timeline.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task id (TASK-###)."},
+                "plan": {"type": "string", "description": "Plan id (PLAN-###)."},
+                "events_limit": {"type": "integer", "description": "Timeline events limit (default 20)."},
+            },
+            "required": [],
+        },
+    },
     "create": {
         "description": "Create a Plan (PLAN-###) or Task (TASK-### under a Plan).",
         "schema": {
@@ -244,6 +287,21 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
             "required": ["task", "checkpoints"],
         },
     },
+    "done": {
+        "description": "Unified “verify + done” style completion (optional note is saved as a progress note first).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task id (TASK-###)."},
+                "path": {"type": "string", "description": _step_path_description()},
+                "step_id": {"type": "string", "description": "Stable step id (STEP-...)."},
+                "note": {"type": "string", "description": "Optional progress note saved before completion."},
+                "force": {"type": "boolean", "default": False},
+                "override_reason": {"type": "string", "description": "Required when force=true."},
+            },
+            "required": ["task", "path"],
+        },
+    },
     "progress": {
         "description": "Mark a step path completed/uncompleted (respects checkpoints unless force=true).",
         "schema": {
@@ -255,6 +313,22 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
                 "force": {"type": "boolean", "default": False},
             },
             "required": ["task", "path"],
+        },
+    },
+    "edit": {
+        "description": "Edit task/plan meta fields (no step mutations).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task id (TASK-### or PLAN-###)."},
+                "description": {"type": "string"},
+                "context": {"type": "string"},
+                "priority": {"type": "string"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "depends_on": {"type": "array", "items": {"type": "string"}},
+                "new_domain": {"type": "string"},
+            },
+            "required": ["task"],
         },
     },
     "note": {
@@ -288,6 +362,32 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
             "required": ["task", "path"],
         },
     },
+    "contract": {
+        "description": "Set/clear a plan contract.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "plan": {"type": "string", "description": "Plan id (PLAN-###)."},
+                "current": {"type": "string", "description": "New contract text."},
+                "clear": {"type": "boolean", "default": False, "description": "Clear contract when true."},
+            },
+            "required": ["plan"],
+        },
+    },
+    "plan": {
+        "description": "Update plan checklist (`doc`, `steps`, `current`) and/or `advance=true`.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "plan": {"type": "string", "description": "Plan id (PLAN-###)."},
+                "doc": {"type": "string", "description": "Plan documentation (free text)."},
+                "steps": {"type": "array", "items": {"type": "string"}, "description": "Plan checklist steps."},
+                "current": {"type": "integer", "description": "Current step index (0-based)."},
+                "advance": {"type": "boolean", "default": False, "description": "Increment current by 1."},
+            },
+            "required": ["plan"],
+        },
+    },
     "mirror": {
         "description": "Export a compact plan slice for a plan/task (one in-progress item).",
         "schema": {
@@ -303,6 +403,65 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
             },
             "required": [],
         },
+    },
+    "complete": {
+        "description": "Set status for a plan/task (TODO/ACTIVE/DONE).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task id (TASK-### or PLAN-###)."},
+                "status": {"type": "string", "description": "TODO|ACTIVE|DONE (default DONE)."},
+                "force": {"type": "boolean", "default": False},
+                "override_reason": {"type": "string", "description": "Required when force=true."},
+                "domain": {"type": "string", "description": "Optional domain override."},
+            },
+            "required": ["task"],
+        },
+    },
+    "delete": {
+        "description": "Delete a task file (TASK/PLAN) or a nested step (when path/step_id is provided).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task id (TASK-### or PLAN-###)."},
+                "path": {"type": "string", "description": _step_path_description()},
+                "step_id": {"type": "string", "description": "Stable step id (STEP-...)."},
+                "domain": {"type": "string", "description": "Optional domain override."},
+            },
+            "required": ["task"],
+        },
+    },
+    "batch": {
+        "description": "Run multiple operations in one call (optional atomic rollback).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "operations": {"type": "array", "items": {"type": "object"}, "description": "List of intent payloads."},
+                "atomic": {"type": "boolean", "default": False, "description": "Rollback all on first failure."},
+                "task": {"type": "string", "description": "Default task id to apply when op omits it."},
+            },
+            "required": ["operations"],
+        },
+    },
+    "undo": {
+        "description": "Undo last operation (history).",
+        "schema": {"type": "object", "properties": {}, "required": []},
+    },
+    "redo": {
+        "description": "Redo last undone operation (history).",
+        "schema": {"type": "object", "properties": {}, "required": []},
+    },
+    "history": {
+        "description": "Get operation history (undo/redo metadata).",
+        "schema": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "default": 20, "description": "Max operations returned."}},
+            "required": [],
+        },
+    },
+    "storage": {
+        "description": "Get storage paths and namespaces.",
+        "schema": {"type": "object", "properties": {}, "required": []},
     },
 }
 

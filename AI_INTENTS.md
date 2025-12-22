@@ -8,6 +8,14 @@ The intent API is a deterministic JSON surface designed for AI agents and automa
 
 In MCP, intents are exposed as tools named `tasks_<intent>` and map 1:1 to the intent payloads described below.
 
+### Control tower rules (MCP ergonomics)
+
+These are strict-by-construction conventions intended to make the MCP surface “one screen → one truth”:
+
+- **Explicit > focus**: if an intent accepts an explicit `task`/`plan`/`step_id`/`task_node_id`/`path`, it always wins.
+- **Focus is convenience, never magic**: the only supported implicit target is the stored focus (`.last`), and it is managed explicitly via `focus_set` / `focus_get` / `focus_clear`.
+- **Errors are actionable**: missing-id errors should return a recovery hint and suggestions (`set_focus …` or candidate ids).
+
 ### Canonical model
 
 - **Plan**: `PLAN-###` (`TaskDetail.kind = "plan"`) stores:
@@ -48,6 +56,44 @@ Every intent returns `AIResponse`:
 On failure: `success=false` and `error={code,message,recovery?}`.
 
 ## Intents
+
+### focus_get
+
+Get current focus (the `.last` pointer).
+
+```json
+{"intent":"focus_get"}
+```
+
+### focus_set
+
+Set focus (writes `.last`).
+
+```json
+{"intent":"focus_set","task":"TASK-001","domain":"alpha/api"}
+```
+
+### focus_clear
+
+Clear focus (removes `.last` if present).
+
+```json
+{"intent":"focus_clear"}
+```
+
+### radar
+
+Compact “Radar View” snapshot for the current work:
+
+- **Now**: active step / current plan checklist item
+- **Why**: contract / goal summary
+- **How to verify**: checks/tests (and missing checkpoints)
+- **Next**: top 1–3 actions/suggestions
+- **Blockers/Deps**: blockers + dependency state
+
+```json
+{"intent":"radar","task":"TASK-001","limit":3}
+```
 
 ### context
 

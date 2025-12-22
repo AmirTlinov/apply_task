@@ -64,6 +64,22 @@ def get_last_task() -> Tuple[Optional[str], Optional[str]]:
     return raw or None, None
 
 
+def clear_last_task() -> bool:
+    """Clear stored focus pointer (`.last`).
+
+    Returns True if any candidate file was removed.
+    """
+    removed = False
+    for candidate in _last_file_candidates():
+        try:
+            if candidate.exists():
+                candidate.unlink()
+                removed = True
+        except Exception:
+            continue
+    return removed
+
+
 def normalize_task_id(raw: str) -> str:
     """Normalize task ID with path traversal protection."""
     value = raw.strip().upper()
@@ -132,6 +148,7 @@ def parse_smart_title(title: str) -> Tuple[str, List[str], List[str]]:
 __all__ = [
     "save_last_task",
     "get_last_task",
+    "clear_last_task",
     "normalize_task_id",
     "derive_domain_explicit",
     "derive_folder_explicit",

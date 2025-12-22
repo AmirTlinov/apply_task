@@ -26,7 +26,12 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core import PlanNode, Step, TaskDetail, TaskNode, Attachment, VerificationCheck, StepEvent
-from core.desktop.devtools.application.context import get_last_task, normalize_task_id
+from core.desktop.devtools.application.context import (
+    clear_last_task,
+    get_last_task,
+    normalize_task_id,
+    save_last_task,
+)
 from core.desktop.devtools.application.task_manager import TaskManager, _find_step_by_path, _find_task_by_path
 from core.desktop.devtools.interface.operation_history import OperationHistory
 from core.desktop.devtools.interface.serializers import plan_to_dict, plan_node_to_dict, step_to_dict, task_to_dict, task_node_to_dict
@@ -110,15 +115,67 @@ class AIResponse:
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
 
-def error_response(intent: str, code: str, message: str, *, recovery: str = "", result: Optional[Dict[str, Any]] = None) -> AIResponse:
+def error_response(
+    intent: str,
+    code: str,
+    message: str,
+    *,
+    recovery: str = "",
+    result: Optional[Dict[str, Any]] = None,
+    context: Optional[Dict[str, Any]] = None,
+    suggestions: Optional[List[Suggestion]] = None,
+) -> AIResponse:
     return AIResponse(
         success=False,
         intent=intent,
         result=result or {},
+        context=context or {},
+        suggestions=list(suggestions or []),
         error_code=code,
         error_message=message,
         error_recovery=recovery or None,
     )
+
+
+def _missing_target_suggestions(manager: TaskManager, *, want: str) -> List[Suggestion]:
+    suggestions: List[Suggestion] = [
+        Suggestion(
+            action="context",
+            target="tasks_context",
+            reason="Покажи доступные планы/задачи и выбери id для явной адресации.",
+            priority="high",
+            params={"include_all": True, "compact": True},
+        ),
+        Suggestion(
+            action="focus_get",
+            target="tasks_focus_get",
+            reason="Покажи текущий focus (.last) и используй его явно или обнови через focus_set.",
+            priority="normal",
+        ),
+    ]
+    details = manager.list_all_tasks(skip_sync=True)
+    # Provide a couple of concrete candidates as set_focus suggestions.
+    candidates = [d for d in details if str(getattr(d, "id", "") or "").startswith(want)]
+    for cand in candidates[:3]:
+        suggestions.append(
+            Suggestion(
+                action="focus_set",
+                target=str(getattr(cand, "id", "") or ""),
+                reason="Установи focus на существующий объект, если хочешь опускать id в следующих вызовах.",
+                priority="normal",
+                params={"task": str(getattr(cand, "id", "") or ""), "domain": str(getattr(cand, "domain", "") or "")},
+            )
+        )
+    return suggestions
+
+
+def _preview_text(value: str, *, max_len: int = 280) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1] + "…"
 
 
 def validate_task_id(value: Any) -> Optional[str]:
@@ -1013,20 +1070,223 @@ def handle_context(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     )
 
 
+def handle_focus_get(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
+    last_id, last_domain = get_last_task()
+    focus_id: Optional[str] = None
+    if last_id:
+        try:
+            focus_id = normalize_task_id(last_id)
+        except Exception:
+            focus_id = str(last_id).strip() or None
+    domain = str(last_domain or "")
+    return AIResponse(
+        success=True,
+        intent="focus_get",
+        result={"focus": {"id": focus_id, "domain": domain} if focus_id else None},
+        context={"focus_id": focus_id, "domain": domain} if focus_id else {},
+    )
+
+
+def handle_focus_set(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
+    raw = data.get("task")
+    if not raw:
+        return error_response(
+            "focus_set",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-###|PLAN-### или сначала создай объект через create.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
+    err = validate_task_id(raw)
+    if err:
+        return error_response("focus_set", "INVALID_TASK", err)
+    focus_id = normalize_task_id(str(raw))
+
+    # Best-effort validation: focus must point to an existing object.
+    if not manager.load_task(focus_id, skip_sync=True):
+        return error_response(
+            "focus_set",
+            "NOT_FOUND",
+            f"Не найдено: {focus_id}",
+            recovery="Проверь id через context(include_all=true) или создай объект.",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-" if focus_id.startswith("PLAN-") else "TASK-"),
+            result={"task": focus_id},
+        )
+
+    domain = str(data.get("domain", "") or "").strip()
+    save_last_task(focus_id, domain)
+    return AIResponse(
+        success=True,
+        intent="focus_set",
+        result={"focus": {"id": focus_id, "domain": domain}},
+        context={"focus_id": focus_id, "domain": domain},
+    )
+
+
+def handle_focus_clear(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
+    removed = clear_last_task()
+    return AIResponse(success=True, intent="focus_clear", result={"cleared": bool(removed), "focus": None})
+
+
+def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
+    focus = data.get("task") or data.get("plan")
+    focus_domain: str = ""
+    if focus is None:
+        last_id, last_domain = get_last_task()
+        focus = last_id
+        focus_domain = str(last_domain or "")
+    if not focus:
+        return error_response(
+            "radar",
+            "MISSING_ID",
+            "Не указан task/plan и нет focus",
+            recovery="Передай task=TASK-###|plan=PLAN-### или установи focus через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
+    err = validate_task_id(focus)
+    if err:
+        return error_response("radar", "INVALID_ID", err)
+    focus_id = str(focus)
+    detail = manager.load_task(focus_id, skip_sync=True)
+    if not detail:
+        return error_response(
+            "radar",
+            "NOT_FOUND",
+            f"Не найдено: {focus_id}",
+            recovery="Проверь id через context(include_all=true) или установи focus заново.",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-" if focus_id.startswith("PLAN-") else "TASK-"),
+        )
+
+    try:
+        limit = int(data.get("limit", 3) or 3)
+    except Exception:
+        return error_response("radar", "INVALID_LIMIT", "limit должен быть числом")
+    limit = max(0, min(limit, 10))
+
+    focus_payload = {
+        "id": focus_id,
+        "kind": str(getattr(detail, "kind", "task") or "task"),
+        "domain": str(getattr(detail, "domain", "") or focus_domain or ""),
+        "title": str(getattr(detail, "title", "") or ""),
+    }
+
+    next_suggestions = list(generate_suggestions(manager, focus_id))[:limit]
+
+    result: Dict[str, Any] = {"focus": focus_payload, "next": [s.to_dict() for s in next_suggestions]}
+
+    if getattr(detail, "kind", "task") == "plan":
+        steps = list(getattr(detail, "plan_steps", []) or [])
+        current = int(getattr(detail, "plan_current", 0) or 0)
+        current = max(0, min(current, len(steps)))
+        title = steps[current] if current < len(steps) else ""
+        status = "completed" if steps and current >= len(steps) else ("in_progress" if steps else "pending")
+        result["now"] = {"kind": "plan_step", "index": current, "title": title, "total": len(steps), "status": status}
+        result["why"] = {
+            "plan_id": focus_id,
+            "contract_preview": _preview_text(str(getattr(detail, "contract", "") or "")),
+        }
+        result["verify"] = {
+            "checks": list(getattr(detail, "tests", []) or []),
+            "criteria_confirmed": bool(getattr(detail, "criteria_confirmed", False)),
+            "tests_confirmed": bool(getattr(detail, "tests_confirmed", False)),
+        }
+        open_checkpoints: List[str] = []
+        if list(getattr(detail, "success_criteria", []) or []) and not bool(getattr(detail, "criteria_confirmed", False)):
+            open_checkpoints.append("criteria")
+        tests_auto = bool(getattr(detail, "tests_auto_confirmed", False))
+        if list(getattr(detail, "tests", []) or []) and not (bool(getattr(detail, "tests_confirmed", False)) or tests_auto):
+            open_checkpoints.append("tests")
+        result["open_checkpoints"] = open_checkpoints
+        result["blockers"] = {"blocked": bool(getattr(detail, "blocked", False)), "blockers": list(getattr(detail, "blockers", []) or [])}
+        return AIResponse(
+            success=True,
+            intent="radar",
+            result=result,
+            context={"task_id": focus_id},
+            suggestions=next_suggestions,
+        )
+
+    task = detail
+    items = _mirror_items_from_steps(list(getattr(task, "steps", []) or []))
+    _normalize_mirror_progress(items)
+    now = next((i for i in items if i.get("status") == "in_progress"), items[0] if items else None)
+    result["now"] = now
+
+    plan_id = str(getattr(task, "parent", "") or "").strip()
+    plan = manager.load_task(plan_id, skip_sync=True) if plan_id else None
+    result["why"] = {
+        "plan_id": plan_id or None,
+        "contract_preview": _preview_text(str(getattr(plan, "contract", "") or "")) if plan else "",
+    }
+
+    if now and now.get("path"):
+        path = str(now.get("path") or "")
+        st, _, _ = _find_step_by_path(list(getattr(task, "steps", []) or []), path)
+        if st:
+            missing: List[Dict[str, Any]] = []
+            if not bool(getattr(st, "criteria_confirmed", False)):
+                missing.append({"checkpoint": "criteria", "path": path})
+            if not (bool(getattr(st, "tests_confirmed", False)) or bool(getattr(st, "tests_auto_confirmed", False))):
+                missing.append({"checkpoint": "tests", "path": path})
+            if bool(getattr(st, "blocked", False)):
+                missing.append({"checkpoint": "unblocked", "path": path})
+            result["verify"] = {
+                "path": path,
+                "step_id": str(getattr(st, "id", "") or ""),
+                "tests": list(getattr(st, "tests", []) or []),
+                "missing": missing,
+            }
+
+    deps = [str(d or "").strip() for d in list(getattr(task, "depends_on", []) or []) if str(d or "").strip()]
+    unresolved: List[str] = []
+    for dep_id in deps:
+        dep = manager.load_task(dep_id, skip_sync=True)
+        if not dep or str(getattr(dep, "status", "") or "").upper() != "DONE":
+            unresolved.append(dep_id)
+    result["blockers"] = {
+        "blocked": bool(getattr(task, "blocked", False)),
+        "blockers": list(getattr(task, "blockers", []) or []),
+        "depends_on": deps,
+        "unresolved_depends_on": unresolved,
+    }
+    result["open_checkpoints"] = _compute_checkpoint_status(task)
+
+    return AIResponse(
+        success=True,
+        intent="radar",
+        result=result,
+        context={"task_id": focus_id},
+        suggestions=next_suggestions,
+    )
+
+
 def handle_resume(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     focus = data.get("task") or data.get("plan")
     if focus is None:
         last_id, _domain = get_last_task()
         focus = last_id
     if not focus:
-        return error_response("resume", "MISSING_ID", "Не указан task/plan и нет последнего контекста")
+        return error_response(
+            "resume",
+            "MISSING_ID",
+            "Не указан task/plan и нет focus",
+            recovery="Передай task=TASK-###|plan=PLAN-### или установи focus через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(focus)
     if err:
         return error_response("resume", "INVALID_ID", err)
     focus_id = str(focus)
     detail = manager.load_task(focus_id, skip_sync=True)
     if not detail:
-        return error_response("resume", "NOT_FOUND", f"Не найдено: {focus_id}")
+        return error_response(
+            "resume",
+            "NOT_FOUND",
+            f"Не найдено: {focus_id}",
+            recovery="Проверь id через context(include_all=true) или установи focus заново.",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-" if focus_id.startswith("PLAN-") else "TASK-"),
+            result={"task": focus_id},
+        )
     result: Dict[str, Any] = {}
     if getattr(detail, "kind", "task") == "plan":
         result["plan"] = plan_to_dict(detail, compact=False)
@@ -1686,7 +1946,13 @@ def handle_progress(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_done(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("done", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "done",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-### или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
         return error_response("done", "INVALID_TASK", err)
@@ -1700,7 +1966,14 @@ def handle_done(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("done", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "done",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            result={"task": task_id},
+        )
     if getattr(task, "kind", "task") != "task":
         return error_response("done", "NOT_A_TASK", "done применим только к заданиям (TASK-###)")
 
@@ -1740,14 +2013,27 @@ def handle_done(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_edit(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("edit", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "edit",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-###|PLAN-### или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
         return error_response("edit", "INVALID_TASK", err)
     task_id = str(task_id)
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("edit", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "edit",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-" if task_id.startswith("PLAN-") else "TASK-"),
+            result={"task": task_id},
+        )
 
     updated_fields: List[str] = []
     old_domain = str(getattr(task, "domain", "") or "")
@@ -1911,14 +2197,27 @@ def handle_block(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_contract(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     plan_id = data.get("plan") or data.get("task")
     if not plan_id:
-        return error_response("contract", "MISSING_PLAN", "plan обязателен")
+        return error_response(
+            "contract",
+            "MISSING_PLAN",
+            "plan обязателен",
+            recovery="Передай plan=PLAN-### или установи focus на план через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-"),
+        )
     err = validate_task_id(plan_id)
     if err:
         return error_response("contract", "INVALID_PLAN", err)
     plan_id = str(plan_id)
     plan = manager.load_task(plan_id, skip_sync=True)
     if not plan:
-        return error_response("contract", "NOT_FOUND", f"Не найдено: {plan_id}")
+        return error_response(
+            "contract",
+            "NOT_FOUND",
+            f"Не найдено: {plan_id}",
+            recovery="Проверь plan через context(include_all=true) или создай новый plan.",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-"),
+            result={"plan": plan_id},
+        )
     if getattr(plan, "kind", "task") != "plan":
         return error_response("contract", "NOT_A_PLAN", "contract применим только к планам (PLAN-###)")
 
@@ -1938,14 +2237,27 @@ def handle_contract(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_plan(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     plan_id = data.get("plan") or data.get("task")
     if not plan_id:
-        return error_response("plan", "MISSING_PLAN", "plan обязателен")
+        return error_response(
+            "plan",
+            "MISSING_PLAN",
+            "plan обязателен",
+            recovery="Передай plan=PLAN-### или установи focus на план через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-"),
+        )
     err = validate_task_id(plan_id)
     if err:
         return error_response("plan", "INVALID_PLAN", err)
     plan_id = str(plan_id)
     plan = manager.load_task(plan_id, skip_sync=True)
     if not plan:
-        return error_response("plan", "NOT_FOUND", f"Не найдено: {plan_id}")
+        return error_response(
+            "plan",
+            "NOT_FOUND",
+            f"Не найдено: {plan_id}",
+            recovery="Проверь plan через context(include_all=true) или создай новый plan.",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-"),
+            result={"plan": plan_id},
+        )
     if getattr(plan, "kind", "task") != "plan":
         return error_response("plan", "NOT_A_PLAN", "plan intent применим только к планам (PLAN-###)")
 
@@ -1987,14 +2299,27 @@ def handle_mirror(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         last_id, _domain = get_last_task()
         focus = last_id
     if not focus:
-        return error_response("mirror", "MISSING_ID", "Не указан task/plan и нет последнего контекста")
+        return error_response(
+            "mirror",
+            "MISSING_ID",
+            "Не указан task/plan и нет focus",
+            recovery="Передай task=TASK-###|plan=PLAN-### или установи focus через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(focus)
     if err:
         return error_response("mirror", "INVALID_ID", err)
     focus_id = str(focus)
     detail = manager.load_task(focus_id, skip_sync=True)
     if not detail:
-        return error_response("mirror", "NOT_FOUND", f"Не найдено: {focus_id}")
+        return error_response(
+            "mirror",
+            "NOT_FOUND",
+            f"Не найдено: {focus_id}",
+            recovery="Проверь id через context(include_all=true) или установи focus заново.",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-" if focus_id.startswith("PLAN-") else "TASK-"),
+            result={"task": focus_id},
+        )
 
     limit = data.get("limit")
     if limit is not None:
@@ -2075,7 +2400,13 @@ def handle_mirror(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_complete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("complete", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "complete",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-###|PLAN-### или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
         return error_response("complete", "INVALID_TASK", err)
@@ -2093,7 +2424,14 @@ def handle_complete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         return error_response("complete", str(code).upper(), msg, result={"task": task_id})
     detail = manager.load_task(task_id, skip_sync=True)
     if not detail:
-        return error_response("complete", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "complete",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-" if task_id.startswith("PLAN-") else "TASK-"),
+            result={"task": task_id},
+        )
     if force and override_reason and detail:
         try:
             detail.events.append(StepEvent.override(f"complete:{status}", override_reason, target=f"task:{task_id}"))
@@ -2108,7 +2446,13 @@ def handle_complete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_delete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("delete", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "delete",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-###|PLAN-### или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
         return error_response("delete", "INVALID_TASK", err)
@@ -2119,7 +2463,14 @@ def handle_delete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         return AIResponse(success=True, intent="delete", result={"task_id": task_id, "deleted": bool(deleted)})
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("delete", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "delete",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-" if task_id.startswith("PLAN-") else "TASK-"),
+            result={"task": task_id},
+        )
     if getattr(task, "kind", "task") != "task":
         return error_response("delete", "NOT_A_TASK", "delete path применим только к заданиям (TASK-###)")
     path, path_err = _resolve_step_path(manager, task, data)
@@ -2346,6 +2697,10 @@ def handle_storage(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
 INTENT_HANDLERS: Dict[str, Callable[[TaskManager, Dict[str, Any]], AIResponse]] = {
     "context": handle_context,
+    "focus_get": handle_focus_get,
+    "focus_set": handle_focus_set,
+    "focus_clear": handle_focus_clear,
+    "radar": handle_radar,
     "resume": handle_resume,
     "create": handle_create,
     "decompose": handle_decompose,
