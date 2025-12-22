@@ -3331,6 +3331,54 @@ _MUTATING_INTENTS = {
     "complete",
     "delete",
 }
+_TARGETED_MUTATING_INTENTS = set(_MUTATING_INTENTS) - {"create"}
+
+
+def _parse_expected_revision(data: Dict[str, Any]) -> Tuple[Optional[int], Optional[str]]:
+    raw = data.get("expected_revision", None)
+    if raw is None:
+        raw = data.get("expected_version", None)
+    if raw is None:
+        return None, None
+    if isinstance(raw, bool):
+        return None, "expected_revision должен быть целым числом"
+    try:
+        expected = int(raw)
+    except (TypeError, ValueError):
+        return None, "expected_revision должен быть целым числом"
+    if expected < 0:
+        return None, "expected_revision должен быть >= 0"
+    return expected, None
+
+
+def _revision_mismatch_response(intent: str, *, task_id: str, expected: int, current: int) -> AIResponse:
+    tid = str(task_id or "").strip()
+    recovery = (
+        "Состояние изменилось (optimistic concurrency): revision не совпадает.\n"
+        "1) Получи актуальную revision через resume(task=...) или radar(task=...).\n"
+        "2) Повтори запрос с expected_revision=<current_revision>."
+    )
+    suggestions: List[Suggestion] = []
+    if tid:
+        suggestions.append(
+            Suggestion(
+                action="resume",
+                target="tasks_resume",
+                reason="Получить актуальную revision и текущее состояние объекта перед повтором операции.",
+                priority="high",
+                params={"task": tid},
+            )
+        )
+        suggestions.extend(_path_help_suggestions(tid))
+    return error_response(
+        intent,
+        "REVISION_MISMATCH",
+        f"revision не совпадает: expected={expected}, current={current}",
+        recovery=recovery,
+        result={"task": tid, "expected_revision": expected, "current_revision": current},
+        context={"task_id": tid} if tid else {},
+        suggestions=suggestions,
+    )
 
 
 def _task_file_for(manager: TaskManager, task_id: str, domain: str = "") -> Path:
@@ -3351,9 +3399,34 @@ def process_intent(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     if not handler:
         return error_response(intent, "UNKNOWN_INTENT", f"Неизвестный intent: {intent}")
 
+    expected_revision, expected_err = _parse_expected_revision(data)
+    if expected_err:
+        return error_response(
+            intent,
+            "INVALID_EXPECTED_REVISION",
+            expected_err,
+            recovery="Передай expected_revision как целое число (etag-like). Чтобы узнать текущую revision — вызови radar/resume.",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
+
     # History tracking: snapshot root task file before mutation.
     history = OperationHistory(storage_dir=Path(manager.tasks_dir))
     task_id = data.get("task") or data.get("plan")
+
+    if expected_revision is not None and intent in _TARGETED_MUTATING_INTENTS and task_id:
+        norm_err = validate_task_id(task_id)
+        if not norm_err:
+            current_detail = manager.load_task(str(task_id), skip_sync=True)
+            if current_detail:
+                current_revision = int(getattr(current_detail, "revision", 0) or 0)
+                if current_revision != int(expected_revision):
+                    return _revision_mismatch_response(
+                        intent,
+                        task_id=str(task_id),
+                        expected=int(expected_revision),
+                        current=current_revision,
+                    )
+
     task_file: Optional[Path] = None
     if intent in _MUTATING_INTENTS and task_id:
         norm = validate_task_id(task_id)
