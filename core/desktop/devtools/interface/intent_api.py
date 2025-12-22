@@ -1240,6 +1240,7 @@ def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     focus_payload = {
         "id": focus_id,
         "kind": str(getattr(detail, "kind", "task") or "task"),
+        "revision": int(getattr(detail, "revision", 0) or 0),
         "domain": str(getattr(detail, "domain", "") or focus_domain or ""),
         "title": str(getattr(detail, "title", "") or ""),
     }

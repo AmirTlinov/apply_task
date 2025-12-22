@@ -12,7 +12,7 @@ from core.status import normalize_status_code
 
 class TaskFileParser:
     STEP_PATTERN = re.compile(r"^-\s*\[(x|X| )\]\s*(.+)$")
-    CURRENT_SCHEMA_VERSION = 7
+    CURRENT_SCHEMA_VERSION = 8
 
     @staticmethod
     def _coerce_timestamp(value: Any) -> str:
@@ -59,12 +59,18 @@ class TaskFileParser:
 
         progress = int(metadata.get("progress", 0) or 0)
         blocked = bool(metadata.get("blocked", False))
+        try:
+            revision = int(metadata.get("revision", 0) or 0)
+        except Exception:
+            revision = 0
+        revision = max(0, revision)
         raw_id = str(metadata.get("id", "") or "")
         raw_kind = str(metadata.get("kind", "") or "").strip().lower()
         kind = raw_kind if raw_kind in {"plan", "task"} else ("plan" if raw_id.startswith("PLAN-") else "task")
         task = TaskDetail(
             # Always load into the current in-memory schema; old files auto-migrate on save.
             schema_version=cls.CURRENT_SCHEMA_VERSION,
+            revision=revision,
             id=raw_id,
             kind=kind,
             title=metadata.get("title", ""),

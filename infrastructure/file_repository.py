@@ -2,6 +2,8 @@ import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import yaml
+
 from application.ports import TaskRepository
 from core import TaskDetail
 from core.status import normalize_status_code
@@ -68,6 +70,20 @@ class FileTaskRepository(TaskRepository):
     def save(self, task: TaskDetail) -> None:
         path = self._resolve_path(task.id, task.domain)
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Monotonic revision (etag-like): always bump on write.
+        # Best-effort: if file exists but parsing fails, fall back to in-memory revision.
+        disk_revision = 0
+        if path.exists():
+            try:
+                content = path.read_text(encoding="utf-8")
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    meta = yaml.safe_load(parts[1]) or {}
+                    disk_revision = int((meta or {}).get("revision", 0) or 0)
+            except Exception:
+                disk_revision = 0
+        current_revision = int(getattr(task, "revision", 0) or 0)
+        task.revision = max(0, max(current_revision, disk_revision)) + 1
         path.write_text(task.to_file_content(), encoding="utf-8")
 
     def list(self, domain_path: str = "", skip_sync: bool = False) -> List[TaskDetail]:
@@ -138,9 +154,8 @@ class FileTaskRepository(TaskRepository):
             return False
         old_path = Path(detail.filepath)
         detail.domain = new_domain
+        self.save(detail)
         dest_path = self._resolve_path(task_id, new_domain)
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-        dest_path.write_text(detail.to_file_content(), encoding="utf-8")
         if old_path.exists() and old_path != dest_path:
             try:
                 old_path.unlink()

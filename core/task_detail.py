@@ -16,7 +16,8 @@ class TaskDetail:
     title: str
     status: str
     kind: Literal["plan", "task"] = "task"
-    schema_version: int = 7
+    schema_version: int = 8
+    revision: int = 0  # Monotonic storage revision (optimistic concurrency / etag-like)
     status_manual: bool = False  # True when status was explicitly set by user and should not be auto-recalculated
     description: str = ""
     domain: str = ""
@@ -109,6 +110,7 @@ class TaskDetail:
     def to_file_content(self) -> str:
         metadata = {
             "schema_version": int(getattr(self, "schema_version", 6) or 6),
+            "revision": int(getattr(self, "revision", 0) or 0),
             "id": self.id,
             "kind": getattr(self, "kind", "task"),
             "title": self.title,

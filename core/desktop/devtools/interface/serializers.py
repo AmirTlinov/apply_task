@@ -189,7 +189,12 @@ def task_node_to_dict(
 
 def plan_to_dict(plan: TaskDetail, *, compact: bool = False) -> Dict[str, Any]:
     if compact:
-        data: Dict[str, Any] = {"id": plan.id, "kind": getattr(plan, "kind", "plan"), "title": plan.title}
+        data: Dict[str, Any] = {
+            "id": plan.id,
+            "kind": getattr(plan, "kind", "plan"),
+            "title": plan.title,
+            "revision": int(getattr(plan, "revision", 0) or 0),
+        }
         if plan.domain:
             data["domain"] = plan.domain
         contract_text = getattr(plan, "contract", "") or ""
@@ -213,6 +218,7 @@ def plan_to_dict(plan: TaskDetail, *, compact: bool = False) -> Dict[str, Any]:
         "id": plan.id,
         "kind": getattr(plan, "kind", "plan"),
         "title": plan.title,
+        "revision": int(getattr(plan, "revision", 0) or 0),
         "domain": plan.domain,
         "created_at": getattr(plan, "created", "") or None,
         "updated_at": getattr(plan, "updated", "") or None,
@@ -260,6 +266,7 @@ def task_to_dict(
             "id": task.id,
             "kind": getattr(task, "kind", "task"),
             "title": task.title,
+            "revision": int(getattr(task, "revision", 0) or 0),
             "status": normalized_status,
             "status_code": normalized_status,
             "progress": task.calculate_progress(),
@@ -291,6 +298,7 @@ def task_to_dict(
         "id": task.id,
         "kind": getattr(task, "kind", "task"),
         "title": task.title,
+        "revision": int(getattr(task, "revision", 0) or 0),
         "status": normalized_status,
         "status_code": normalized_status,
         "progress": task.calculate_progress(),
