@@ -256,10 +256,16 @@ Confirm checkpoints (`criteria` and/or `tests`) for any checkpointable node.
 ```
 
 Target kinds:
-- `kind: "step"` (default) → step at `path` or `step_id`
+- `kind: "auto"` → if `task=PLAN-###` targets the root plan; otherwise defaults to `step`
+- `kind: "step"` (default for `TASK-###`) → step at `path` or `step_id`
 - `kind: "task"` → task node at `path` or `task_node_id`
-- `kind: "plan"` → nested plan owned by step at `path` or `step_id`
-- `kind: "task_detail"` → root task/plan (no path)
+- `kind: "plan"`:
+  - for `task=PLAN-###` → root plan checkpoints (no path)
+  - for `task=TASK-###` → nested plan owned by a step at `path` or `step_id`
+- `kind: "task_detail"` → root task/plan (no path, legacy-compatible)
+
+Strict confirmation-only rule:
+- Every provided `checkpoints.<name>` must include `confirmed:true`. Missing/false confirmations are rejected with `error.code="VERIFY_NOOP"` and do not mutate state.
 
 Optional evidence (step only):
 - `checks[]` / `attachments[]` / `verification_outcome`

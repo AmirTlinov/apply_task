@@ -2617,7 +2617,7 @@ def handle_verify(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "verify",
             "MISSING_TASK",
             "task обязателен",
-            recovery="Передай task=TASK-### (или task=PLAN-### с kind=task_detail) либо установи focus через focus_set и передай его явно.",
+            recovery="Передай task=TASK-### (или task=PLAN-### с kind=plan|auto) либо установи focus через focus_set и передай его явно.",
             suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
         )
     err = validate_task_id(task_id)
@@ -2651,12 +2651,22 @@ def handle_verify(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             result={"task": task_id},
         )
     kind = str(data.get("kind", "") or "").strip().lower()
+    detail_kind = str(getattr(task, "kind", "task") or "task")
+    is_plan_detail = detail_kind == "plan"
     if not kind:
-        kind = "step"
+        kind = "plan" if is_plan_detail else "step"
+    if kind == "auto":
+        kind = "plan" if is_plan_detail else "step"
     if kind not in {"step", "task", "plan", "task_detail"}:
-        return error_response("verify", "INVALID_KIND", "kind должен быть: step|task|plan|task_detail")
-    if kind != "task_detail" and getattr(task, "kind", "task") != "task":
-        return error_response("verify", "NOT_A_TASK", "verify path применим только к заданиям (TASK-###)")
+        return error_response("verify", "INVALID_KIND", "kind должен быть: step|task|plan|task_detail|auto")
+
+    # For root PLAN-###, kind=plan targets plan checkpoints (no path required).
+    # For nested plan nodes (within TASK-### step plans), kind=plan still requires a step path.
+    checkpoint_target_kind = kind
+    if kind == "plan" and is_plan_detail:
+        checkpoint_target_kind = "task_detail"
+    if kind in {"step", "task"} and detail_kind != "task":
+        return error_response("verify", "NOT_A_TASK", "verify kind=step|task применим только к заданиям (TASK-###)")
 
     path = None
     if kind == "step":
@@ -2681,7 +2691,7 @@ def handle_verify(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 recovery="Возьми корректный task path/task_node_id через mirror/radar.",
                 suggestions=_path_help_suggestions(task_id),
             )
-    elif kind == "plan":
+    elif kind == "plan" and not is_plan_detail:
         path, path_err = _resolve_step_path(manager, task, data)
         if path_err:
             code, message = path_err
@@ -2693,19 +2703,72 @@ def handle_verify(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 suggestions=_path_help_suggestions(task_id),
             )
 
-    for name in ("criteria", "tests"):
-        if name not in checkpoints:
-            continue
+    checks_raw = data.get("checks") or data.get("verification_checks")
+    attachments_raw = data.get("attachments")
+    verification_outcome = data.get("verification_outcome")
+    if (checks_raw is not None or attachments_raw is not None or verification_outcome is not None) and kind != "step":
+        return error_response("verify", "INVALID_TARGET", "checks/attachments доступны только для шагов")
+
+    # Strict: verify is confirmation-only.
+    # Every provided checkpoint entry must include confirmed=true, otherwise this is a NOOP/FAILED call and must not mutate state.
+    for name in sorted(keys):
         item = checkpoints.get(name) or {}
         if not isinstance(item, dict):
             return error_response("verify", "INVALID_CHECKPOINTS", f"checkpoints.{name} должен быть объектом")
-        confirmed = bool(item.get("confirmed", False))
+        if item.get("confirmed", None) is not True:
+            return error_response(
+                "verify",
+                "VERIFY_NOOP",
+                f"checkpoints.{name}.confirmed должен быть true",
+                recovery="verify не поддерживает сброс/\"холостую\" верификацию. Передай confirmed:true для подтверждения.",
+                result={"task": task_id, "checkpoint": name},
+            )
+
+    def _checkpoint_snapshot(target: Any) -> Dict[str, Any]:
+        return {
+            "criteria": {
+                "confirmed": bool(getattr(target, "criteria_confirmed", False)),
+                "auto_confirmed": bool(getattr(target, "criteria_auto_confirmed", False)),
+                "notes_count": len(list(getattr(target, "criteria_notes", []) or [])),
+            },
+            "tests": {
+                "confirmed": bool(getattr(target, "tests_confirmed", False)),
+                "auto_confirmed": bool(getattr(target, "tests_auto_confirmed", False)),
+                "notes_count": len(list(getattr(target, "tests_notes", []) or [])),
+            },
+        }
+
+    def _locate_target(detail: TaskDetail, *, kind_key: str, path_value: Optional[str]) -> Optional[Any]:
+        if kind_key == "task_detail":
+            return detail
+        if kind_key == "step":
+            if not path_value:
+                return None
+            st0, _, _ = _find_step_by_path(list(getattr(detail, "steps", []) or []), path_value)
+            return st0
+        if kind_key == "plan":
+            if not path_value:
+                return None
+            st0, _, _ = _find_step_by_path(list(getattr(detail, "steps", []) or []), path_value)
+            return getattr(st0, "plan", None) if st0 else None
+        if kind_key == "task":
+            if not path_value:
+                return None
+            node0, _, _ = _find_task_by_path(list(getattr(detail, "steps", []) or []), path_value)
+            return node0
+        return None
+
+    before_target = _locate_target(task, kind_key=checkpoint_target_kind, path_value=path)
+    checkpoints_before = _checkpoint_snapshot(before_target) if before_target is not None else None
+
+    for name in sorted(keys):
+        item = checkpoints.get(name) or {}
         note = str(item.get("note", "") or "").strip()
         ok, msg = manager.update_checkpoint(
             task_id,
-            kind=kind,
+            kind=checkpoint_target_kind,
             checkpoint=name,
-            value=confirmed,
+            value=True,
             note=note,
             domain=task.domain,
             path=path,
@@ -2719,22 +2782,12 @@ def handle_verify(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 "unknown_target": "INVALID_KIND",
             }
             return error_response("verify", mapping.get(msg or "", "FAILED"), msg or "Не удалось подтвердить")
-
-    checks_raw = data.get("checks") or data.get("verification_checks")
-    attachments_raw = data.get("attachments")
-    verification_outcome = data.get("verification_outcome")
-    any_confirmed = any(
-        bool((checkpoints.get(name) or {}).get("confirmed", False))
-        for name in ("criteria", "tests")
-        if name in checkpoints
-    )
+    any_confirmed = True
 
     updated = manager.load_task(task_id, task.domain, skip_sync=True)
     st = None
     if kind == "step" and path:
         st, _, _ = _find_step_by_path((updated or task).steps, path)
-    if (checks_raw is not None or attachments_raw is not None or verification_outcome is not None) and kind != "step":
-        return error_response("verify", "INVALID_TARGET", "checks/attachments доступны только для шагов")
     if st and kind == "step":
         def _extend_unique_checks(items: List[VerificationCheck]) -> int:
             existing = {str(getattr(x, "digest", "") or "").strip() for x in (st.verification_checks or []) if getattr(x, "digest", "")}
@@ -2796,6 +2849,24 @@ def handle_verify(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
         if needs_save and updated:
             manager.save_task(updated, skip_sync=True)
+            updated = manager.load_task(task_id, task.domain, skip_sync=True) or updated
+            if path:
+                st, _, _ = _find_step_by_path((updated or task).steps, path)
+
+    after_target = _locate_target(updated or task, kind_key=checkpoint_target_kind, path_value=path) if (updated or task) else None
+    checkpoints_after = _checkpoint_snapshot(after_target) if after_target is not None else None
+
+    ready: Optional[bool] = None
+    needs: Optional[List[str]] = None
+    if st and kind == "step":
+        ready = bool(st.ready_for_completion())
+        if not ready:
+            missing: List[str] = []
+            if list(getattr(st, "success_criteria", []) or []) and not bool(getattr(st, "criteria_confirmed", False)):
+                missing.append("criteria")
+            if list(getattr(st, "tests", []) or []) and not (bool(getattr(st, "tests_confirmed", False)) or bool(getattr(st, "tests_auto_confirmed", False))):
+                missing.append("tests")
+            needs = missing
     payload_key = "plan" if getattr(updated or task, "kind", "task") == "plan" else "task"
     return AIResponse(
         success=True,
@@ -2803,6 +2874,11 @@ def handle_verify(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         result={
             "task_id": task_id,
             "path": path,
+            "kind": kind,
+            "checkpoints_before": checkpoints_before,
+            "checkpoints_after": checkpoints_after,
+            "ready": ready,
+            "needs": needs,
             "step": step_to_dict(st, path=path, compact=False) if st else None,
             payload_key: plan_to_dict(updated or task, compact=False)
             if payload_key == "plan"

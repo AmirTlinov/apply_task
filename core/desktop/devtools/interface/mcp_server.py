@@ -315,21 +315,21 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
         },
     },
     "verify": {
-        "description": "Confirm checkpoints (criteria/tests) for a step/task/plan. For step/task/plan, provide path or node id; for task_detail (root plan/task), omit path.",
+        "description": "Confirm checkpoints (criteria/tests) for a checkpointable node. For TASK-### defaults to kind=step; for PLAN-### kind=plan targets the root plan (no need for kind=task_detail).",
         "schema": {
             "type": "object",
             "properties": {
                 "task": {"type": "string", "description": "Task id (TASK-### or PLAN-###)."},
                 "kind": {
                     "type": "string",
-                    "description": "Target kind: step|task|plan|task_detail. Defaults to step.",
+                    "description": "Target kind: step|task|plan|task_detail|auto. Defaults to step (TASK-###) or plan (PLAN-###).",
                 },
                 "path": {"type": "string", "description": _step_path_description()},
                 "step_id": {"type": "string", "description": "Stable step id (STEP-XXXX)."},
                 "task_node_id": {"type": "string", "description": "Stable task node id (NODE-XXXX)."},
                 "checkpoints": {
                     "type": "object",
-                    "description": "Allowed: checkpoints.criteria / checkpoints.tests",
+                    "description": "Allowed: checkpoints.criteria / checkpoints.tests. Strict: every provided checkpoints.<name> must include confirmed:true.",
                     "properties": {
                         "criteria": {"type": "object"},
                         "tests": {"type": "object"},
