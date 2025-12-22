@@ -175,6 +175,36 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
             "required": [],
         },
     },
+    "lint": {
+        "description": "Read-only preflight checks (discipline lint) for a plan/task.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task id (TASK-###). Uses focus if omitted."},
+                "plan": {"type": "string", "description": "Plan id (PLAN-###). Uses focus if omitted."},
+            },
+            "required": [],
+        },
+    },
+    "templates_list": {
+        "description": "List built-in templates for scaffold.",
+        "schema": {"type": "object", "properties": {}, "required": []},
+    },
+    "scaffold": {
+        "description": "Scaffold a plan/task from a template (safe default: dry_run=true).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "template": {"type": "string", "description": "Template id (from templates_list)."},
+                "kind": {"type": "string", "description": "Target kind: plan|task."},
+                "title": {"type": "string", "description": "Title for the new item."},
+                "parent": {"type": "string", "description": "Required for kind=task: parent plan id (PLAN-###). If omitted, may be inferred from focus."},
+                "priority": {"type": "string", "description": "LOW|MEDIUM|HIGH (default MEDIUM)."},
+                "dry_run": {"type": "boolean", "default": True, "description": "When true, returns a deterministic preview and writes nothing."},
+            },
+            "required": ["template", "kind", "title"],
+        },
+    },
     "create": {
         "description": "Create a Plan (PLAN-###) or Task (TASK-### under a Plan).",
         "schema": {

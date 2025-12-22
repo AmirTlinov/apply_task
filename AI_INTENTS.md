@@ -138,6 +138,50 @@ Load a specific `plan`/`task` (or `.last` fallback) with optional timeline.
 
 Returns either `result.plan` or `result.task`. For tasks also returns `result.checkpoint_status`.
 
+### lint
+
+Read-only discipline lint (preflight checks) for a plan/task.
+
+```json
+{"intent":"lint","task":"TASK-001"}
+```
+
+```json
+{"intent":"lint","plan":"PLAN-001"}
+```
+
+Result highlights:
+- `result.summary`: counts of errors/warnings
+- `result.issues[]`: structured issues with `code`, `severity`, `message`, and `target` (task/step/plan/deps)
+- `result.links`: small “expand” payloads (radar/resume/mirror)
+
+### templates_list
+
+List built-in templates available for `scaffold`.
+
+```json
+{"intent":"templates_list"}
+```
+
+### scaffold
+
+Create a plan/task from a template (safe default: `dry_run=true`).
+
+Dry run (preview only):
+```json
+{"intent":"scaffold","template":"bugfix","kind":"task","title":"Fix login redirect","parent":"PLAN-001"}
+```
+
+Write (create files):
+```json
+{"intent":"scaffold","template":"bugfix","kind":"task","title":"Fix login redirect","parent":"PLAN-001","dry_run":false}
+```
+
+Notes:
+- For `kind:"task"`, `parent` is required unless it can be inferred from focus (`focus_set` to a `PLAN-###` or a `TASK-###` with a parent).
+- Successful writes return `meta.operation_id` (for `delta` chaining).
+- On missing/invalid inputs, errors include `error.recovery` plus actionable `suggestions` (e.g. `templates_list`, `context(include_all=true)`, `focus_set`).
+
 ### create
 
 Create a plan or a task.
