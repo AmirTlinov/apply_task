@@ -140,7 +140,10 @@ def error_response(
     )
 
 
-def _missing_target_suggestions(manager: TaskManager, *, want: str) -> List[Suggestion]:
+def _missing_target_suggestions(manager: TaskManager, *, want: str | List[str]) -> List[Suggestion]:
+    wants = [want] if isinstance(want, str) else list(want or [])
+    if not wants:
+        wants = ["TASK-"]
     suggestions: List[Suggestion] = [
         Suggestion(
             action="context",
@@ -158,7 +161,7 @@ def _missing_target_suggestions(manager: TaskManager, *, want: str) -> List[Sugg
     ]
     details = manager.list_all_tasks(skip_sync=True)
     # Provide a couple of concrete candidates as set_focus suggestions.
-    candidates = [d for d in details if str(getattr(d, "id", "") or "").startswith(want)]
+    candidates = [d for d in details if any(str(getattr(d, "id", "") or "").startswith(prefix) for prefix in wants)]
     for cand in candidates[:3]:
         suggestions.append(
             Suggestion(
@@ -172,6 +175,28 @@ def _missing_target_suggestions(manager: TaskManager, *, want: str) -> List[Sugg
     return suggestions
 
 
+def _path_help_suggestions(task_id: str) -> List[Suggestion]:
+    tid = str(task_id or "").strip()
+    if not tid:
+        return []
+    return [
+        Suggestion(
+            action="radar",
+            target="tasks_radar",
+            reason="Покажи Now/Why/Verify и текущий активный шаг (чтобы взять корректный path/step_id).",
+            priority="high",
+            params={"task": tid},
+        ),
+        Suggestion(
+            action="mirror",
+            target="tasks_mirror",
+            reason="Покажи дерево и canonical path/step_id для точной адресации.",
+            priority="normal",
+            params={"task": tid, "limit": 10},
+        ),
+    ]
+
+
 def _preview_text(value: str, *, max_len: int = 280) -> str:
     text = str(value or "").strip()
     if not text:
@@ -179,6 +204,40 @@ def _preview_text(value: str, *, max_len: int = 280) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 1] + "…"
+
+
+def _dedupe_strs(items: List[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in items:
+        val = str(raw or "").strip()
+        if not val or val in seen:
+            continue
+        seen.add(val)
+        out.append(val)
+    return out
+
+
+def _contract_summary(value: Any) -> Dict[str, Any]:
+    """Compact contract summary for Radar View (1 screen → 1 truth)."""
+    if not isinstance(value, dict):
+        return {}
+    data = dict(value)
+    out: Dict[str, Any] = {}
+
+    goal = data.get("goal")
+    if isinstance(goal, str) and goal.strip():
+        out["goal"] = _preview_text(goal, max_len=180)
+
+    for key, limit in (("checks", 5), ("done", 5), ("constraints", 3), ("risks", 3)):
+        raw = data.get(key)
+        if not isinstance(raw, list):
+            continue
+        items = _dedupe_strs([str(x or "").strip() for x in raw])
+        if items:
+            out[key] = items[:limit]
+
+    return out
 
 
 def validate_task_id(value: Any) -> Optional[str]:
@@ -1098,11 +1157,17 @@ def handle_focus_set(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "MISSING_TASK",
             "task обязателен",
             recovery="Передай task=TASK-###|PLAN-### или сначала создай объект через create.",
-            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
         )
     err = validate_task_id(raw)
     if err:
-        return error_response("focus_set", "INVALID_TASK", err)
+        return error_response(
+            "focus_set",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
     focus_id = normalize_task_id(str(raw))
 
     # Best-effort validation: focus must point to an existing object.
@@ -1144,11 +1209,17 @@ def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "MISSING_ID",
             "Не указан task/plan и нет focus",
             recovery="Передай task=TASK-###|plan=PLAN-### или установи focus через focus_set.",
-            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
         )
     err = validate_task_id(focus)
     if err:
-        return error_response("radar", "INVALID_ID", err)
+        return error_response(
+            "radar",
+            "INVALID_ID",
+            err,
+            recovery="Проверь id через context(include_all=true) или установи focus через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
     focus_id = str(focus)
     detail = manager.load_task(focus_id, skip_sync=True)
     if not detail:
@@ -1175,19 +1246,34 @@ def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     next_suggestions = list(generate_suggestions(manager, focus_id))[:limit]
 
-    result: Dict[str, Any] = {"focus": focus_payload, "next": [s.to_dict() for s in next_suggestions]}
+    focus_key = "plan" if getattr(detail, "kind", "task") == "plan" else "task"
+    result: Dict[str, Any] = {
+        "focus": focus_payload,
+        "next": [s.to_dict() for s in next_suggestions],
+        "links": {
+            "resume": {"intent": "resume", focus_key: focus_id},
+            "mirror": {"intent": "mirror", focus_key: focus_id, "limit": 10},
+            "context": {"intent": "context", "include_all": True, "compact": True},
+            "focus_get": {"intent": "focus_get"},
+            "history": {"intent": "history", "limit": 20},
+        },
+    }
 
     if getattr(detail, "kind", "task") == "plan":
+        contract_summary = _contract_summary(getattr(detail, "contract_data", {}) or {})
         steps = list(getattr(detail, "plan_steps", []) or [])
         current = int(getattr(detail, "plan_current", 0) or 0)
         current = max(0, min(current, len(steps)))
         title = steps[current] if current < len(steps) else ""
         status = "completed" if steps and current >= len(steps) else ("in_progress" if steps else "pending")
         result["now"] = {"kind": "plan_step", "index": current, "title": title, "total": len(steps), "status": status}
-        result["why"] = {
+        why_payload: Dict[str, Any] = {
             "plan_id": focus_id,
             "contract_preview": _preview_text(str(getattr(detail, "contract", "") or "")),
         }
+        if contract_summary:
+            why_payload["contract"] = contract_summary
+        result["why"] = why_payload
         result["verify"] = {
             "checks": list(getattr(detail, "tests", []) or []),
             "criteria_confirmed": bool(getattr(detail, "criteria_confirmed", False)),
@@ -1200,6 +1286,10 @@ def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         if list(getattr(detail, "tests", []) or []) and not (bool(getattr(detail, "tests_confirmed", False)) or tests_auto):
             open_checkpoints.append("tests")
         result["open_checkpoints"] = open_checkpoints
+        result["how_to_verify"] = {
+            "commands": _dedupe_strs(list(contract_summary.get("checks", []) or []) + list(getattr(detail, "tests", []) or [])),
+            "open_checkpoints": open_checkpoints,
+        }
         result["blockers"] = {"blocked": bool(getattr(detail, "blocked", False)), "blockers": list(getattr(detail, "blockers", []) or [])}
         return AIResponse(
             success=True,
@@ -1217,10 +1307,15 @@ def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     plan_id = str(getattr(task, "parent", "") or "").strip()
     plan = manager.load_task(plan_id, skip_sync=True) if plan_id else None
-    result["why"] = {
+    plan_contract_summary = _contract_summary(getattr(plan, "contract_data", {}) or {}) if plan else {}
+    why_payload = {
         "plan_id": plan_id or None,
         "contract_preview": _preview_text(str(getattr(plan, "contract", "") or "")) if plan else "",
     }
+    if plan_contract_summary:
+        why_payload["contract"] = plan_contract_summary
+    result["why"] = why_payload
+    result["how_to_verify"] = {"commands": list(plan_contract_summary.get("checks", []) or [])}
 
     if now and now.get("path"):
         path = str(now.get("path") or "")
@@ -1238,6 +1333,12 @@ def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 "step_id": str(getattr(st, "id", "") or ""),
                 "tests": list(getattr(st, "tests", []) or []),
                 "missing": missing,
+            }
+            result["how_to_verify"] = {
+                "path": path,
+                "step_id": str(getattr(st, "id", "") or ""),
+                "commands": _dedupe_strs(list(plan_contract_summary.get("checks", []) or []) + list(getattr(st, "tests", []) or [])),
+                "missing_checkpoints": [m.get("checkpoint") for m in missing if m.get("checkpoint")],
             }
 
     deps = [str(d or "").strip() for d in list(getattr(task, "depends_on", []) or []) if str(d or "").strip()]
@@ -1274,11 +1375,17 @@ def handle_resume(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "MISSING_ID",
             "Не указан task/plan и нет focus",
             recovery="Передай task=TASK-###|plan=PLAN-### или установи focus через focus_set.",
-            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
         )
     err = validate_task_id(focus)
     if err:
-        return error_response("resume", "INVALID_ID", err)
+        return error_response(
+            "resume",
+            "INVALID_ID",
+            err,
+            recovery="Проверь id через context(include_all=true) или установи focus через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
     focus_id = str(focus)
     detail = manager.load_task(focus_id, skip_sync=True)
     if not detail:
@@ -1439,10 +1546,22 @@ def handle_create(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_decompose(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("decompose", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "decompose",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-### (явная адресация) или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
-        return error_response("decompose", "INVALID_TASK", err)
+        return error_response(
+            "decompose",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     task_id = str(task_id)
     steps_payload = data.get("steps")
     if steps_payload is None:
@@ -1458,21 +1577,46 @@ def handle_decompose(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("decompose", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "decompose",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            result={"task": task_id},
+        )
     if getattr(task, "kind", "task") != "task":
         return error_response("decompose", "NOT_A_TASK", "decompose применим только к заданиям (TASK-###)")
 
     if parent_task_node_id is not None:
         err = validate_node_id(parent_task_node_id, "parent_task_node_id")
         if err:
-            return error_response("decompose", "INVALID_PARENT_TASK_NODE_ID", err)
+            return error_response(
+                "decompose",
+                "INVALID_PARENT_TASK_NODE_ID",
+                err,
+                recovery="Чтобы найти parent_task_node_id, используй mirror(kind=step|task) или radar.",
+                suggestions=_path_help_suggestions(task_id),
+            )
         parent_path = manager.find_task_node_path_by_id(task, str(parent_task_node_id))
         if not parent_path:
-            return error_response("decompose", "PARENT_TASK_NODE_ID_NOT_FOUND", f"Задание parent_task_node_id={parent_task_node_id} не найдено")
+            return error_response(
+                "decompose",
+                "PARENT_TASK_NODE_ID_NOT_FOUND",
+                f"Задание parent_task_node_id={parent_task_node_id} не найдено",
+                recovery="Возьми корректный task_node_id через mirror (он показывает task_node_id и path).",
+                suggestions=_path_help_suggestions(task_id),
+            )
     elif parent_path is not None:
         path_err = validate_task_path(parent_path)
         if path_err:
-            return error_response("decompose", "INVALID_PARENT_PATH", path_err)
+            return error_response(
+                "decompose",
+                "INVALID_PARENT_PATH",
+                path_err,
+                recovery="Возьми корректный parent path через mirror/radar.",
+                suggestions=_path_help_suggestions(task_id),
+            )
         parent_path = str(parent_path)
 
     created = 0
@@ -1481,7 +1625,14 @@ def handle_decompose(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         ok, msg = manager.add_step(task_id, step.title, task.domain, step.success_criteria, step.tests, step.blockers, parent_path=parent_path)
         if not ok:
             if msg == "path":
-                return error_response("decompose", "PATH_NOT_FOUND", "Неверный parent path", result={"parent": parent_path})
+                return error_response(
+                    "decompose",
+                    "PATH_NOT_FOUND",
+                    "Неверный parent path",
+                    recovery="Возьми корректный parent path через mirror/radar.",
+                    suggestions=_path_help_suggestions(task_id),
+                    result={"parent": parent_path},
+                )
             return error_response("decompose", "FAILED", msg or "Не удалось добавить шаг")
         created += 1
 
@@ -1501,16 +1652,34 @@ def handle_decompose(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_task_add(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("task_add", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "task_add",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-### или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
-        return error_response("task_add", "INVALID_TASK", err)
+        return error_response(
+            "task_add",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     task_id = str(task_id)
 
     parent_step = data.get("parent_step") or data.get("step") or data.get("step_path")
     parent_step_id = data.get("parent_step_id") or data.get("step_id")
     if parent_step is None and parent_step_id is None:
-        return error_response("task_add", "MISSING_PARENT_STEP", "parent_step обязателен")
+        return error_response(
+            "task_add",
+            "MISSING_PARENT_STEP",
+            "parent_step обязателен",
+            recovery="Передай parent_step=s:<n> или parent_step_id=STEP-... (чтобы найти — вызови mirror/radar).",
+            suggestions=_path_help_suggestions(task_id),
+        )
 
     title = str(data.get("title", "") or "").strip()
     if not title:
@@ -1518,21 +1687,46 @@ def handle_task_add(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("task_add", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "task_add",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            result={"task": task_id},
+        )
     if getattr(task, "kind", "task") != "task":
         return error_response("task_add", "NOT_A_TASK", "task_add применим только к заданиям (TASK-###)")
 
     if parent_step_id is not None:
         err = validate_node_id(parent_step_id, "parent_step_id")
         if err:
-            return error_response("task_add", "INVALID_PARENT_STEP_ID", err)
+            return error_response(
+                "task_add",
+                "INVALID_PARENT_STEP_ID",
+                err,
+                recovery="Возьми корректный step_id через radar/mirror.",
+                suggestions=_path_help_suggestions(task_id),
+            )
         parent_step = manager.find_step_path_by_id(task, str(parent_step_id))
         if not parent_step:
-            return error_response("task_add", "PARENT_STEP_ID_NOT_FOUND", f"Шаг parent_step_id={parent_step_id} не найден")
+            return error_response(
+                "task_add",
+                "PARENT_STEP_ID_NOT_FOUND",
+                f"Шаг parent_step_id={parent_step_id} не найден",
+                recovery="Возьми корректный step_id через radar/mirror.",
+                suggestions=_path_help_suggestions(task_id),
+            )
     else:
         path_err = validate_step_path(parent_step)
         if path_err:
-            return error_response("task_add", "INVALID_PARENT_STEP", path_err)
+            return error_response(
+                "task_add",
+                "INVALID_PARENT_STEP",
+                path_err,
+                recovery="Возьми корректный parent_step через radar/mirror.",
+                suggestions=_path_help_suggestions(task_id),
+            )
         parent_step = str(parent_step)
 
     try:
@@ -1593,10 +1787,22 @@ def handle_task_add(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_task_define(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("task_define", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "task_define",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-### или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
-        return error_response("task_define", "INVALID_TASK", err)
+        return error_response(
+            "task_define",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     task_id = str(task_id)
 
     allowed_fields = {"title", "status", "priority", "description", "context", "success_criteria", "tests", "dependencies", "next_steps", "problems", "risks", "blocked", "blockers", "status_manual"}
@@ -1605,14 +1811,27 @@ def handle_task_define(manager: TaskManager, data: Dict[str, Any]) -> AIResponse
 
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("task_define", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "task_define",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            result={"task": task_id},
+        )
     if getattr(task, "kind", "task") != "task":
         return error_response("task_define", "NOT_A_TASK", "task_define применим только к заданиям (TASK-###)")
 
     path, path_err = _resolve_task_path(manager, task, data)
     if path_err:
         code, message = path_err
-        return error_response("task_define", code, message)
+        return error_response(
+            "task_define",
+            code,
+            message,
+            recovery="Возьми корректный task path/task_node_id через mirror/radar.",
+            suggestions=_path_help_suggestions(task_id),
+        )
 
     try:
         sc_list = _normalize_str_list(data.get("success_criteria")) if data.get("success_criteria") is not None else None
@@ -1671,22 +1890,47 @@ def handle_task_define(manager: TaskManager, data: Dict[str, Any]) -> AIResponse
 def handle_task_delete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("task_delete", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "task_delete",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-### или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
-        return error_response("task_delete", "INVALID_TASK", err)
+        return error_response(
+            "task_delete",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     task_id = str(task_id)
 
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("task_delete", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "task_delete",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            result={"task": task_id},
+        )
     if getattr(task, "kind", "task") != "task":
         return error_response("task_delete", "NOT_A_TASK", "task_delete применим только к заданиям (TASK-###)")
 
     path, path_err = _resolve_task_path(manager, task, data)
     if path_err:
         code, message = path_err
-        return error_response("task_delete", code, message)
+        return error_response(
+            "task_delete",
+            code,
+            message,
+            recovery="Возьми корректный task path/task_node_id через mirror/radar.",
+            suggestions=_path_help_suggestions(task_id),
+        )
 
     ok, code, deleted = manager.delete_task_node(task_id, path=path, domain=task.domain)
     if not ok:
@@ -1715,10 +1959,22 @@ def handle_task_delete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse
 def handle_define(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("define", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "define",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-### или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
-        return error_response("define", "INVALID_TASK", err)
+        return error_response(
+            "define",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     task_id = str(task_id)
 
     title = data.get("title")
@@ -1731,14 +1987,27 @@ def handle_define(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("define", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "define",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            result={"task": task_id},
+        )
     if getattr(task, "kind", "task") != "task":
         return error_response("define", "NOT_A_TASK", "define применим только к заданиям (TASK-###)")
 
     path, path_err = _resolve_step_path(manager, task, data)
     if path_err:
         code, message = path_err
-        return error_response("define", code, message)
+        return error_response(
+            "define",
+            code,
+            message,
+            recovery="Возьми корректный path/step_id через radar/mirror.",
+            suggestions=_path_help_suggestions(task_id),
+        )
 
     try:
         sc_list = _normalize_str_list(success_criteria) if success_criteria is not None else None
@@ -1783,10 +2052,22 @@ def handle_define(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_verify(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("verify", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "verify",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-### (или task=PLAN-### с kind=task_detail) либо установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
     err = validate_task_id(task_id)
     if err:
-        return error_response("verify", "INVALID_TASK", err)
+        return error_response(
+            "verify",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
     task_id = str(task_id)
 
     checkpoints = data.get("checkpoints") or {}
@@ -1800,7 +2081,14 @@ def handle_verify(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("verify", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "verify",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-" if task_id.startswith("PLAN-") else "TASK-"),
+            result={"task": task_id},
+        )
     kind = str(data.get("kind", "") or "").strip().lower()
     if not kind:
         kind = "step"
@@ -1814,17 +2102,35 @@ def handle_verify(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         path, path_err = _resolve_step_path(manager, task, data)
         if path_err:
             code, message = path_err
-            return error_response("verify", code, message)
+            return error_response(
+                "verify",
+                code,
+                message,
+                recovery="Возьми корректный path/step_id через radar/mirror.",
+                suggestions=_path_help_suggestions(task_id),
+            )
     elif kind == "task":
         path, path_err = _resolve_task_path(manager, task, data)
         if path_err:
             code, message = path_err
-            return error_response("verify", code, message)
+            return error_response(
+                "verify",
+                code,
+                message,
+                recovery="Возьми корректный task path/task_node_id через mirror/radar.",
+                suggestions=_path_help_suggestions(task_id),
+            )
     elif kind == "plan":
         path, path_err = _resolve_step_path(manager, task, data)
         if path_err:
             code, message = path_err
-            return error_response("verify", code, message)
+            return error_response(
+                "verify",
+                code,
+                message,
+                recovery="Возьми корректный path/step_id через radar/mirror.",
+                suggestions=_path_help_suggestions(task_id),
+            )
 
     for name in ("criteria", "tests"):
         if name not in checkpoints:
@@ -1948,10 +2254,22 @@ def handle_verify(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_progress(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("progress", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "progress",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-### или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
-        return error_response("progress", "INVALID_TASK", err)
+        return error_response(
+            "progress",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     task_id = str(task_id)
 
     completed = bool(data.get("completed", False))
@@ -1962,14 +2280,27 @@ def handle_progress(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("progress", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "progress",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            result={"task": task_id},
+        )
     if getattr(task, "kind", "task") != "task":
         return error_response("progress", "NOT_A_TASK", "progress применим только к заданиям (TASK-###)")
 
     path, path_err = _resolve_step_path(manager, task, data)
     if path_err:
         code, message = path_err
-        return error_response("progress", code, message)
+        return error_response(
+            "progress",
+            code,
+            message,
+            recovery="Возьми корректный path/step_id через radar/mirror.",
+            suggestions=_path_help_suggestions(task_id),
+        )
 
     ok, msg = manager.set_step_completed(task_id, 0, completed, task.domain, path=path, force=force)
     if not ok:
@@ -2011,7 +2342,13 @@ def handle_done(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         )
     err = validate_task_id(task_id)
     if err:
-        return error_response("done", "INVALID_TASK", err)
+        return error_response(
+            "done",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     task_id = str(task_id)
 
     force = bool(data.get("force", False))
@@ -2036,7 +2373,13 @@ def handle_done(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     path, path_err = _resolve_step_path(manager, task, data)
     if path_err:
         code, message = path_err
-        return error_response("done", code, message)
+        return error_response(
+            "done",
+            code,
+            message,
+            recovery="Возьми корректный path/step_id через radar/mirror.",
+            suggestions=_path_help_suggestions(task_id),
+        )
 
     if note:
         manager.add_step_progress_note(task_id, path=path, note=note, domain=task.domain)
@@ -2074,11 +2417,17 @@ def handle_edit(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "MISSING_TASK",
             "task обязателен",
             recovery="Передай task=TASK-###|PLAN-### или установи focus через focus_set и передай его явно.",
-            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
         )
     err = validate_task_id(task_id)
     if err:
-        return error_response("edit", "INVALID_TASK", err)
+        return error_response(
+            "edit",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
     task_id = str(task_id)
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
@@ -2171,10 +2520,22 @@ def handle_edit(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_note(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("note", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "note",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-### или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
-        return error_response("note", "INVALID_TASK", err)
+        return error_response(
+            "note",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     task_id = str(task_id)
 
     note = str(data.get("note", "") or "").strip()
@@ -2183,14 +2544,27 @@ def handle_note(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("note", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "note",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            result={"task": task_id},
+        )
     if getattr(task, "kind", "task") != "task":
         return error_response("note", "NOT_A_TASK", "note применим только к заданиям (TASK-###)")
 
     path, path_err = _resolve_step_path(manager, task, data)
     if path_err:
         code, message = path_err
-        return error_response("note", code, message)
+        return error_response(
+            "note",
+            code,
+            message,
+            recovery="Возьми корректный path/step_id через radar/mirror.",
+            suggestions=_path_help_suggestions(task_id),
+        )
 
     ok, code, step = manager.add_step_progress_note(task_id, path=path, note=note, domain=task.domain)
     if not ok:
@@ -2213,24 +2587,49 @@ def handle_note(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 def handle_block(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
-        return error_response("block", "MISSING_TASK", "task обязателен")
+        return error_response(
+            "block",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-### или установи focus через focus_set и передай его явно.",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     err = validate_task_id(task_id)
     if err:
-        return error_response("block", "INVALID_TASK", err)
+        return error_response(
+            "block",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
     task_id = str(task_id)
 
     blocked = bool(data.get("blocked", True))
     reason = str(data.get("reason", "") or "").strip()
     task = manager.load_task(task_id, skip_sync=True)
     if not task:
-        return error_response("block", "NOT_FOUND", f"Не найдено: {task_id}")
+        return error_response(
+            "block",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            result={"task": task_id},
+        )
     if getattr(task, "kind", "task") != "task":
         return error_response("block", "NOT_A_TASK", "block применим только к заданиям (TASK-###)")
 
     path, path_err = _resolve_step_path(manager, task, data)
     if path_err:
         code, message = path_err
-        return error_response("block", code, message)
+        return error_response(
+            "block",
+            code,
+            message,
+            recovery="Возьми корректный path/step_id через radar/mirror.",
+            suggestions=_path_help_suggestions(task_id),
+        )
 
     ok, code, step = manager.set_step_blocked(task_id, path=path, blocked=blocked, reason=reason, domain=task.domain)
     if not ok:
@@ -2366,11 +2765,17 @@ def handle_mirror(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "MISSING_ID",
             "Не указан task/plan и нет focus",
             recovery="Передай task=TASK-###|plan=PLAN-### или установи focus через focus_set.",
-            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
         )
     err = validate_task_id(focus)
     if err:
-        return error_response("mirror", "INVALID_ID", err)
+        return error_response(
+            "mirror",
+            "INVALID_ID",
+            err,
+            recovery="Проверь id через context(include_all=true) или установи focus через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
     focus_id = str(focus)
     detail = manager.load_task(focus_id, skip_sync=True)
     if not detail:
@@ -2418,10 +2823,22 @@ def handle_mirror(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             target_path, err_pair = _resolve_task_path(manager, detail, data, path_field="path")
             if err_pair:
                 code, msg = err_pair
-                return error_response("mirror", code, msg)
+                return error_response(
+                    "mirror",
+                    code,
+                    msg,
+                    recovery="Вызови mirror без path/kind чтобы увидеть корневое дерево, или radar чтобы взять активный path.",
+                    suggestions=_path_help_suggestions(focus_id),
+                )
             task_node, _, _ = _find_task_by_path(list(getattr(detail, "steps", []) or []), target_path)
             if not task_node:
-                return error_response("mirror", "TASK_NODE_NOT_FOUND", f"Задание не найдено: {target_path}")
+                return error_response(
+                    "mirror",
+                    "TASK_NODE_NOT_FOUND",
+                    f"Задание не найдено: {target_path}",
+                    recovery="Возьми корректный task_node_id/path через mirror без path или через radar.",
+                    suggestions=_path_help_suggestions(focus_id),
+                )
             scope.update({"path": target_path, "kind": "task"})
             items = _mirror_items_from_steps(list(getattr(task_node, "steps", []) or []), prefix=target_path)
         elif step_id is not None or path is not None or kind == "step":
@@ -2429,10 +2846,22 @@ def handle_mirror(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             target_path, err_pair = _resolve_step_path(manager, detail, data, path_field="path")
             if err_pair:
                 code, msg = err_pair
-                return error_response("mirror", code, msg)
+                return error_response(
+                    "mirror",
+                    code,
+                    msg,
+                    recovery="Вызови mirror без path/kind чтобы увидеть корневое дерево, или radar чтобы взять активный path.",
+                    suggestions=_path_help_suggestions(focus_id),
+                )
             step, _, _ = _find_step_by_path(list(getattr(detail, "steps", []) or []), target_path)
             if not step:
-                return error_response("mirror", "STEP_NOT_FOUND", f"Шаг не найден: {target_path}")
+                return error_response(
+                    "mirror",
+                    "STEP_NOT_FOUND",
+                    f"Шаг не найден: {target_path}",
+                    recovery="Возьми корректный step_id/path через mirror без path или через radar.",
+                    suggestions=_path_help_suggestions(focus_id),
+                )
             plan = getattr(step, "plan", None)
             tasks = list(getattr(plan, "tasks", []) or []) if plan else []
             scope.update({"path": target_path, "kind": "step"})
@@ -2467,11 +2896,17 @@ def handle_complete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "MISSING_TASK",
             "task обязателен",
             recovery="Передай task=TASK-###|PLAN-### или установи focus через focus_set и передай его явно.",
-            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
         )
     err = validate_task_id(task_id)
     if err:
-        return error_response("complete", "INVALID_TASK", err)
+        return error_response(
+            "complete",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
     task_id = str(task_id)
 
     status = str(data.get("status", "DONE") or "DONE").strip().upper()
@@ -2513,11 +2948,17 @@ def handle_delete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "MISSING_TASK",
             "task обязателен",
             recovery="Передай task=TASK-###|PLAN-### или установи focus через focus_set и передай его явно.",
-            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
         )
     err = validate_task_id(task_id)
     if err:
-        return error_response("delete", "INVALID_TASK", err)
+        return error_response(
+            "delete",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
     task_id = str(task_id)
     path = data.get("path")
     if path is None and data.get("step_id") is None:
@@ -2538,7 +2979,13 @@ def handle_delete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     path, path_err = _resolve_step_path(manager, task, data)
     if path_err:
         code, message = path_err
-        return error_response("delete", code, message)
+        return error_response(
+            "delete",
+            code,
+            message,
+            recovery="Возьми корректный path/step_id через radar/mirror.",
+            suggestions=_path_help_suggestions(task_id),
+        )
     ok, code, deleted_step = manager.delete_step_node(task_id, path=path, domain=task.domain)
     if not ok:
         mapping = {"not_found": "NOT_FOUND", "path": "PATH_NOT_FOUND"}
@@ -2578,6 +3025,12 @@ def handle_batch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             return error_response("batch", "INVALID_TASK", err)
         default_task = str(default_task)
 
+    try:
+        history_before = OperationHistory(storage_dir=Path(manager.tasks_dir))
+        initial_latest_id = history_before.operations[-1].id if history_before.operations else None
+    except Exception:
+        initial_latest_id = None
+
     # Optional sugar: allow one operation to target multiple step paths via `paths: [...]`.
     # This keeps the batch payload small and deterministic while preserving the canonical single-path intents.
     expanded_ops: List[Dict[str, Any]] = []
@@ -2610,7 +3063,7 @@ def handle_batch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     # If everything was filtered out (e.g., only empty paths), return a stable no-op response.
     if not expanded_ops:
-        return AIResponse(success=True, intent="batch", result={"total": 0, "completed": 0, "results": []})
+        return AIResponse(success=True, intent="batch", result={"total": 0, "completed": 0, "results": [], "latest_id": initial_latest_id})
 
     ops = expanded_ops
     total = len(ops)
@@ -2634,16 +3087,32 @@ def handle_batch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             if not resp.success:
                 if atomic and backup_dir:
                     _restore_dir(backup_dir, Path(manager.tasks_dir))
+                    latest_id = initial_latest_id
+                else:
+                    try:
+                        history_now = OperationHistory(storage_dir=Path(manager.tasks_dir))
+                        latest_id = history_now.operations[-1].id if history_now.operations else None
+                    except Exception:
+                        latest_id = None
                 return AIResponse(
                     success=False,
                     intent="batch",
-                    result={"total": total, "completed": completed, "results": results},
+                    result={"total": total, "completed": completed, "results": results, "latest_id": latest_id},
                     error_code=resp.error_code or "BATCH_FAILED",
                     error_message=resp.error_message or "Batch failed",
                 )
             results.append(resp.to_dict())
             completed += 1
-        return AIResponse(success=True, intent="batch", result={"total": total, "completed": completed, "results": results})
+        try:
+            history_after = OperationHistory(storage_dir=Path(manager.tasks_dir))
+            latest_id = history_after.operations[-1].id if history_after.operations else None
+        except Exception:
+            latest_id = None
+        return AIResponse(
+            success=True,
+            intent="batch",
+            result={"total": total, "completed": completed, "results": results, "latest_id": latest_id},
+        )
     finally:
         if atomic and backup_dir:
             try:
@@ -2671,6 +3140,12 @@ def handle_delta(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     """Return operations since a given operation id (delta updates for agents)."""
     history = OperationHistory(storage_dir=Path(manager.tasks_dir))
     since = str(data.get("since") or data.get("since_operation_id") or data.get("since_id") or "").strip()
+    task_filter = data.get("task") or data.get("task_id") or data.get("filter_task")
+    if task_filter is not None:
+        err = validate_task_id(task_filter)
+        if err:
+            return error_response("delta", "INVALID_TASK", err)
+        task_filter = str(task_filter)
     limit_raw = data.get("limit", 50)
     try:
         limit = int(limit_raw or 50)
@@ -2694,6 +3169,8 @@ def handle_delta(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         start_idx = int(found) + 1
 
     sliced = ops[start_idx:]
+    if task_filter:
+        sliced = [op for op in sliced if str(getattr(op, "task_id", "") or "") == task_filter]
     if not include_undone:
         sliced = [op for op in sliced if not bool(getattr(op, "undone", False))]
     sliced = sliced[:limit] if limit else []
@@ -2704,6 +3181,7 @@ def handle_delta(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         intent="delta",
         result={
             "since": since or None,
+            "task": task_filter or None,
             "latest_id": latest_id,
             "operations": [op.to_dict() for op in sliced],
             "can_undo": history.can_undo(),
@@ -2893,7 +3371,11 @@ def process_intent(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     if intent in _MUTATING_INTENTS and resp.success and not bool(data.get("dry_run", False)):
         try:
-            history.record(intent=intent, task_id=str(task_id) if task_id else None, data=dict(data), task_file=task_file, result=resp.to_dict())
+            op = history.record(intent=intent, task_id=str(task_id) if task_id else None, data=dict(data), task_file=task_file, result=resp.to_dict())
+            # Make delta-chaining trivial for agents: every mutating response carries the op id.
+            if op and getattr(op, "id", None):
+                resp.meta = dict(resp.meta or {})
+                resp.meta.setdefault("operation_id", str(op.id))
         except Exception:
             # Never fail the operation because history failed.
             pass

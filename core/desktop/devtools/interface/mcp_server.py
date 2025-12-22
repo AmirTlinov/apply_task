@@ -467,6 +467,7 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
             "type": "object",
             "properties": {
                 "since": {"type": "string", "description": "Return ops strictly after this operation id."},
+                "task": {"type": "string", "description": "Optional filter: only operations for this task/plan id."},
                 "limit": {"type": "integer", "default": 50, "description": "Max operations returned (0..500)."},
                 "include_undone": {"type": "boolean", "default": True, "description": "Include operations marked as undone."},
             },

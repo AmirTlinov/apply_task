@@ -95,6 +95,10 @@ Compact “Radar View” snapshot for the current work:
 {"intent":"radar","task":"TASK-001","limit":3}
 ```
 
+Notes:
+- `result.why.contract` may include a compact summary from structured `contract_data` (goal/done/checks/constraints/risks).
+- `result.links` contains small “expand” payloads (resume/mirror/context/history).
+
 ### context
 
 Get global context snapshot.
@@ -335,6 +339,10 @@ Execute multiple intents in order (optionally `atomic=true`).
 }
 ```
 
+Batch result also includes:
+- `result.latest_id`: latest operation id after the batch (for `delta` chaining)
+- Nested results may include `meta.operation_id` (when the nested intent is mutating)
+
 ### undo / redo
 
 Undo/redo last reversible operation (when available).
@@ -357,8 +365,12 @@ Return recent operation history (undo/redo metadata).
 Return operation log entries strictly after a given operation id (agent-friendly delta updates).
 
 ```json
-{"intent":"delta","since":"<operation_id>","limit":50}
+{"intent":"delta","since":"<operation_id>","task":"TASK-001","limit":50}
 ```
+
+Notes:
+- Use `meta.operation_id` from any mutating response as the `since` cursor.
+- `since` is exclusive (returns ops strictly after it).
 
 ### storage
 

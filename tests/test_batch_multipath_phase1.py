@@ -83,6 +83,7 @@ class TestPathsExpansion:
         # Should expand to 2 operations
         assert resp.result["total"] == 2
         assert resp.result["completed"] == 2
+        assert resp.result.get("latest_id")
 
         # Verify both subtasks were updated
         reloaded = manager.load_task(task.id)
