@@ -227,6 +227,20 @@ def _dedupe_strs(items: List[str]) -> List[str]:
     return out
 
 
+def _counts_by_kind(items: List[Any]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for item in items:
+        kind = str(getattr(item, "kind", "") or "").strip() or "unknown"
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
+def _latest_observed_at(items: List[Any]) -> str:
+    observed = [str(getattr(item, "observed_at", "") or "").strip() for item in items]
+    observed = [v for v in observed if v]
+    return max(observed) if observed else ""
+
+
 def _contract_summary(value: Any) -> Dict[str, Any]:
     """Compact contract summary for Radar View (1 screen → 1 truth)."""
     if not isinstance(value, dict):
@@ -1338,11 +1352,26 @@ def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 missing.append({"checkpoint": "tests", "path": path})
             if bool(getattr(st, "blocked", False)):
                 missing.append({"checkpoint": "unblocked", "path": path})
+            checks = list(getattr(st, "verification_checks", []) or [])
+            attachments = list(getattr(st, "attachments", []) or [])
             result["verify"] = {
                 "path": path,
                 "step_id": str(getattr(st, "id", "") or ""),
                 "tests": list(getattr(st, "tests", []) or []),
                 "missing": missing,
+                "evidence": {
+                    "verification_outcome": str(getattr(st, "verification_outcome", "") or ""),
+                    "checks": {
+                        "count": len(checks),
+                        "kinds": _counts_by_kind(checks),
+                        "last_observed_at": _latest_observed_at(checks),
+                    },
+                    "attachments": {
+                        "count": len(attachments),
+                        "kinds": _counts_by_kind(attachments),
+                        "last_observed_at": _latest_observed_at(attachments),
+                    },
+                },
             }
             result["how_to_verify"] = {
                 "path": path,

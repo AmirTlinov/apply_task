@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from core import Step, TaskDetail
+from core import Attachment, Step, TaskDetail, VerificationCheck
 from core.desktop.devtools.application.task_manager import TaskManager
 from core.desktop.devtools.interface.intent_api import handle_radar
 
@@ -42,6 +42,11 @@ def test_handle_radar_task_includes_now_verify_and_deps(manager: TaskManager):
 
     step1 = Step.new("Step 1", criteria=["c1"], tests=["t1"])
     assert step1 is not None
+    step1.verification_outcome = "pass"
+    step1.verification_checks = [
+        VerificationCheck(kind="ci", spec="pytest -q -k radar", outcome="pass", observed_at="2025-12-22T00:00:00+00:00")
+    ]
+    step1.attachments = [Attachment(kind="cmd_output", uri="stdout", size=1, observed_at="2025-12-22T00:00:01+00:00")]
     step2 = Step.new("Step 2", criteria=["c2"], tests=[])
     assert step2 is not None
     task = TaskDetail(
@@ -61,6 +66,13 @@ def test_handle_radar_task_includes_now_verify_and_deps(manager: TaskManager):
     assert result["now"]["kind"] == "step"
     assert "verify" in result
     assert "open_checkpoints" in result
+    evidence = result["verify"]["evidence"]
+    assert evidence["verification_outcome"] == "pass"
+    assert evidence["checks"]["count"] == 1
+    assert evidence["checks"]["kinds"]["ci"] == 1
+    assert evidence["checks"]["last_observed_at"] == "2025-12-22T00:00:00+00:00"
+    assert evidence["attachments"]["count"] == 1
+    assert evidence["attachments"]["kinds"]["cmd_output"] == 1
+    assert evidence["attachments"]["last_observed_at"] == "2025-12-22T00:00:01+00:00"
     assert result["blockers"]["depends_on"] == ["TASK-002"]
     assert result["blockers"]["unresolved_depends_on"] == ["TASK-002"]
-
