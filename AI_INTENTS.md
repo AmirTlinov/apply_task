@@ -87,6 +87,8 @@ Rules:
 - When `strict_targeting=true` and the operation is focus-based (no explicit `task`/`plan`), `expected_target_id` is required (otherwise fails with `error.code = "STRICT_TARGETING_REQUIRES_EXPECTED_TARGET_ID"`).
 - Mutating responses include `context.target_resolution` (`explicit|focus|focus_task_parent|missing|focus_incompatible`) so you can trace how the target was chosen.
 - Aliases: `expected_target` → `expected_target_id`, `strict_writes` → `strict_targeting`.
+- Auto strict: if there are multiple ACTIVE targets and a focus-based write omits strict flags, `strict_targeting` is enabled automatically and `context.strict_writes_auto=true` with `context.strict_writes_active_count`.
+- Explicit addressing (`task`/`plan`) bypasses auto strict because the target is unambiguous.
 
 ## Intents
 

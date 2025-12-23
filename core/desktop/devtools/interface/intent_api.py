@@ -576,6 +576,20 @@ def _apply_focus_to_mutation(manager: TaskManager, *, intent: str, data: Dict[st
     return payload, {"target_resolution": {"source": "focus", "focus": focus_id, "task": focus_id, "domain": focus_domain}}, None
 
 
+def _auto_strict_writes_required(manager: TaskManager) -> Tuple[bool, int]:
+    """Auto-enable strict targeting when multiple ACTIVE targets exist."""
+    try:
+        details = manager.list_all_tasks(skip_sync=True)
+    except Exception:
+        return False, 0
+    active_count = 0
+    for detail in details:
+        status = str(getattr(detail, "status", "") or "").strip().upper()
+        if status == "ACTIVE":
+            active_count += 1
+    return active_count > 1, active_count
+
+
 def validate_node_id(value: Any, field_name: str = "id") -> Optional[str]:
     err = validate_task_id(value)
     if not err:
@@ -5695,6 +5709,26 @@ def process_intent(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         if "strict_writes" in payload:
             payload["strict_targeting"] = bool(payload.get("strict_targeting", False)) or bool(payload.get("strict_writes", False))
 
+        target_resolution = (ctx_add or {}).get("target_resolution") if isinstance(ctx_add, dict) else {}
+        source = str((target_resolution or {}).get("source") or "").strip()
+        resolved_target_id = payload.get("plan") if payload.get("plan") is not None else payload.get("task")
+        resolved_target_id = str(resolved_target_id or "").strip() or None
+        resolved_kind: Optional[str] = None
+        if resolved_target_id:
+            if resolved_target_id.startswith("PLAN-"):
+                resolved_kind = "plan"
+            elif resolved_target_id.startswith("TASK-"):
+                resolved_kind = "task"
+
+        if source and source != "explicit" and "strict_targeting" not in payload and "strict_writes" not in payload:
+            auto_required, active_count = _auto_strict_writes_required(manager)
+            if auto_required:
+                payload["strict_targeting"] = True
+                ctx_add = dict(ctx_add or {})
+                ctx_add.setdefault("strict_writes_auto", True)
+                ctx_add.setdefault("strict_writes_reason", "multiple_active_targets")
+                ctx_add.setdefault("strict_writes_active_count", int(active_count))
+
         expected_target_id = payload.get("expected_target_id", None)
         if expected_target_id is not None:
             err = validate_node_id(expected_target_id, "expected_target_id")
@@ -5709,17 +5743,6 @@ def process_intent(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             if expected_kind not in {"task", "plan"}:
                 return error_response(intent, "INVALID_EXPECTED_KIND", "expected_kind должен быть task|plan")
         strict_targeting = bool(payload.get("strict_targeting", False))
-
-        target_resolution = (ctx_add or {}).get("target_resolution") if isinstance(ctx_add, dict) else {}
-        source = str((target_resolution or {}).get("source") or "").strip()
-        resolved_target_id = payload.get("plan") if payload.get("plan") is not None else payload.get("task")
-        resolved_target_id = str(resolved_target_id or "").strip() or None
-        resolved_kind: Optional[str] = None
-        if resolved_target_id:
-            if resolved_target_id.startswith("PLAN-"):
-                resolved_kind = "plan"
-            elif resolved_target_id.startswith("TASK-"):
-                resolved_kind = "task"
 
         if strict_targeting and source and source != "explicit" and not expected_target_id:
             err_resp = error_response(

@@ -69,6 +69,46 @@ def test_strict_writes_alias_requires_expected_target(manager: TaskManager):
     assert resp.error_code == "STRICT_TARGETING_REQUIRES_EXPECTED_TARGET_ID"
 
 
+def test_auto_strict_writes_requires_expected_target_when_multiple_active(manager: TaskManager):
+    plan = TaskDetail(id="PLAN-001", title="Plan", status="TODO", kind="plan")
+    manager.save_task(plan, skip_sync=True)
+
+    step1 = Step.new("Step 1", criteria=["c"], tests=["t"])
+    assert step1 is not None
+    task1 = TaskDetail(id="TASK-001", title="Task 1", status="ACTIVE", parent="PLAN-001", steps=[step1])
+    manager.save_task(task1, skip_sync=True)
+
+    step2 = Step.new("Step 2", criteria=["c"], tests=["t"])
+    assert step2 is not None
+    task2 = TaskDetail(id="TASK-002", title="Task 2", status="ACTIVE", parent="PLAN-001", steps=[step2])
+    manager.save_task(task2, skip_sync=True)
+
+    save_last_task("TASK-001")
+    resp = process_intent(manager, {"intent": "note", "path": "s:0", "note": "x"})
+    assert resp.success is False
+    assert resp.error_code == "STRICT_TARGETING_REQUIRES_EXPECTED_TARGET_ID"
+    assert resp.context.get("strict_writes_auto") is True
+    assert resp.context.get("strict_writes_active_count") == 2
+
+
+def test_auto_strict_writes_allows_explicit_target(manager: TaskManager):
+    plan = TaskDetail(id="PLAN-001", title="Plan", status="TODO", kind="plan")
+    manager.save_task(plan, skip_sync=True)
+
+    step1 = Step.new("Step 1", criteria=["c"], tests=["t"])
+    assert step1 is not None
+    task1 = TaskDetail(id="TASK-001", title="Task 1", status="ACTIVE", parent="PLAN-001", steps=[step1])
+    manager.save_task(task1, skip_sync=True)
+
+    step2 = Step.new("Step 2", criteria=["c"], tests=["t"])
+    assert step2 is not None
+    task2 = TaskDetail(id="TASK-002", title="Task 2", status="ACTIVE", parent="PLAN-001", steps=[step2])
+    manager.save_task(task2, skip_sync=True)
+
+    resp = process_intent(manager, {"intent": "note", "task": "TASK-001", "path": "s:0", "note": "x"})
+    assert resp.success is True
+
+
 def test_expected_target_alias_mismatch_fails_fast(manager: TaskManager):
     plan = TaskDetail(id="PLAN-001", title="Plan", status="TODO", kind="plan")
     manager.save_task(plan, skip_sync=True)
