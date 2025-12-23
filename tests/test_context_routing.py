@@ -63,7 +63,9 @@ class ContextRoutingTests(unittest.TestCase):
         manager.save_task(task)
 
         loaded = manager.load_task(task.id, "phase1/api")
-        self.assertEqual(loaded.status, "DONE")
+        # Status is explicit: completion requires close_task/complete. Saving a 100%-complete task
+        # must not auto-flip it to DONE.
+        self.assertEqual(loaded.status, "ACTIVE")
 
         moved = manager.move_glob("phase1/**/*.task", "phase2/api")
         self.assertEqual(moved, 1)

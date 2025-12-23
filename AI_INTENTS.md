@@ -511,6 +511,16 @@ Patch a task node inside a step plan:
 {"intent":"patch","task":"TASK-001","kind":"task","path":"s:0.t:1","ops":[{"op":"set","field":"status","value":"DONE"}]}
 ```
 
+Dry-run preview (no writes; does not pollute ops history/delta):
+```json
+{"intent":"patch","task":"TASK-001","dry_run":true,"ops":[{"op":"append","field":"success_criteria","value":"<done>"}]}
+```
+
+Dry-run response is explicit-by-shape:
+- `result.current` — current snapshot
+- `result.computed` — post-preview snapshot (in-memory)
+- `result.diff` — minimal status/progress/blocked diff (when changed)
+
 ### contract
 
 Set/clear a plan contract.
@@ -586,6 +596,7 @@ Notes:
 - Returns `runway` + `diff` so you can see exactly what would change.
 - If the runway is closed and `force=false`, `apply=true` fails with `RUNWAY_CLOSED` and includes the same `runway` + `diff` in the error payload.
 - `patches[]` use the same shape as `patch` requests but omit the root `task` id (it’s implied by `close_task.task`).
+- Status is explicit: a 100% complete task is not auto-flipped to `DONE` on save/patch; use `close_task(apply=true)` or `complete(status=\"DONE\")`.
 
 ### delete
 

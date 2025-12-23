@@ -105,22 +105,44 @@ class TaskDetail:
         return (base / self.domain / f"{self.id}.task").resolve() if self.domain else base / f"{self.id}.task"
 
     def update_status_from_progress(self) -> None:
-        if self.status_manual:
-            return
+        """Recalculate progress and (optionally) derive status.
+
+        State machine invariant (tasks):
+        - Status becomes DONE only via explicit intents (close_task/complete).
+        - Automatic recalculation may move TODO↔ACTIVE based on progress/blocked,
+          but never auto-flips to DONE.
+        """
         prog = self.calculate_progress()
         self.progress = prog
+
+        # DONE is explicit: never auto-reopen or auto-close.
+        if str(self.status or "").upper() == "DONE":
+            return
+        if self.status_manual:
+            return
+
         if self.blocked:
             self.status = "TODO"
-        elif prog == 100:
-            # Guard against auto-DONE when root success_criteria are missing (lint invariants).
-            if str(getattr(self, "kind", "task") or "task") == "task" and not list(self.success_criteria or []):
+            return
+
+        kind = str(getattr(self, "kind", "task") or "task")
+        if kind == "plan":
+            if prog == 100:
+                self.status = "DONE"
+            elif prog > 0:
                 self.status = "ACTIVE"
             else:
-                self.status = "DONE"
-        elif prog > 0:
-            self.status = "ACTIVE"
-        else:
-            self.status = "TODO"
+                self.status = "TODO"
+            return
+
+        # kind == "task"
+        #
+        # Status is primarily explicit. We only "wake up" TODO tasks when progress appears,
+        # but we never auto-demote ACTIVE→TODO purely because progress is 0 (that would be
+        # surprising and breaks focus/safety heuristics).
+        current = str(self.status or "").upper()
+        if current in {"", "TODO"}:
+            self.status = "ACTIVE" if prog > 0 else "TODO"
 
     def to_file_content(self) -> str:
         metadata = {

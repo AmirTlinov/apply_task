@@ -487,6 +487,19 @@ def _latest_observed_at(items: List[Any]) -> str:
     return max(observed) if observed else ""
 
 
+def _preview_state_diff(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a minimal, trust-oriented state diff for previews.
+
+    Previews must never "lie by omission": if computed status/progress differs from current,
+    surface it explicitly so clients don't have to infer it from full snapshots.
+    """
+    diff: Dict[str, Any] = {}
+    for field in ("status", "progress", "blocked"):
+        if before.get(field) != after.get(field):
+            diff[field] = {"from": before.get(field), "to": after.get(field)}
+    return diff
+
+
 def _task_evidence_summary(task: Any) -> Dict[str, Any]:
     flat = _flatten_steps(list(getattr(task, "steps", []) or []))
     all_checks: List[Any] = []
@@ -2601,12 +2614,19 @@ def handle_resume(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             events_sorted = events
         limit = int(data.get("events_limit", 20) or 20)
         result["timeline"] = [e.to_dict() for e in events_sorted[: max(0, limit)]]
+
+    # Keep suggestions consistent with radar: runway-gated, single best next action.
+    focus_domain = str(getattr(detail, "domain", "") or "")
+    try:
+        _radar, next_suggestions = _build_radar_payload(manager, detail, focus_id, focus_domain, limit=3, max_chars=12_000)
+    except Exception:
+        next_suggestions = generate_suggestions(manager, focus_id)
     return AIResponse(
         success=True,
         intent="resume",
         result=result,
         context={"task_id": focus_id},
-        suggestions=generate_suggestions(manager, focus_id),
+        suggestions=list(next_suggestions or []),
     )
 
 
@@ -5340,11 +5360,21 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     if kind == "task_detail":
         if dry_run:
             key = "plan" if getattr(detail, "kind", "task") == "plan" else "task"
-            snapshot = plan_to_dict(detail, compact=False) if key == "plan" else task_to_dict(detail, include_steps=True, compact=False)
+            current = plan_to_dict(base, compact=False) if key == "plan" else task_to_dict(base, include_steps=True, compact=False)
+            computed = plan_to_dict(detail, compact=False) if key == "plan" else task_to_dict(detail, include_steps=True, compact=False)
             return AIResponse(
                 success=True,
                 intent="patch",
-                result={"dry_run": True, "would_execute": True, "updated_fields": sorted(set(updated_fields)), key: snapshot},
+                result={
+                    "dry_run": True,
+                    "would_execute": True,
+                    "task_id": task_id,
+                    "kind": "task_detail",
+                    "updated_fields": sorted(set(updated_fields)),
+                    "diff": _preview_state_diff(current, computed),
+                    "current": {key: current},
+                    "computed": {key: computed},
+                },
                 context={"task_id": task_id},
             )
 
@@ -5369,6 +5399,9 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             return error_response("patch", "PATH_NOT_FOUND", "path не найден после применения patch")
         step, _, _ = _find_step_by_path(list(getattr(detail, "steps", []) or []), path)
         if dry_run:
+            current_task = task_to_dict(base, include_steps=True, compact=False)
+            computed_task = task_to_dict(detail, include_steps=True, compact=False)
+            current_step, _, _ = _find_step_by_path(list(getattr(base, "steps", []) or []), path)
             return AIResponse(
                 success=True,
                 intent="patch",
@@ -5379,8 +5412,15 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                     "kind": "step",
                     "path": path,
                     "updated_fields": sorted(set(updated_fields)),
-                    "step": step_to_dict(step, path=path, compact=False) if step else None,
-                    "task": task_to_dict(detail, include_steps=True, compact=False),
+                    "diff": _preview_state_diff(current_task, computed_task),
+                    "current": {
+                        "task": current_task,
+                        "step": step_to_dict(current_step, path=path, compact=False) if current_step else None,
+                    },
+                    "computed": {
+                        "task": computed_task,
+                        "step": step_to_dict(step, path=path, compact=False) if step else None,
+                    },
                 },
                 context={"task_id": task_id},
             )
@@ -5407,6 +5447,9 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         return error_response("patch", "PATH_NOT_FOUND", "path не найден после применения patch")
     node, _, _ = _find_task_by_path(list(getattr(detail, "steps", []) or []), path)
     if dry_run:
+        current_task = task_to_dict(base, include_steps=True, compact=False)
+        computed_task = task_to_dict(detail, include_steps=True, compact=False)
+        current_node, _, _ = _find_task_by_path(list(getattr(base, "steps", []) or []), path)
         return AIResponse(
             success=True,
             intent="patch",
@@ -5417,8 +5460,15 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 "kind": "task",
                 "path": path,
                 "updated_fields": sorted(set(updated_fields)),
-                "task_node": task_node_to_dict(node, path=path, compact=False) if node else None,
-                "task": task_to_dict(detail, include_steps=True, compact=False),
+                "diff": _preview_state_diff(current_task, computed_task),
+                "current": {
+                    "task": current_task,
+                    "task_node": task_node_to_dict(current_node, path=path, compact=False) if current_node else None,
+                },
+                "computed": {
+                    "task": computed_task,
+                    "task_node": task_node_to_dict(node, path=path, compact=False) if node else None,
+                },
             },
             context={"task_id": task_id},
         )

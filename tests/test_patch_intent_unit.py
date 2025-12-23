@@ -110,3 +110,30 @@ def test_patch_task_node_sets_status(tmp_path):
     patched = after.steps[0].plan.tasks[0]
     assert patched.status == "DONE"
     assert patched.status_manual is True
+
+
+def test_patch_does_not_auto_close_task_when_criteria_added(tmp_path):
+    tasks_dir = tmp_path / ".tasks"
+    tasks_dir.mkdir()
+    manager = TaskManager(tasks_dir=tasks_dir)
+
+    step = Step(False, "Step", success_criteria=["c"], tests=["t"])
+    step.completed = True
+    step.criteria_confirmed = True
+    step.tests_confirmed = True
+    task = TaskDetail(id="TASK-001", title="Example", status="ACTIVE", steps=[step], success_criteria=[])
+    manager.save_task(task, skip_sync=True)
+
+    resp = process_intent(
+        manager,
+        {
+            "intent": "patch",
+            "task": "TASK-001",
+            "ops": [{"op": "append", "field": "success_criteria", "value": "done"}],
+        },
+    )
+    assert resp.success is True
+
+    after = manager.load_task("TASK-001", skip_sync=True)
+    assert after is not None
+    assert str(after.status).upper() != "DONE"

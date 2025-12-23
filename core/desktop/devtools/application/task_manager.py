@@ -229,12 +229,6 @@ def _normalized_fields(values: Optional[List[str]]) -> List[str]:
     return [v.strip() for v in (values or []) if v and v.strip()]
 
 
-def _auto_done_allowed(task: TaskDetail) -> bool:
-    if str(getattr(task, "kind", "task") or "task") != "task":
-        return True
-    return bool(list(getattr(task, "success_criteria", []) or []))
-
-
 def _build_step(title: str, criteria, tests, blockers) -> Optional[Step]:
     return Step.new(
         title,
@@ -607,13 +601,10 @@ class TaskManager:
         if task.steps:
             ensure_tree_ids(task.steps)
         task.updated = current_timestamp()
-        prog = task.calculate_progress()
-        task.progress = prog
-        if not getattr(task, "status_manual", False) and prog == 100 and not task.blocked:
-            if _auto_done_allowed(task):
-                task.status = "DONE"
-            elif task.status == "DONE":
-                task.status = "ACTIVE"
+        try:
+            task.update_status_from_progress()
+        except Exception:
+            task.progress = task.calculate_progress()
         task.domain = self.sanitize_domain(task.domain)
         self.repo.save(task)
         if not skip_sync:
