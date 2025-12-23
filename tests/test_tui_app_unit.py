@@ -108,6 +108,16 @@ class TestTaskTrackerTUIInstanceMethods:
             result = tui._current_description_snippet()
             assert result == ""
 
+    def test_command_palette_handoff_invokes_export(self, tui):
+        called = {"count": 0}
+
+        def fake_export():
+            called["count"] += 1
+
+        tui.export_handoff = fake_export
+        tui._run_command_palette("handoff")
+        assert called["count"] == 1
+
     def test_current_description_snippet_normalizes_whitespace(self, tui):
         """Test _current_description_snippet normalizes whitespace."""
         detail = TaskDetail(

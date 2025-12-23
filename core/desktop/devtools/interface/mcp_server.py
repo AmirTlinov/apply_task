@@ -491,6 +491,45 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
             "required": ["checkpoints"],
         },
     },
+    "close_task": {
+        "description": "Golden task closure: dry_run→diff→apply→complete (atomic).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task id (TASK-###)."},
+                "apply": {"type": "boolean", "default": False, "description": "When true, applies patches and completes (DONE) atomically."},
+                "force": {"type": "boolean", "default": False},
+                "override_reason": {"type": "string", "description": "Required when force=true."},
+                "patches": {
+                    "type": "array",
+                    "description": "Optional patch requests executed before completion (each is a tasks_patch-like payload without task id).",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"type": "string", "description": "task_detail|step|task (default inferred)."},
+                            "path": {"type": "string", "description": "Target path: step ('s:0...s:n') or task node ('s:0.t:1')."},
+                            "step_id": {"type": "string", "description": "Stable step id (STEP-...)."},
+                            "task_node_id": {"type": "string", "description": "Stable task node id (NODE-...)."},
+                            "ops": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "op": {"type": "string", "description": "set|unset|append|remove"},
+                                        "field": {"type": "string"},
+                                        "value": {},
+                                    },
+                                    "required": ["op", "field"],
+                                },
+                            },
+                        },
+                        "required": ["ops"],
+                    },
+                },
+            },
+            "required": ["task"],
+        },
+    },
     "progress": {
         "description": "Mark a step path completed/uncompleted (respects checkpoints unless force=true).",
         "schema": {

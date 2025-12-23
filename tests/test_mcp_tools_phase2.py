@@ -53,6 +53,10 @@ class TestStrictSchemas:
         schema = _tool("tasks_batch")["inputSchema"]
         assert set(schema["required"]) == {"operations"}
 
+    def test_close_task_requires_task(self):
+        schema = _tool("tasks_close_task")["inputSchema"]
+        assert set(schema["required"]) == {"task"}
+
 
 class TestFocusAndRadarTools:
     def test_focus_get_has_empty_required(self):

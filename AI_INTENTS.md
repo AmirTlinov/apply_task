@@ -131,11 +131,16 @@ Compact “Radar View” snapshot for the current work (1 screen → 1 truth):
 ```
 
 Notes:
-- Radar always returns stable keys: `now`, `why`, `verify`, `next`, `blockers`, `open_checkpoints` (plus `focus`, `links`, `budget`).
+- Radar always returns stable keys: `now`, `why`, `verify`, `next`, `blockers`, `open_checkpoints`, `runway` (plus `focus`, `links`, `budget`).
 - `max_chars` is a hard output budget (UTF-8 bytes). Result includes `result.budget` with `used_chars` and `truncated`.
 - `result.why.contract` may include a compact summary from structured `contract_data` (goal/done/checks/constraints/risks).
 - `result.links` contains small “expand” payloads (resume/mirror/context/history/handoff).
 - For tasks, `result.verify.evidence` includes a compact “black box” summary for the active step (counts + kinds + last observed timestamps).
+- `result.runway` is the “runway status” for safe closure:
+  - `open: bool` — whether closing is allowed right now
+  - `blocking.lint` — top lint errors (severity=error) + summary counters
+  - `blocking.validation` — structural gating (e.g., task not complete / step not ready / plan checklist not finished)
+  - `recipe` — one executable, schema-correct fix payload (usually `patch`, sometimes `batch`/`close_step` or `plan(advance=true)`).
 
 ### handoff
 
@@ -160,6 +165,7 @@ Cold-start pack: Radar View + delta slice under a hard budget (one call = orient
 
 Notes:
 - Returns the stable radar keys (`now/why/verify/next/blockers/open_checkpoints`) plus `delta`.
+- Includes `runway` (same contract as `radar`) — enough to continue work without re-reading full context.
 - `delta` is metadata-only by default; use `include_details` or `include_snapshot` explicitly.
 - `since` mirrors `delta` semantics; invalid `since` returns `SINCE_NOT_FOUND`.
 - `budget` is enforced for the whole pack.
@@ -518,6 +524,31 @@ Set plan/task status (`TODO|ACTIVE|DONE`). For plans: requires checklist complet
 
 Notes:
 - Lint errors (`tasks_lint` severity=error) block `status=DONE` unless `force=true`.
+
+### close_task
+
+Golden task closure: `dry_run → diff → apply → complete` (atomic).
+
+Dry-run preview (safe-by-default):
+```json
+{"intent":"close_task","task":"TASK-001"}
+```
+
+Preview with patches (simulate in-memory; no writes):
+```json
+{"intent":"close_task","task":"TASK-001","patches":[{"kind":"task_detail","ops":[{"op":"append","field":"success_criteria","value":"<definition of done>"}]}]}
+```
+
+Apply atomically (patches → complete DONE):
+```json
+{"intent":"close_task","task":"TASK-001","apply":true,"patches":[{"kind":"task_detail","ops":[{"op":"append","field":"success_criteria","value":"<definition of done>"}]}]}
+```
+
+Notes:
+- When `apply=false` (default), `close_task` is always a dry-run (no history side-effects).
+- Returns `runway` + `diff` so you can see exactly what would change.
+- If the runway is closed and `force=false`, `apply=true` fails with `RUNWAY_CLOSED` and includes the same `runway` + `diff` in the error payload.
+- `patches[]` use the same shape as `patch` requests but omit the root `task` id (it’s implied by `close_task.task`).
 
 ### delete
 

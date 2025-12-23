@@ -42,7 +42,12 @@ from core.desktop.devtools.application.scaffolding import (
     get_template,
     list_templates,
 )
-from core.desktop.devtools.application.task_manager import TaskManager, _find_step_by_path, _find_task_by_path
+from core.desktop.devtools.application.task_manager import (
+    TaskManager,
+    _find_step_by_path,
+    _find_task_by_path,
+    _validate_root_step_ready_for_ok,
+)
 from core.desktop.devtools.application.linting import lint_item
 from core.desktop.devtools.interface.artifacts_store import write_artifact
 from core.desktop.devtools.interface.evidence_collectors import collect_auto_verification_checks
@@ -172,7 +177,8 @@ def _missing_target_suggestions(manager: TaskManager, *, want: str | List[str]) 
             priority="normal",
         ),
     ]
-    details = manager.list_all_tasks(skip_sync=True)
+    # Read-only: avoid TaskManager.list_all_tasks (may auto-clean DONE tasks depending on user config).
+    details = manager.repo.list("", skip_sync=True)
     # Provide a couple of concrete candidates as set_focus suggestions.
     candidates = [d for d in details if any(str(getattr(d, "id", "") or "").startswith(prefix) for prefix in wants)]
     for cand in candidates[:3]:
@@ -217,6 +223,144 @@ def _preview_text(value: str, *, max_len: int = 280) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 1] + "…"
+
+
+def _suggestion_to_intent_payload(suggestion: Optional["Suggestion"]) -> Optional[Dict[str, Any]]:
+    if not suggestion:
+        return None
+    intent = str(getattr(suggestion, "action", "") or "").strip().lower()
+    if not intent:
+        return None
+    allow_paramless = {"focus_get", "undo", "redo", "history", "storage"}
+    payload: Dict[str, Any] = {"intent": intent}
+    params = getattr(suggestion, "params", None)
+    if isinstance(params, dict) and params:
+        payload.update(dict(params))
+    elif intent not in allow_paramless:
+        return None
+    return payload
+
+
+def _lint_issue_fix_recipe(focus_id: str, *, detail: Any, issue: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    code = str(issue.get("code", "") or "").strip()
+    target = issue.get("target")
+    if not isinstance(target, dict):
+        target = {}
+    path = str(target.get("path") or "").strip()
+
+    if code == "TASK_SUCCESS_CRITERIA_MISSING":
+        return {
+            "intent": "patch",
+            "task": focus_id,
+            "kind": "task_detail",
+            "ops": [{"op": "append", "field": "success_criteria", "value": "<definition of done>"}],
+        }
+    if code == "STEP_SUCCESS_CRITERIA_MISSING" and path:
+        return {
+            "intent": "patch",
+            "task": focus_id,
+            "kind": "step",
+            "path": path,
+            "ops": [{"op": "append", "field": "success_criteria", "value": "<define measurable outcome>"}],
+        }
+    if code == "STEP_TESTS_MISSING" and path:
+        return {
+            "intent": "patch",
+            "task": focus_id,
+            "kind": "step",
+            "path": path,
+            "ops": [{"op": "append", "field": "tests", "value": "<how to verify (cmd/test)>"}],
+        }
+    if code == "TASK_NODE_TITLE_MISSING" and path:
+        return {
+            "intent": "patch",
+            "task": focus_id,
+            "kind": "task",
+            "path": path,
+            "ops": [{"op": "set", "field": "title", "value": "<task title>"}],
+        }
+    if code == "PLAN_CURRENT_OUT_OF_RANGE":
+        steps = list(getattr(detail, "plan_steps", []) or [])
+        current = int(getattr(detail, "plan_current", 0) or 0)
+        safe_current = max(0, min(current, len(steps)))
+        return {
+            "intent": "patch",
+            "task": focus_id,
+            "kind": "task_detail",
+            "ops": [{"op": "set", "field": "plan_current", "value": str(safe_current)}],
+        }
+    if code in {"INVALID_DEPENDENCY_ID", "INVALID_DEPENDENCIES", "CIRCULAR_DEPENDENCY", "DEPENDS_ON_INVALID"}:
+        return {"intent": "context", "include_all": True, "compact": True}
+    return None
+
+
+def _build_runway_payload(
+    manager: TaskManager,
+    *,
+    detail: Any,
+    focus_id: str,
+    next_suggestions: List["Suggestion"],
+) -> Dict[str, Any]:
+    """Runway status for the focus item: can we safely close it (DONE) right now?"""
+    kind = str(getattr(detail, "kind", "task") or "task")
+
+    all_items: List[Any] = []
+    if kind == "task" and list(getattr(detail, "depends_on", []) or []):
+        all_items = manager.repo.list("", skip_sync=True)
+    report = lint_item(manager, detail, all_items)
+    report_dict = report.to_dict()
+    issues = list(report_dict.get("issues", []) or [])
+    blocking_lint = [i for i in issues if str(i.get("severity", "") or "").strip().lower() == "error"]
+
+    validation_block: Optional[Dict[str, Any]] = None
+    if kind == "task":
+        try:
+            ok, err = _validate_root_step_ready_for_ok(detail, manager._t)
+        except Exception:
+            ok, err = True, None
+        if not ok and isinstance(err, dict):
+            validation_block = {
+                "code": str(err.get("code", "validation") or "validation"),
+                "message": str(err.get("message", "") or ""),
+            }
+    elif kind == "plan":
+        steps = list(getattr(detail, "plan_steps", []) or [])
+        current = int(getattr(detail, "plan_current", 0) or 0)
+        status = str(getattr(detail, "status", "") or "").strip().upper()
+        if steps and current < len(steps) and status != "DONE":
+            validation_block = {
+                "code": "PLAN_NOT_COMPLETE",
+                "message": "План не завершён: закрой все пункты plan_steps (plan_current) или используй force.",
+            }
+
+    open_runway = not blocking_lint and not validation_block
+
+    recipe: Optional[Dict[str, Any]] = None
+    if not open_runway:
+        # Prefer a deterministic patch recipe for the first relevant lint issue.
+        for issue in blocking_lint:
+            recipe = _lint_issue_fix_recipe(focus_id, detail=detail, issue=issue)
+            if recipe:
+                break
+        # If lint does not provide a safe patch, fall back to the current best "next action" suggestion.
+        if not recipe and validation_block and kind == "task":
+            recipe = _suggestion_to_intent_payload((list(next_suggestions)[:1] or [None])[0])
+        # Plan-only fallback: advance checklist (explicit user action).
+        if not recipe and validation_block and kind == "plan":
+            recipe = {"intent": "plan", "plan": focus_id, "advance": True}
+
+    return {
+        "open": bool(open_runway),
+        "blocking": {
+            "lint": {
+                "summary": dict((report_dict.get("summary") or {})),
+                "errors_count": len(blocking_lint),
+                "top_errors": blocking_lint[:3],
+            },
+            "validation": validation_block,
+        },
+        "recipe": recipe,
+    }
 
 
 def _dedupe_strs(items: List[str]) -> List[str]:
@@ -589,6 +733,7 @@ _FOCUSABLE_MUTATING_INTENTS: set[str] = {
     "evidence_capture",
     "done",
     "close_step",
+    "close_task",
     "progress",
     "note",
     "block",
@@ -607,6 +752,7 @@ _TASK_ONLY_INTENTS: set[str] = {
     "evidence_capture",
     "done",
     "close_step",
+    "close_task",
     "progress",
     "note",
     "block",
@@ -1395,31 +1541,13 @@ def build_context(
 
 
 def generate_suggestions(manager: TaskManager, focus_id: Optional[str] = None) -> List[Suggestion]:
-    details = manager.list_all_tasks(skip_sync=True)
+    # Read-only: avoid TaskManager.list_all_tasks (may auto-clean DONE tasks depending on user config).
+    details = manager.repo.list("", skip_sync=True)
     plans = [d for d in details if getattr(d, "kind", "task") == "plan"]
     tasks = [d for d in details if getattr(d, "kind", "task") == "task"]
-    if not plans:
-        return [
-            Suggestion(
-                action="create",
-                target="PLAN",
-                reason="Нет планов — создай план (kind=plan) и зафиксируй контракт.",
-                priority="high",
-                params={"kind": "plan"},
-            )
-        ]
-    if focus_id and focus_id.startswith("PLAN-"):
-        has_tasks = any(getattr(t, "parent", None) == focus_id for t in tasks)
-        if not has_tasks:
-            return [
-                Suggestion(
-                    action="create",
-                    target="TASK",
-                    reason="В плане нет заданий — добавь первое задание в план.",
-                    priority="high",
-                    params={"kind": "task", "parent": focus_id},
-                )
-            ]
+
+    # Focus-first: when the caller is already looking at a concrete object, suggestions must be
+    # state-aware and actionable for that object (even if the global workspace is incomplete).
     if focus_id and focus_id.startswith("TASK-"):
         task = manager.load_task(focus_id, skip_sync=True)
         if task and task.steps:
@@ -1428,9 +1556,18 @@ def generate_suggestions(manager: TaskManager, focus_id: Optional[str] = None) -
             now = next((i for i in items if i.get("status") == "in_progress"), None)
             if not now:
                 now = next((i for i in items if i.get("status") == "pending"), None)
-            if not now and items:
-                now = items[0]
             if not now or not now.get("path"):
+                # All steps are completed (or there is no actionable step). Next safe action is task closure.
+                if str(getattr(task, "status", "") or "").strip().upper() != "DONE":
+                    return [
+                        Suggestion(
+                            action="close_task",
+                            target=focus_id,
+                            reason="Все шаги завершены — проверь полосу и закрой задачу (dry_run→diff).",
+                            priority="high",
+                            params={"task": focus_id},
+                        )
+                    ]
                 return []
             path = str(now.get("path") or "").strip()
             step_id = str(now.get("id", "") or "").strip() or None
@@ -1484,6 +1621,28 @@ def generate_suggestions(manager: TaskManager, focus_id: Optional[str] = None) -
                     },
                 )
             ]
+    if focus_id and focus_id.startswith("PLAN-"):
+        has_tasks = any(getattr(t, "parent", None) == focus_id for t in tasks)
+        if not has_tasks:
+            return [
+                Suggestion(
+                    action="create",
+                    target="TASK",
+                    reason="В плане нет заданий — добавь первое задание в план.",
+                    priority="high",
+                    params={"kind": "task", "parent": focus_id, "title": "New task"},
+                )
+            ]
+    if not plans:
+        return [
+            Suggestion(
+                action="create",
+                target="PLAN",
+                reason="Нет планов — создай план (kind=plan) и зафиксируй контракт.",
+                priority="high",
+                params={"kind": "plan", "title": "New plan"},
+            )
+        ]
     return []
 
 
@@ -1711,6 +1870,7 @@ def _build_radar_payload(
         "next": [s.to_dict() for s in next_suggestions],
         "blockers": {"blocked": False, "blockers": [], "depends_on": [], "unresolved_depends_on": []},
         "open_checkpoints": [],
+        "runway": {},
         "links": {
             "resume": {"intent": "resume", focus_key: focus_id},
             "mirror": {"intent": "mirror", focus_key: focus_id, "limit": 10},
@@ -1720,6 +1880,7 @@ def _build_radar_payload(
             "handoff": {"intent": "handoff", focus_key: focus_id, "limit": limit, "max_chars": max_chars},
         },
     }
+    result["runway"] = _build_runway_payload(manager, detail=detail, focus_id=focus_id, next_suggestions=next_suggestions)
 
     if getattr(detail, "kind", "task") == "plan":
         contract_summary = _contract_summary(getattr(detail, "contract_data", {}) or {})
@@ -1780,8 +1941,7 @@ def _build_radar_payload(
     now = next((i for i in items if i.get("status") == "in_progress"), None)
     if not now:
         now = next((i for i in items if i.get("status") == "pending"), None)
-    if not now and items:
-        now = items[0]
+    all_completed = bool(items) and all(i.get("status") == "completed" for i in items)
     queue = _compute_checkpoint_status(task)
     queue_summary = {
         "pending": len(list(queue.get("pending", []) or [])),
@@ -1792,6 +1952,8 @@ def _build_radar_payload(
     now_payload = dict(now or {})
     if now_payload:
         now_payload.setdefault("queue", queue_summary)
+    elif all_completed:
+        now_payload = {"kind": "task", "status": "ready", "queue": queue_summary}
     else:
         now_payload = {"kind": "step", "status": "missing", "queue": queue_summary}
     result["now"] = now_payload
@@ -4621,6 +4783,270 @@ def _apply_patch_scalar_field(value_type: str, op: str, value: Any, *, field: st
     return None, f"Неизвестный тип поля: {value_type}"
 
 
+def _apply_patch_ops_to_target(
+    intent: str,
+    *,
+    ops: List[Dict[str, Any]],
+    target: Any,
+    allow: Dict[str, str],
+    updated_fields: List[str],
+) -> Tuple[Optional[AIResponse], bool]:
+    """Apply patch ops to a single target node in-place.
+
+    Returns: (error_response_or_none, contract_touched)
+    """
+    contract_touched = False
+    for idx, raw_op in enumerate(list(ops or [])):
+        if not isinstance(raw_op, dict):
+            return error_response(intent, "INVALID_OPS", f"ops[{idx}] должен быть объектом"), contract_touched
+        op = str(raw_op.get("op", "") or "").strip().lower()
+        if op not in _PATCH_OPS:
+            return (
+                error_response(intent, "INVALID_OP", f"ops[{idx}].op должен быть: set|unset|append|remove", result={"op": raw_op}),
+                contract_touched,
+            )
+        field = str(raw_op.get("field", "") or "").strip()
+        if not field:
+            return error_response(intent, "MISSING_FIELD", f"ops[{idx}].field обязателен", result={"op": raw_op}), contract_touched
+        value_present = "value" in raw_op
+        value = raw_op.get("value")
+        if op != "unset" and not value_present:
+            return (
+                error_response(intent, "MISSING_VALUE", f"ops[{idx}].value обязателен для op={op}", result={"op": raw_op}),
+                contract_touched,
+            )
+
+        if field.startswith("contract_data."):
+            if not isinstance(target, TaskDetail):
+                return error_response(intent, "INVALID_FIELD", f"{field} допустим только для kind=task_detail"), contract_touched
+            parts = field.split(".", 2)
+            if len(parts) != 2 or not parts[1]:
+                return (
+                    error_response(intent, "INVALID_FIELD", f"Неверный field: {field} (ожидается contract_data.<key>)"),
+                    contract_touched,
+                )
+            key = parts[1]
+            value_type = _CONTRACT_DATA_FIELDS.get(key)
+            if not value_type:
+                return (
+                    error_response(intent, "FORBIDDEN_FIELD", f"contract_data.{key} не поддерживается", result={"field": field}),
+                    contract_touched,
+                )
+            contract_touched = True
+            cd = dict(getattr(target, "contract_data", {}) or {})
+            if op == "unset":
+                if key in cd:
+                    cd.pop(key, None)
+                    updated_fields.append(field)
+                setattr(target, "contract_data", cd)
+                continue
+            if value_type == "str_list":
+                current = cd.get(key, []) if isinstance(cd.get(key, []), list) else []
+                new_list, list_err = _apply_patch_list_field(list(current or []), op, value, field=field)
+                if list_err:
+                    return error_response(intent, "INVALID_VALUE", list_err, result={"field": field, "op": op}), contract_touched
+                cd[key] = list(new_list or [])
+                updated_fields.append(field)
+                setattr(target, "contract_data", cd)
+                continue
+            # value_type == str
+            if op in {"append", "remove"}:
+                return error_response(intent, "INVALID_OP", f"{field} не поддерживает op={op}"), contract_touched
+            new_val, val_err = _apply_patch_scalar_field("str", op, value, field=field)
+            if val_err:
+                return error_response(intent, "INVALID_VALUE", val_err, result={"field": field, "op": op}), contract_touched
+            cd[key] = str(new_val or "")
+            updated_fields.append(field)
+            setattr(target, "contract_data", cd)
+            continue
+
+        value_type = allow.get(field)
+        if not value_type:
+            return (
+                error_response(intent, "FORBIDDEN_FIELD", f"Поле не поддерживается: {field}", result={"field": field}),
+                contract_touched,
+            )
+        if "." in field:
+            return (
+                error_response(
+                    intent,
+                    "INVALID_FIELD",
+                    f"Неверный field: {field} (поддерживаются только contract_data.<key> и top-level поля)",
+                ),
+                contract_touched,
+            )
+        if value_type == "str_list":
+            current = list(getattr(target, field, []) or [])
+            new_list, list_err = _apply_patch_list_field(current, op, value, field=field)
+            if list_err:
+                return error_response(intent, "INVALID_VALUE", list_err, result={"field": field, "op": op}), contract_touched
+            setattr(target, field, list(new_list or []))
+            updated_fields.append(field)
+            continue
+
+        if op in {"append", "remove"}:
+            return error_response(intent, "INVALID_OP", f"{field} не поддерживает op={op}"), contract_touched
+        new_val, val_err = _apply_patch_scalar_field(value_type, op, value, field=field)
+        if val_err:
+            return error_response(intent, "INVALID_VALUE", val_err, result={"field": field, "op": op}), contract_touched
+        setattr(target, field, new_val)
+        updated_fields.append(field)
+
+    return None, contract_touched
+
+
+def _apply_patch_request_inplace(
+    manager: TaskManager,
+    intent: str,
+    *,
+    task_id: str,
+    detail: TaskDetail,
+    kind: str,
+    ops: List[Dict[str, Any]],
+    data: Dict[str, Any],
+) -> Tuple[Optional[AIResponse], Dict[str, Any]]:
+    """Apply a patch request to an in-memory TaskDetail (no I/O)."""
+    updated_fields: List[str] = []
+    contract_touched = False
+    path: Optional[str] = None
+
+    if kind == "task_detail":
+        # Plan-only fields guard.
+        if getattr(detail, "kind", "task") != "plan":
+            plan_only = {"plan_doc", "plan_steps", "plan_current"}
+            if any(f in plan_only for f in (str(o.get("field", "") or "") for o in list(ops or []) if isinstance(o, dict))):
+                return error_response(intent, "NOT_A_PLAN", "plan_* поля применимы только к планам (PLAN-###)"), {}
+        err_resp, touched = _apply_patch_ops_to_target(
+            intent,
+            ops=list(ops or []),
+            target=detail,
+            allow=_PATCHABLE_TASK_DETAIL_FIELDS,
+            updated_fields=updated_fields,
+        )
+        contract_touched = contract_touched or touched
+        if err_resp:
+            return err_resp, {}
+
+        # Checkpoint semantics for root criteria/tests.
+        if "success_criteria" in updated_fields:
+            detail.criteria_confirmed = False
+            detail.criteria_auto_confirmed = False
+        if "tests" in updated_fields:
+            tests_list = list(getattr(detail, "tests", []) or [])
+            detail.tests_confirmed = False
+            detail.tests_auto_confirmed = not tests_list
+        if any(f.startswith("contract_data.") or f == "contract" for f in updated_fields):
+            contract_touched = True
+        try:
+            detail.update_status_from_progress()
+        except Exception:
+            pass
+        return None, {"kind": "task_detail", "path": None, "updated_fields": sorted(set(updated_fields)), "contract_touched": bool(contract_touched)}
+
+    if kind == "step":
+        path, path_err = _resolve_step_path(manager, detail, data)
+        if path_err:
+            code, message = path_err
+            return (
+                error_response(
+                    intent,
+                    code,
+                    message,
+                    recovery="Возьми корректный path/step_id через radar/mirror.",
+                    suggestions=_path_help_suggestions(task_id),
+                ),
+                {},
+            )
+        step, _, _ = _find_step_by_path(list(getattr(detail, "steps", []) or []), path)
+        if not step:
+            return (
+                error_response(
+                    intent,
+                    "PATH_NOT_FOUND",
+                    f"Шаг path={path} не найден",
+                    recovery="Возьми корректный path/step_id через radar/mirror.",
+                    suggestions=_path_help_suggestions(task_id),
+                ),
+                {},
+            )
+        err_resp, touched = _apply_patch_ops_to_target(
+            intent,
+            ops=list(ops or []),
+            target=step,
+            allow=_PATCHABLE_STEP_FIELDS,
+            updated_fields=updated_fields,
+        )
+        contract_touched = contract_touched or touched
+        if err_resp:
+            return err_resp, {}
+        if updated_fields:
+            step.completed = False
+            step.completed_at = None
+        if "success_criteria" in updated_fields:
+            step.criteria_confirmed = False
+            step.criteria_auto_confirmed = False
+        if "tests" in updated_fields:
+            tests_list = list(getattr(step, "tests", []) or [])
+            step.tests_confirmed = False
+            step.tests_auto_confirmed = not tests_list
+        try:
+            detail.update_status_from_progress()
+        except Exception:
+            pass
+        return None, {"kind": "step", "path": path, "updated_fields": sorted(set(updated_fields)), "contract_touched": bool(contract_touched)}
+
+    # kind == task (task node)
+    path, path_err = _resolve_task_path(manager, detail, data)
+    if path_err:
+        code, message = path_err
+        return (
+            error_response(
+                intent,
+                code,
+                message,
+                recovery="Возьми корректный task path/task_node_id через mirror/radar.",
+                suggestions=_path_help_suggestions(task_id),
+            ),
+            {},
+        )
+    node, _, _ = _find_task_by_path(list(getattr(detail, "steps", []) or []), path)
+    if not node:
+        return (
+            error_response(
+                intent,
+                "PATH_NOT_FOUND",
+                f"Задание path={path} не найдено",
+                recovery="Возьми корректный task path/task_node_id через mirror/radar.",
+                suggestions=_path_help_suggestions(task_id),
+            ),
+            {},
+        )
+    err_resp, touched = _apply_patch_ops_to_target(
+        intent,
+        ops=list(ops or []),
+        target=node,
+        allow=_PATCHABLE_TASK_NODE_FIELDS,
+        updated_fields=updated_fields,
+    )
+    contract_touched = contract_touched or touched
+    if err_resp:
+        return err_resp, {}
+    if "success_criteria" in updated_fields:
+        node.criteria_confirmed = False
+        node.criteria_auto_confirmed = False
+    if "tests" in updated_fields:
+        tests_list = list(getattr(node, "tests", []) or [])
+        node.tests_confirmed = False
+        node.tests_auto_confirmed = not tests_list
+    if "status" in updated_fields and "status_manual" not in updated_fields:
+        node.status_manual = True
+    try:
+        detail.update_status_from_progress()
+    except Exception:
+        pass
+    return None, {"kind": "task", "path": path, "updated_fields": sorted(set(updated_fields)), "contract_touched": bool(contract_touched)}
+
+
 def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task") or data.get("plan")
     if not task_id:
@@ -4672,117 +5098,23 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     if kind != "task_detail" and getattr(detail, "kind", "task") != "task":
         return error_response("patch", "NOT_A_TASK", "patch(kind=step|task) применим только к заданиям (TASK-###)")
 
-    updated_fields: List[str] = []
-    contract_touched = False
-    path: Optional[str] = None
-
-    def apply_ops(target: Any, allow: Dict[str, str]) -> Optional[AIResponse]:
-        nonlocal updated_fields, contract_touched
-        for idx, raw_op in enumerate(list(ops or [])):
-            if not isinstance(raw_op, dict):
-                return error_response("patch", "INVALID_OPS", f"ops[{idx}] должен быть объектом")
-            op = str(raw_op.get("op", "") or "").strip().lower()
-            if op not in _PATCH_OPS:
-                return error_response("patch", "INVALID_OP", f"ops[{idx}].op должен быть: set|unset|append|remove", result={"op": raw_op})
-            field = str(raw_op.get("field", "") or "").strip()
-            if not field:
-                return error_response("patch", "MISSING_FIELD", f"ops[{idx}].field обязателен", result={"op": raw_op})
-            value_present = "value" in raw_op
-            value = raw_op.get("value")
-            if op != "unset" and not value_present:
-                return error_response("patch", "MISSING_VALUE", f"ops[{idx}].value обязателен для op={op}", result={"op": raw_op})
-
-            if field.startswith("contract_data."):
-                if not isinstance(target, TaskDetail):
-                    return error_response("patch", "INVALID_FIELD", f"{field} допустим только для kind=task_detail")
-                parts = field.split(".", 2)
-                if len(parts) != 2 or not parts[1]:
-                    return error_response("patch", "INVALID_FIELD", f"Неверный field: {field} (ожидается contract_data.<key>)")
-                key = parts[1]
-                value_type = _CONTRACT_DATA_FIELDS.get(key)
-                if not value_type:
-                    return error_response("patch", "FORBIDDEN_FIELD", f"contract_data.{key} не поддерживается", result={"field": field})
-                contract_touched = True
-                cd = dict(getattr(target, "contract_data", {}) or {})
-                if op == "unset":
-                    if key in cd:
-                        cd.pop(key, None)
-                        updated_fields.append(field)
-                    setattr(target, "contract_data", cd)
-                    continue
-                if value_type == "str_list":
-                    current = cd.get(key, []) if isinstance(cd.get(key, []), list) else []
-                    new_list, list_err = _apply_patch_list_field(list(current or []), op, value, field=field)
-                    if list_err:
-                        return error_response("patch", "INVALID_VALUE", list_err, result={"field": field, "op": op})
-                    cd[key] = list(new_list or [])
-                    updated_fields.append(field)
-                    setattr(target, "contract_data", cd)
-                    continue
-                # value_type == str
-                if op in {"append", "remove"}:
-                    return error_response("patch", "INVALID_OP", f"{field} не поддерживает op={op}")
-                new_val, val_err = _apply_patch_scalar_field("str", op, value, field=field)
-                if val_err:
-                    return error_response("patch", "INVALID_VALUE", val_err, result={"field": field, "op": op})
-                cd[key] = str(new_val or "")
-                updated_fields.append(field)
-                setattr(target, "contract_data", cd)
-                continue
-
-            value_type = allow.get(field)
-            if not value_type:
-                return error_response("patch", "FORBIDDEN_FIELD", f"Поле не поддерживается: {field}", result={"field": field})
-
-            if "." in field:
-                return error_response("patch", "INVALID_FIELD", f"Неверный field: {field} (поддерживаются только contract_data.<key> и top-level поля)")
-
-            if value_type == "str_list":
-                current = list(getattr(target, field, []) or [])
-                new_list, list_err = _apply_patch_list_field(current, op, value, field=field)
-                if list_err:
-                    return error_response("patch", "INVALID_VALUE", list_err, result={"field": field, "op": op})
-                setattr(target, field, list(new_list or []))
-                updated_fields.append(field)
-                continue
-
-            if op in {"append", "remove"}:
-                return error_response("patch", "INVALID_OP", f"{field} не поддерживает op={op}")
-            new_val, val_err = _apply_patch_scalar_field(value_type, op, value, field=field)
-            if val_err:
-                return error_response("patch", "INVALID_VALUE", val_err, result={"field": field, "op": op})
-            setattr(target, field, new_val)
-            updated_fields.append(field)
-
-        return None
+    err_resp, meta = _apply_patch_request_inplace(
+        manager,
+        "patch",
+        task_id=task_id,
+        detail=detail,
+        kind=kind,
+        ops=list(ops or []),
+        data=data,
+    )
+    if err_resp:
+        return err_resp
+    updated_fields = list((meta or {}).get("updated_fields", []) or [])
+    contract_touched = bool((meta or {}).get("contract_touched", False))
+    raw_path = (meta or {}).get("path")
+    path = str(raw_path or "").strip() or None
 
     if kind == "task_detail":
-        # Plan-only fields guard.
-        if getattr(detail, "kind", "task") != "plan":
-            plan_only = {"plan_doc", "plan_steps", "plan_current"}
-            if any(f in plan_only for f in (str(o.get("field", "") or "") for o in list(ops or []) if isinstance(o, dict))):
-                return error_response("patch", "NOT_A_PLAN", "plan_* поля применимы только к планам (PLAN-###)")
-        err_resp = apply_ops(detail, _PATCHABLE_TASK_DETAIL_FIELDS)
-        if err_resp:
-            return err_resp
-
-        # Checkpoint semantics for root criteria/tests.
-        if "success_criteria" in updated_fields:
-            detail.criteria_confirmed = False
-            detail.criteria_auto_confirmed = False
-        if "tests" in updated_fields:
-            tests_list = list(getattr(detail, "tests", []) or [])
-            detail.tests_confirmed = False
-            detail.tests_auto_confirmed = not tests_list
-        if any(f.startswith("contract_data.") or f == "contract" for f in updated_fields):
-            contract_touched = True
-
-        # Keep status consistent (esp. plans: plan_current/steps).
-        try:
-            detail.update_status_from_progress()
-        except Exception:
-            pass
-
         if dry_run:
             key = "plan" if getattr(detail, "kind", "task") == "plan" else "task"
             snapshot = plan_to_dict(detail, compact=False) if key == "plan" else task_to_dict(detail, include_steps=True, compact=False)
@@ -4810,44 +5142,9 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         )
 
     if kind == "step":
-        path, path_err = _resolve_step_path(manager, detail, data)
-        if path_err:
-            code, message = path_err
-            return error_response(
-                "patch",
-                code,
-                message,
-                recovery="Возьми корректный path/step_id через radar/mirror.",
-                suggestions=_path_help_suggestions(task_id),
-            )
+        if not path:
+            return error_response("patch", "PATH_NOT_FOUND", "path не найден после применения patch")
         step, _, _ = _find_step_by_path(list(getattr(detail, "steps", []) or []), path)
-        if not step:
-            return error_response(
-                "patch",
-                "PATH_NOT_FOUND",
-                f"Шаг path={path} не найден",
-                recovery="Возьми корректный path/step_id через radar/mirror.",
-                suggestions=_path_help_suggestions(task_id),
-            )
-        err_resp = apply_ops(step, _PATCHABLE_STEP_FIELDS)
-        if err_resp:
-            return err_resp
-        # Any step field change invalidates completion and checkpoints for criteria/tests.
-        if updated_fields:
-            step.completed = False
-            step.completed_at = None
-        if "success_criteria" in updated_fields:
-            step.criteria_confirmed = False
-            step.criteria_auto_confirmed = False
-        if "tests" in updated_fields:
-            tests_list = list(getattr(step, "tests", []) or [])
-            step.tests_confirmed = False
-            step.tests_auto_confirmed = not tests_list
-        try:
-            detail.update_status_from_progress()
-        except Exception:
-            pass
-
         if dry_run:
             return AIResponse(
                 success=True,
@@ -4859,7 +5156,7 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                     "kind": "step",
                     "path": path,
                     "updated_fields": sorted(set(updated_fields)),
-                    "step": step_to_dict(step, path=path, compact=False),
+                    "step": step_to_dict(step, path=path, compact=False) if step else None,
                     "task": task_to_dict(detail, include_steps=True, compact=False),
                 },
                 context={"task_id": task_id},
@@ -4883,42 +5180,9 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         )
 
     # kind == task (task node)
-    path, path_err = _resolve_task_path(manager, detail, data)
-    if path_err:
-        code, message = path_err
-        return error_response(
-            "patch",
-            code,
-            message,
-            recovery="Возьми корректный task path/task_node_id через mirror/radar.",
-            suggestions=_path_help_suggestions(task_id),
-        )
+    if not path:
+        return error_response("patch", "PATH_NOT_FOUND", "path не найден после применения patch")
     node, _, _ = _find_task_by_path(list(getattr(detail, "steps", []) or []), path)
-    if not node:
-        return error_response(
-            "patch",
-            "PATH_NOT_FOUND",
-            f"Задание path={path} не найдено",
-            recovery="Возьми корректный task path/task_node_id через mirror/radar.",
-            suggestions=_path_help_suggestions(task_id),
-        )
-    err_resp = apply_ops(node, _PATCHABLE_TASK_NODE_FIELDS)
-    if err_resp:
-        return err_resp
-    if "success_criteria" in updated_fields:
-        node.criteria_confirmed = False
-        node.criteria_auto_confirmed = False
-    if "tests" in updated_fields:
-        tests_list = list(getattr(node, "tests", []) or [])
-        node.tests_confirmed = False
-        node.tests_auto_confirmed = not tests_list
-    if "status" in updated_fields and "status_manual" not in updated_fields:
-        node.status_manual = True
-    try:
-        detail.update_status_from_progress()
-    except Exception:
-        pass
-
     if dry_run:
         return AIResponse(
             success=True,
@@ -4930,7 +5194,7 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 "kind": "task",
                 "path": path,
                 "updated_fields": sorted(set(updated_fields)),
-                "task_node": task_node_to_dict(node, path=path, compact=False),
+                "task_node": task_node_to_dict(node, path=path, compact=False) if node else None,
                 "task": task_to_dict(detail, include_steps=True, compact=False),
             },
             context={"task_id": task_id},
@@ -5400,6 +5664,222 @@ def handle_complete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     return AIResponse(success=True, intent="complete", result={key: payload}, context={"task_id": task_id})
 
 
+def handle_close_task(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
+    """Golden button for task closure: dry_run → diff → apply → complete (DONE)."""
+    task_id = data.get("task")
+    if not task_id:
+        return error_response(
+            "close_task",
+            "MISSING_TASK",
+            "task обязателен",
+            recovery="Передай task=TASK-### (явная адресация). Чтобы выбрать id — вызови context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
+    err = validate_task_id(task_id)
+    if err:
+        return error_response(
+            "close_task",
+            "INVALID_TASK",
+            err,
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+        )
+    task_id = str(task_id)
+
+    apply = bool(data.get("apply", False))
+    # Safety-by-default: when not applying, always behave as dry_run (no history side-effects).
+    dry_run = False if apply else True
+
+    force = bool(data.get("force", False))
+    override_reason = str(data.get("override_reason", "") or "").strip()
+    if force and not override_reason:
+        return error_response("close_task", "MISSING_OVERRIDE_REASON", "override_reason обязателен при force=true")
+
+    raw_patches = data.get("patches")
+    if raw_patches is None:
+        raw_patches = []
+    if not isinstance(raw_patches, list):
+        return error_response("close_task", "INVALID_PATCHES", "patches должен быть массивом")
+    if len(raw_patches) > MAX_ARRAY_LENGTH:
+        return error_response("close_task", "TOO_MANY_PATCHES", f"patches слишком длинный (max {MAX_ARRAY_LENGTH})")
+
+    base = manager.load_task(task_id, skip_sync=True)
+    if not base:
+        return error_response(
+            "close_task",
+            "NOT_FOUND",
+            f"Не найдено: {task_id}",
+            recovery="Проверь id через context(include_all=true).",
+            suggestions=_missing_target_suggestions(manager, want="TASK-"),
+            result={"task": task_id},
+        )
+    if getattr(base, "kind", "task") != "task":
+        return error_response("close_task", "NOT_A_TASK", "close_task применим только к заданиям (TASK-###)")
+
+    base_status = str(getattr(base, "status", "") or "").strip().upper()
+    if base_status == "DONE" and not raw_patches:
+        # Stable no-op (already parked at the gate).
+        return AIResponse(
+            success=True,
+            intent="close_task",
+            result={
+                "task_id": task_id,
+                "dry_run": True,
+                "apply": False,
+                "already_done": True,
+                "diff": {"patches": [], "complete": None},
+                "runway": {"open": True, "blocking": {"lint": {"summary": {}, "errors_count": 0, "top_errors": []}, "validation": None}, "recipe": None},
+            },
+            context={"task_id": task_id},
+        )
+
+    # Simulate patches in-memory for diff/runway determination.
+    sim = copy.deepcopy(base)
+    patch_results: List[Dict[str, Any]] = []
+    for idx, patch in enumerate(list(raw_patches or [])):
+        if not isinstance(patch, dict):
+            return error_response("close_task", "INVALID_PATCH", f"patches[{idx}] должен быть объектом")
+        ops = patch.get("ops")
+        if ops is None:
+            ops = patch.get("operations")
+        if ops is None:
+            return error_response("close_task", "MISSING_OPS", f"patches[{idx}].ops обязателен")
+        arr_err = validate_array(ops, f"patches[{idx}].ops")
+        if arr_err:
+            return error_response("close_task", "INVALID_OPS", arr_err, result={"patch_index": idx})
+        kind = _infer_patch_kind(patch)
+        if kind not in {"task_detail", "step", "task"}:
+            return error_response("close_task", "INVALID_KIND", f"patches[{idx}].kind должен быть: task_detail|step|task")
+        err_resp, meta = _apply_patch_request_inplace(
+            manager,
+            "close_task",
+            task_id=task_id,
+            detail=sim,
+            kind=kind,
+            ops=list(ops or []),
+            data=dict(patch),
+        )
+        if err_resp:
+            err_resp.result = dict(err_resp.result or {})
+            err_resp.result.update({"task": task_id, "patch_index": idx})
+            return err_resp
+        meta_payload = dict(meta or {})
+        meta_payload["index"] = idx
+        patch_results.append(meta_payload)
+
+    all_items: List[Any] = []
+    if list(getattr(sim, "depends_on", []) or []):
+        all_items = manager.repo.list("", skip_sync=True)
+    report = lint_item(manager, sim, all_items)
+    report_dict = report.to_dict()
+    issues = list(report_dict.get("issues", []) or [])
+    blocking_lint = [i for i in issues if str(i.get("severity", "") or "").strip().lower() == "error"]
+
+    validation_block: Optional[Dict[str, Any]] = None
+    if not force:
+        ok, val_err = _validate_root_step_ready_for_ok(sim, manager._t)
+        if not ok and isinstance(val_err, dict):
+            validation_block = {"code": str(val_err.get("code", "validation") or "validation"), "message": str(val_err.get("message", "") or "")}
+
+    runway_open = not blocking_lint and not validation_block
+
+    recipe: Optional[Dict[str, Any]] = None
+    if not runway_open:
+        for issue in blocking_lint:
+            recipe = _lint_issue_fix_recipe(task_id, detail=sim, issue=issue)
+            if recipe:
+                break
+        # Fallback to the next best action for the current task.
+        if not recipe and validation_block:
+            recipe = _suggestion_to_intent_payload((generate_suggestions(manager, task_id)[:1] or [None])[0])
+
+    runway_payload = {
+        "open": bool(runway_open),
+        "blocking": {
+            "lint": {"summary": dict((report_dict.get("summary") or {})), "errors_count": len(blocking_lint), "top_errors": blocking_lint[:3]},
+            "validation": validation_block,
+        },
+        "recipe": recipe,
+    }
+
+    complete_diff: Optional[Dict[str, Any]] = None
+    if runway_open and base_status != "DONE":
+        complete_diff = {
+            "status": {"from": base_status, "to": "DONE"},
+            "progress": {"from": int(getattr(base, "progress", 0) or 0), "to": 100},
+        }
+
+    diff = {"patches": patch_results, "complete": complete_diff}
+
+    if not apply:
+        return AIResponse(
+            success=True,
+            intent="close_task",
+            result={
+                "task_id": task_id,
+                "dry_run": True,
+                "apply": False,
+                "runway": runway_payload,
+                "diff": diff,
+                "lint": {
+                    "summary": dict((report_dict.get("summary") or {})),
+                    "blocking_errors": blocking_lint[:5],
+                },
+            },
+            context={"task_id": task_id},
+        )
+
+    if not runway_open and not force:
+        return error_response(
+            "close_task",
+            "RUNWAY_CLOSED",
+            "Нельзя закрыть: полоса закрыта",
+            recovery="Используй runway.recipe (patch) и повтори close_task(apply=true), либо force=true с override_reason.",
+            result={"task": task_id, "runway": runway_payload, "diff": diff, "lint": report_dict},
+        )
+
+    operations: List[Dict[str, Any]] = []
+    for patch in list(raw_patches or []):
+        op_payload = dict(patch)
+        op_payload["intent"] = "patch"
+        op_payload.setdefault("task", task_id)
+        operations.append(op_payload)
+    operations.append({"intent": "complete", "task": task_id, "status": "DONE", "force": force, "override_reason": override_reason})
+
+    batch_payload: Dict[str, Any] = {
+        "intent": "batch",
+        "atomic": True,
+        "task": task_id,
+        "expected_target_id": task_id,
+        "expected_kind": "task",
+        "strict_targeting": True,
+        "operations": operations,
+    }
+    batch_resp = handle_batch(manager, batch_payload)
+    if not batch_resp.success:
+        return error_response(
+            "close_task",
+            str(batch_resp.error_code or "BATCH_FAILED"),
+            str(batch_resp.error_message or "Batch failed"),
+            result={"task": task_id, "diff": diff, "runway": runway_payload, "batch": batch_resp.to_dict()},
+        )
+
+    reloaded = manager.load_task(task_id, skip_sync=True)
+    return AIResponse(
+        success=True,
+        intent="close_task",
+        result={
+            "task_id": task_id,
+            "dry_run": False,
+            "apply": True,
+            "diff": diff,
+            "batch": batch_resp.result,
+            "task": task_to_dict(reloaded, include_steps=True, compact=False) if reloaded else None,
+        },
+        context={"task_id": task_id},
+    )
+
+
 def handle_delete(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     task_id = data.get("task")
     if not task_id:
@@ -5849,6 +6329,7 @@ INTENT_HANDLERS: Dict[str, Callable[[TaskManager, Dict[str, Any]], AIResponse]] 
     "evidence_capture": handle_evidence_capture,
     "done": handle_done,
     "close_step": handle_close_step,
+    "close_task": handle_close_task,
     "progress": handle_progress,
     "edit": handle_edit,
     "patch": handle_patch,
@@ -5878,6 +6359,7 @@ _MUTATING_INTENTS = {
     "evidence_capture",
     "done",
     "close_step",
+    "close_task",
     "progress",
     "edit",
     "patch",
@@ -6107,7 +6589,7 @@ def process_intent(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     task_file: Optional[Path] = None
     before_snapshot_id: Optional[str] = None
-    if intent in _MUTATING_INTENTS and task_id:
+    if intent in _MUTATING_INTENTS and task_id and not bool(payload.get("dry_run", False)):
         norm = validate_task_id(task_id)
         if norm is None:
             # Best-effort: domain might be present, otherwise infer from disk.

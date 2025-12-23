@@ -484,6 +484,17 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
             self._footer_height_after_help = None
             self._set_footer_height(restore)
 
+        @kb.add("H", filter=not_editing)
+        def _(event):
+            """H - export handoff snapshot for the current task/plan."""
+            if getattr(self, "project_mode", False) or getattr(self, "search_mode", False):
+                return
+            if getattr(self, "confirm_mode", False) or getattr(self, "settings_mode", False) or getattr(self, "checkpoint_mode", False):
+                return
+            if getattr(self, "list_editor_mode", False) or getattr(self, "editing_mode", False):
+                return
+            self.export_handoff()
+
         @kb.add(":", filter=not_editing)
         def _(event):
             """Command palette (single-line)."""
@@ -3353,6 +3364,10 @@ class TaskTrackerTUI(ClipboardMixin, CheckpointMixin, EditingMixin, DisplayMixin
             self.help_visible = True
             self._set_footer_height(12)
             self.force_render()
+            return
+
+        if verb in {"handoff"}:
+            self.export_handoff()
             return
 
         if verb in {"desc", "description"}:
