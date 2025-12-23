@@ -184,6 +184,19 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
             "required": [],
         },
     },
+    "handoff": {
+        "description": "Handoff/Export snapshot: compact shift report (now/why/verify/next + done/remaining/risks).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task id (TASK-###). Uses focus if omitted."},
+                "plan": {"type": "string", "description": "Plan id (PLAN-###). Uses focus if omitted."},
+                "limit": {"type": "integer", "default": 3, "description": "Max next suggestions to return (0..10)."},
+                "max_chars": {"type": "integer", "default": 12000, "description": "Hard output budget for handoff JSON (UTF-8 bytes)."},
+            },
+            "required": [],
+        },
+    },
     "resume": {
         "description": "Load a specific plan/task (or focus) with optional timeline.",
         "schema": {

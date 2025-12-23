@@ -1555,53 +1555,15 @@ def handle_focus_clear(manager: TaskManager, data: Dict[str, Any]) -> AIResponse
     return AIResponse(success=True, intent="focus_clear", result={"cleared": bool(removed), "focus": None})
 
 
-def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
-    focus = data.get("task") or data.get("plan")
-    focus_domain: str = ""
-    if focus is None:
-        last_id, last_domain = get_last_task()
-        focus = last_id
-        focus_domain = str(last_domain or "")
-    if not focus:
-        return error_response(
-            "radar",
-            "MISSING_ID",
-            "Не указан task/plan и нет focus",
-            recovery="Передай task=TASK-###|plan=PLAN-### или установи focus через focus_set.",
-            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
-        )
-    err = validate_task_id(focus)
-    if err:
-        return error_response(
-            "radar",
-            "INVALID_ID",
-            err,
-            recovery="Проверь id через context(include_all=true) или установи focus через focus_set.",
-            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
-        )
-    focus_id = str(focus)
-    detail = manager.load_task(focus_id, skip_sync=True)
-    if not detail:
-        return error_response(
-            "radar",
-            "NOT_FOUND",
-            f"Не найдено: {focus_id}",
-            recovery="Проверь id через context(include_all=true) или установи focus заново.",
-            suggestions=_missing_target_suggestions(manager, want="PLAN-" if focus_id.startswith("PLAN-") else "TASK-"),
-        )
-
-    try:
-        limit = int(data.get("limit", 3) or 3)
-    except Exception:
-        return error_response("radar", "INVALID_LIMIT", "limit должен быть числом")
-    limit = max(0, min(limit, 10))
-
-    try:
-        max_chars = int(data.get("max_chars", 12_000) or 12_000)
-    except Exception:
-        return error_response("radar", "INVALID_MAX_CHARS", "max_chars должен быть числом")
-    max_chars = max(1_000, min(max_chars, 50_000))
-
+def _build_radar_payload(
+    manager: TaskManager,
+    detail: Any,
+    focus_id: str,
+    focus_domain: str,
+    *,
+    limit: int,
+    max_chars: int,
+) -> Tuple[Dict[str, Any], List[Suggestion]]:
     focus_payload = {
         "id": focus_id,
         "kind": str(getattr(detail, "kind", "task") or "task"),
@@ -1627,6 +1589,7 @@ def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "context": {"intent": "context", "include_all": True, "compact": True},
             "focus_get": {"intent": "focus_get"},
             "history": {"intent": "history", "limit": 20},
+            "handoff": {"intent": "handoff", focus_key: focus_id, "limit": limit, "max_chars": max_chars},
         },
     }
 
@@ -1681,14 +1644,7 @@ def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "depends_on": deps,
             "unresolved_depends_on": unresolved,
         }
-        _apply_radar_budget(result, max_chars=max_chars)
-        return AIResponse(
-            success=True,
-            intent="radar",
-            result=result,
-            context={"task_id": focus_id},
-            suggestions=next_suggestions,
-        )
+        return result, next_suggestions
 
     task = detail
     items = _mirror_items_from_steps(list(getattr(task, "steps", []) or []))
@@ -1805,11 +1761,165 @@ def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         "depends_on": deps,
         "unresolved_depends_on": unresolved,
     }
+    return result, next_suggestions
+
+
+def _handoff_progress_snapshot(detail: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    max_items = 5
+    if getattr(detail, "kind", "task") == "plan":
+        steps = list(getattr(detail, "plan_steps", []) or [])
+        current = int(getattr(detail, "plan_current", 0) or 0)
+        current = max(0, min(current, len(steps)))
+        done_items = [str(s or "") for s in steps[:current]]
+        remaining_items = [str(s or "") for s in steps[current:]]
+    else:
+        steps = list(getattr(detail, "steps", []) or [])
+        done_items = [str(getattr(s, "title", "") or "") for s in steps if getattr(s, "completed", False)]
+        remaining_items = [str(getattr(s, "title", "") or "") for s in steps if not getattr(s, "completed", False)]
+
+    total = len(done_items) + len(remaining_items)
+    done_payload = {"count": len(done_items), "total": total, "items": done_items[:max_items]}
+    remaining_payload = {"count": len(remaining_items), "total": total, "items": remaining_items[:max_items]}
+    return done_payload, remaining_payload
+
+
+def handle_radar(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
+    focus = data.get("task") or data.get("plan")
+    focus_domain: str = ""
+    if focus is None:
+        last_id, last_domain = get_last_task()
+        focus = last_id
+        focus_domain = str(last_domain or "")
+    if not focus:
+        return error_response(
+            "radar",
+            "MISSING_ID",
+            "Не указан task/plan и нет focus",
+            recovery="Передай task=TASK-###|plan=PLAN-### или установи focus через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
+    err = validate_task_id(focus)
+    if err:
+        return error_response(
+            "radar",
+            "INVALID_ID",
+            err,
+            recovery="Проверь id через context(include_all=true) или установи focus через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
+    focus_id = str(focus)
+    detail = manager.load_task(focus_id, skip_sync=True)
+    if not detail:
+        return error_response(
+            "radar",
+            "NOT_FOUND",
+            f"Не найдено: {focus_id}",
+            recovery="Проверь id через context(include_all=true) или установи focus заново.",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-" if focus_id.startswith("PLAN-") else "TASK-"),
+        )
+
+    try:
+        limit = int(data.get("limit", 3) or 3)
+    except Exception:
+        return error_response("radar", "INVALID_LIMIT", "limit должен быть числом")
+    limit = max(0, min(limit, 10))
+
+    try:
+        max_chars = int(data.get("max_chars", 12_000) or 12_000)
+    except Exception:
+        return error_response("radar", "INVALID_MAX_CHARS", "max_chars должен быть числом")
+    max_chars = max(1_000, min(max_chars, 50_000))
+
+    result, next_suggestions = _build_radar_payload(
+        manager,
+        detail,
+        focus_id,
+        focus_domain,
+        limit=limit,
+        max_chars=max_chars,
+    )
     _apply_radar_budget(result, max_chars=max_chars)
 
     return AIResponse(
         success=True,
         intent="radar",
+        result=result,
+        context={"task_id": focus_id},
+        suggestions=next_suggestions,
+    )
+
+
+def handle_handoff(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
+    focus = data.get("task") or data.get("plan")
+    focus_domain: str = ""
+    if focus is None:
+        last_id, last_domain = get_last_task()
+        focus = last_id
+        focus_domain = str(last_domain or "")
+    if not focus:
+        return error_response(
+            "handoff",
+            "MISSING_ID",
+            "Не указан task/plan и нет focus",
+            recovery="Передай task=TASK-###|plan=PLAN-### или установи focus через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
+    err = validate_task_id(focus)
+    if err:
+        return error_response(
+            "handoff",
+            "INVALID_ID",
+            err,
+            recovery="Проверь id через context(include_all=true) или установи focus через focus_set.",
+            suggestions=_missing_target_suggestions(manager, want=["TASK-", "PLAN-"]),
+        )
+    focus_id = str(focus)
+    detail = manager.load_task(focus_id, skip_sync=True)
+    if not detail:
+        return error_response(
+            "handoff",
+            "NOT_FOUND",
+            f"Не найдено: {focus_id}",
+            recovery="Проверь id через context(include_all=true) или установи focus заново.",
+            suggestions=_missing_target_suggestions(manager, want="PLAN-" if focus_id.startswith("PLAN-") else "TASK-"),
+        )
+
+    try:
+        limit = int(data.get("limit", 3) or 3)
+    except Exception:
+        return error_response("handoff", "INVALID_LIMIT", "limit должен быть числом")
+    limit = max(0, min(limit, 10))
+
+    try:
+        max_chars = int(data.get("max_chars", 12_000) or 12_000)
+    except Exception:
+        return error_response("handoff", "INVALID_MAX_CHARS", "max_chars должен быть числом")
+    max_chars = max(1_000, min(max_chars, 50_000))
+
+    result, next_suggestions = _build_radar_payload(
+        manager,
+        detail,
+        focus_id,
+        focus_domain,
+        limit=limit,
+        max_chars=max_chars,
+    )
+
+    done_payload, remaining_payload = _handoff_progress_snapshot(detail)
+    result["done"] = done_payload
+    result["remaining"] = remaining_payload
+    risks = list(getattr(detail, "risks", []) or [])
+    if not risks:
+        contract_payload = result.get("why", {}).get("contract") if isinstance(result.get("why"), dict) else None
+        if isinstance(contract_payload, dict):
+            risks = list(contract_payload.get("risks", []) or [])
+    result["risks"] = risks
+
+    _apply_radar_budget(result, max_chars=max_chars)
+
+    return AIResponse(
+        success=True,
+        intent="handoff",
         result=result,
         context={"task_id": focus_id},
         suggestions=next_suggestions,
@@ -5427,6 +5537,7 @@ INTENT_HANDLERS: Dict[str, Callable[[TaskManager, Dict[str, Any]], AIResponse]] 
     "focus_set": handle_focus_set,
     "focus_clear": handle_focus_clear,
     "radar": handle_radar,
+    "handoff": handle_handoff,
     "resume": handle_resume,
     "lint": handle_lint,
     "templates_list": handle_templates_list,
@@ -5765,6 +5876,8 @@ __all__ = [
     "error_response",
     "process_intent",
     "handle_context",
+    "handle_radar",
+    "handle_handoff",
     "handle_resume",
     "handle_lint",
     "handle_templates_list",

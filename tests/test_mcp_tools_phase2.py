@@ -78,3 +78,10 @@ class TestFocusAndRadarTools:
         assert "plan" in props
         assert "limit" in props
 
+    def test_handoff_schema_accepts_task_or_plan(self):
+        schema = _tool("tasks_handoff")["inputSchema"]
+        assert schema["type"] == "object"
+        props = schema["properties"]
+        assert "task" in props
+        assert "plan" in props
+        assert "limit" in props

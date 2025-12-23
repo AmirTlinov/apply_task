@@ -132,8 +132,21 @@ Notes:
 - Radar always returns stable keys: `now`, `why`, `verify`, `next`, `blockers`, `open_checkpoints` (plus `focus`, `links`, `budget`).
 - `max_chars` is a hard output budget (UTF-8 bytes). Result includes `result.budget` with `used_chars` and `truncated`.
 - `result.why.contract` may include a compact summary from structured `contract_data` (goal/done/checks/constraints/risks).
-- `result.links` contains small “expand” payloads (resume/mirror/context/history).
+- `result.links` contains small “expand” payloads (resume/mirror/context/history/handoff).
 - For tasks, `result.verify.evidence` includes a compact “black box” summary for the active step (counts + kinds + last observed timestamps).
+
+### handoff
+
+Compact handoff/export snapshot for shift change (done/remaining/risks + radar core).
+
+```json
+{"intent":"handoff","task":"TASK-001","limit":3,"max_chars":12000}
+```
+
+Notes:
+- Handoff returns the same stable radar keys plus `done`, `remaining`, and `risks`.
+- `done`/`remaining` are capped lists (5 items) with counts + totals.
+- `max_chars` is enforced with the same budget rules as radar.
 
 ### context
 
