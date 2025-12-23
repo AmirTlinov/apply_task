@@ -5264,6 +5264,7 @@ def handle_delta(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     limit = max(0, min(limit, 500))
     include_undone = bool(data.get("include_undone", True))
     include_details = bool(data.get("include_details", False))
+    include_snapshot = bool(data.get("include_snapshot", False))
 
     ops = list(history.operations or [])
     start_idx = 0
@@ -5288,6 +5289,31 @@ def handle_delta(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     sliced = sliced[:limit] if limit else []
 
     latest_id = ops[-1].id if ops else None
+    snapshots_dir = Path(manager.tasks_dir) / ".snapshots"
+
+    def _load_snapshot(snapshot_id: Optional[str]) -> Optional[str]:
+        if not snapshot_id:
+            return None
+        try:
+            path = snapshots_dir / f"{snapshot_id}.task"
+            if not path.exists():
+                return None
+            return path.read_text(encoding="utf-8")
+        except Exception:
+            return None
+
+    operations: List[Dict[str, Any]] = []
+    for op in sliced:
+        payload = op.to_dict() if include_details else op.to_summary_dict()
+        if include_snapshot:
+            payload["snapshot"] = {
+                "before_id": op.snapshot_id,
+                "after_id": op.after_snapshot_id,
+                "before": _load_snapshot(op.snapshot_id),
+                "after": _load_snapshot(op.after_snapshot_id),
+            }
+        operations.append(payload)
+
     return AIResponse(
         success=True,
         intent="delta",
@@ -5296,7 +5322,8 @@ def handle_delta(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "task": task_filter or None,
             "latest_id": latest_id,
             "include_details": include_details,
-            "operations": [op.to_dict() if include_details else op.to_summary_dict() for op in sliced],
+            "include_snapshot": include_snapshot,
+            "operations": operations,
             "has_more": has_more,
             "can_undo": history.can_undo(),
             "can_redo": history.can_redo(),
@@ -5540,6 +5567,23 @@ def process_intent(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     # Safe writes (explicit > focus): prevent silent mis-target when the caller expects a specific target.
     if intent in _FOCUSABLE_MUTATING_INTENTS:
+        expected_target_alias = payload.get("expected_target", None)
+        if expected_target_alias is not None:
+            if payload.get("expected_target_id", None) is None:
+                payload["expected_target_id"] = expected_target_alias
+            else:
+                left = str(payload.get("expected_target_id") or "").strip()
+                right = str(expected_target_alias or "").strip()
+                if left and right and left != right:
+                    return error_response(
+                        intent,
+                        "EXPECTED_TARGET_MISMATCH",
+                        f"expected_target={right} != expected_target_id={left}",
+                        recovery="Оставь только expected_target_id либо задай совпадающее expected_target.",
+                    )
+        if "strict_writes" in payload:
+            payload["strict_targeting"] = bool(payload.get("strict_targeting", False)) or bool(payload.get("strict_writes", False))
+
         expected_target_id = payload.get("expected_target_id", None)
         if expected_target_id is not None:
             err = validate_node_id(expected_target_id, "expected_target_id")

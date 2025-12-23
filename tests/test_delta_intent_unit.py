@@ -64,6 +64,17 @@ def test_delta_returns_operations_after_since(tmp_path):
     assert "data" in resp_full.result["operations"][0]
     assert "result" in resp_full.result["operations"][0]
 
+    resp_snap = handle_delta(
+        manager,
+        {"intent": "delta", "since": since_id, "task": "TASK-001", "limit": 50, "include_snapshot": True},
+    )
+    assert resp_snap.success is True
+    op0 = resp_snap.result["operations"][0]
+    snapshot = op0.get("snapshot") or {}
+    assert snapshot.get("before_id")
+    assert isinstance(snapshot.get("before"), str)
+    assert "TASK-001" in snapshot.get("before")
+
 
 def test_delta_errors_when_since_not_found(tmp_path):
     tasks_dir = tmp_path / ".tasks"

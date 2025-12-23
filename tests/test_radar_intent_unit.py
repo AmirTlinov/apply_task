@@ -6,7 +6,7 @@ import pytest
 
 from core import Attachment, Step, TaskDetail, VerificationCheck
 from core.desktop.devtools.application.task_manager import TaskManager
-from core.desktop.devtools.interface.intent_api import handle_radar
+from core.desktop.devtools.interface.intent_api import handle_radar, handle_verify
 
 
 @pytest.fixture
@@ -91,3 +91,32 @@ def test_handle_radar_task_open_checkpoints_include_extended(manager: TaskManage
     assert resp.success is True
     result = resp.result
     assert "security" in list(result.get("open_checkpoints") or [])
+
+
+def test_handle_radar_reflects_verify_evidence(manager: TaskManager):
+    step1 = Step.new("Step 1", criteria=["c1"], tests=["t1"])
+    assert step1 is not None
+    task = TaskDetail(id="TASK-001", title="Task", status="ACTIVE", steps=[step1])
+    manager.save_task(task)
+
+    verify_resp = handle_verify(
+        manager,
+        {
+            "intent": "verify",
+            "task": "TASK-001",
+            "path": "s:0",
+            "checkpoints": {"criteria": {"confirmed": True}},
+            "checks": [{"kind": "command", "spec": "pytest -q", "outcome": "pass"}],
+            "attachments": [{"kind": "cmd_output", "uri": "stdout", "size": 10}],
+            "verification_outcome": "pass",
+        },
+    )
+    assert verify_resp.success is True
+
+    resp = handle_radar(manager, {"intent": "radar", "task": "TASK-001", "limit": 1})
+    assert resp.success is True
+    evidence = resp.result["verify"]["evidence"]
+    assert evidence["verification_outcome"] == "pass"
+    assert evidence["checks"]["count"] >= 1
+    assert evidence["checks"]["kinds"].get("command") == 1
+    assert evidence["attachments"]["count"] == 1

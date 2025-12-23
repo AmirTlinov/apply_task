@@ -86,6 +86,7 @@ Rules:
 - When `expected_target_id` is present, the resolved target id **must match** (otherwise fails with `error.code = "EXPECTED_TARGET_MISMATCH"`).
 - When `strict_targeting=true` and the operation is focus-based (no explicit `task`/`plan`), `expected_target_id` is required (otherwise fails with `error.code = "STRICT_TARGETING_REQUIRES_EXPECTED_TARGET_ID"`).
 - Mutating responses include `context.target_resolution` (`explicit|focus|focus_task_parent|missing|focus_incompatible`) so you can trace how the target was chosen.
+- Aliases: `expected_target` → `expected_target_id`, `strict_writes` → `strict_targeting`.
 
 ## Intents
 
@@ -539,7 +540,8 @@ Return operation log entries strictly after a given operation id (agent-friendly
 Notes:
 - Use `meta.operation_id` from any mutating response as the `since` cursor.
 - `since` is exclusive (returns ops strictly after it).
-- Delta is lightweight by default: set `include_details=true` to return full `data/result` payloads.
+- Delta is metadata-only by default: set `include_details=true` to return full `data/result` payloads.
+- Set `include_snapshot=true` to include before/after snapshot content for each operation (heavier).
 
 ### storage
 

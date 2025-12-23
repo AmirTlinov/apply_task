@@ -86,6 +86,10 @@ _COMMON_REQUEST_PROPERTIES: Dict[str, Any] = {
         "type": "string",
         "description": "Optional safe write guard: the resolved target id MUST match this value, otherwise the operation fails (prevents focus mis-target).",
     },
+    "expected_target": {
+        "type": "string",
+        "description": "Alias for expected_target_id.",
+    },
     "expected_kind": {
         "type": "string",
         "description": "Optional safe write guard: expected target kind (task|plan). Used with expected_target_id/strict_targeting.",
@@ -93,6 +97,10 @@ _COMMON_REQUEST_PROPERTIES: Dict[str, Any] = {
     "strict_targeting": {
         "type": "boolean",
         "description": "When true, focus-based writes require expected_target_id and will fail if focus resolves to a different target.",
+    },
+    "strict_writes": {
+        "type": "boolean",
+        "description": "Alias for strict_targeting.",
     },
 }
 
@@ -630,6 +638,7 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
                 "limit": {"type": "integer", "default": 50, "description": "Max operations returned (0..500)."},
                 "include_undone": {"type": "boolean", "default": True, "description": "Include operations marked as undone."},
                 "include_details": {"type": "boolean", "default": False, "description": "When true, include full operation data/result payloads (larger)."},
+                "include_snapshot": {"type": "boolean", "default": False, "description": "When true, include before/after snapshot content for each operation (larger)."},
             },
             "required": [],
         },

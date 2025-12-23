@@ -54,6 +54,39 @@ def test_expected_target_mismatch_fails_fast(manager: TaskManager):
     assert resp.context.get("target_resolution", {}).get("source") == "focus"
 
 
+def test_strict_writes_alias_requires_expected_target(manager: TaskManager):
+    plan = TaskDetail(id="PLAN-001", title="Plan", status="TODO", kind="plan")
+    manager.save_task(plan, skip_sync=True)
+
+    step = Step.new("Step", criteria=["c"], tests=["t"])
+    assert step is not None
+    task = TaskDetail(id="TASK-001", title="Task", status="TODO", parent="PLAN-001", steps=[step])
+    manager.save_task(task, skip_sync=True)
+
+    save_last_task("TASK-001")
+    resp = process_intent(manager, {"intent": "note", "path": "s:0", "note": "x", "strict_writes": True})
+    assert resp.success is False
+    assert resp.error_code == "STRICT_TARGETING_REQUIRES_EXPECTED_TARGET_ID"
+
+
+def test_expected_target_alias_mismatch_fails_fast(manager: TaskManager):
+    plan = TaskDetail(id="PLAN-001", title="Plan", status="TODO", kind="plan")
+    manager.save_task(plan, skip_sync=True)
+
+    step = Step.new("Step", criteria=["c"], tests=["t"])
+    assert step is not None
+    task = TaskDetail(id="TASK-001", title="Task", status="TODO", parent="PLAN-001", steps=[step])
+    manager.save_task(task, skip_sync=True)
+
+    save_last_task("TASK-001")
+    resp = process_intent(
+        manager,
+        {"intent": "note", "path": "s:0", "note": "x", "strict_writes": True, "expected_target": "TASK-999"},
+    )
+    assert resp.success is False
+    assert resp.error_code == "EXPECTED_TARGET_MISMATCH"
+
+
 def test_radar_budget_enforced(manager: TaskManager):
     plan = TaskDetail(id="PLAN-001", title="Plan", status="TODO", kind="plan")
     manager.save_task(plan, skip_sync=True)
@@ -71,4 +104,3 @@ def test_radar_budget_enforced(manager: TaskManager):
     assert set(["now", "why", "verify", "next", "blockers", "open_checkpoints"]).issubset(result.keys())
     assert result["budget"]["truncated"] is True
     assert result["budget"]["used_chars"] <= 1000
-
