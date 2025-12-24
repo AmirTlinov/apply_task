@@ -50,11 +50,11 @@ def test_mcp_returns_text_content(monkeypatch, tmp_path):
     resume_content = resume_resp["result"]["content"][0]
     assert resume_content["type"] == "text"
     resume_data = _parse_content(resume_content)
-    assert resume_data["result"]["task"]["id"] == task.id
-    # compact=true is the default: nested trees are omitted unless explicitly requested
-    assert "steps" not in (resume_data["result"]["task"] or {})
+    assert resume_data["result"]["summary"]["focus"]["id"] == task.id
+    # compact=true is the default: resume returns a short summary strip unless explicitly requested
+    assert "task" not in (resume_data["result"] or {})
 
-    # patch(dry_run) preview must include trust-by-diff fields and current/computed snapshots
+    # patch(dry_run) preview must include trust-by-diff fields and current/after snapshots
     patch_resp = server.handle_request(JsonRpcRequest(
         jsonrpc="2.0",
         method="tools/call",
@@ -76,9 +76,10 @@ def test_mcp_returns_text_content(monkeypatch, tmp_path):
     assert result.get("kind") == "task_detail"
     assert "diff" in result
     assert (result.get("diff") or {}).get("fields"), "patch(dry_run) must return non-empty diff.fields for changes"
-    assert "current" in result and "computed" in result
-    assert "steps" not in (result["current"]["task"] or {})
-    assert "steps" not in (result["computed"]["task"] or {})
+    assert "current" in result and "after" in result
+    # compact previews are state+diff; full snapshots require compact=false
+    assert "task" not in (result.get("current") or {})
+    assert "task" not in (result.get("after") or {})
 
     # close_task(dry_run) preview must return applyable diff.patches derived from runway.recipe
     close_resp = server.handle_request(JsonRpcRequest(

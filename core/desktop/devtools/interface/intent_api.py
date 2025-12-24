@@ -2779,46 +2779,56 @@ def handle_resume(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             result={"task": focus_id},
         )
     compact = _parse_compact(data.get("compact"), default=True)
-    result: Dict[str, Any] = {}
-    if getattr(detail, "kind", "task") == "plan":
-        result["plan"] = plan_to_dict(detail, compact=compact)
-    else:
-        include_steps = not compact
-        result["task"] = task_to_dict(detail, include_steps=include_steps, compact=compact)
-        checkpoint_status = _compute_checkpoint_status(detail)
-        if compact:
-            pending = list(checkpoint_status.get("pending", []) or [])
-            ready = list(checkpoint_status.get("ready", []) or [])
-            pending_ids = list(checkpoint_status.get("pending_ids", []) or [])
-            ready_ids = list(checkpoint_status.get("ready_ids", []) or [])
-            result["checkpoint_status"] = {
-                "pending_count": len(pending),
-                "ready_count": len(ready),
-                "next_pending": (pending[:1] or [None])[0],
-                "next_ready": (ready[:1] or [None])[0],
-                "pending": pending[:10],
-                "ready": ready[:10],
-                "pending_ids": pending_ids[:10],
-                "ready_ids": ready_ids[:10],
-            }
-        else:
-            result["checkpoint_status"] = checkpoint_status
-    # Timeline: expose events if present (already structured)
-    events = list(getattr(detail, "events", []) or [])
-    if events:
-        try:
-            events_sorted = sorted(events, key=lambda e: getattr(e, "timestamp", "") or "", reverse=True)
-        except Exception:
-            events_sorted = events
-        limit = int(data.get("events_limit", 20) or 20)
-        result["timeline"] = [e.to_dict() for e in events_sorted[: max(0, limit)]]
 
     # Keep suggestions consistent with radar: runway-gated, single best next action.
     focus_domain = str(getattr(detail, "domain", "") or "")
+    radar_payload: Optional[Dict[str, Any]] = None
     try:
-        _radar, next_suggestions = _build_radar_payload(manager, detail, focus_id, focus_domain, limit=3, max_chars=12_000)
+        radar_payload, next_suggestions = _build_radar_payload(
+            manager, detail, focus_id, focus_domain, limit=3, max_chars=12_000
+        )
     except Exception:
         next_suggestions = generate_suggestions(manager, focus_id)
+
+    result: Dict[str, Any] = {}
+    if compact:
+        summary: Dict[str, Any] = {}
+        if isinstance(radar_payload, dict):
+            summary = {
+                "focus": dict(radar_payload.get("focus") or {}),
+                "now": dict(radar_payload.get("now") or {}),
+                "runway": dict(radar_payload.get("runway") or {}),
+                "verify": dict(radar_payload.get("verify") or {}),
+            }
+        else:
+            focus_payload: Dict[str, Any] = {
+                "id": focus_id,
+                "kind": str(getattr(detail, "kind", "task") or "task"),
+                "revision": int(getattr(detail, "revision", 0) or 0),
+                "domain": str(getattr(detail, "domain", "") or focus_domain or ""),
+                "title": str(getattr(detail, "title", "") or ""),
+            }
+            raw_status = str(getattr(detail, "status", "") or "").strip()
+            if raw_status:
+                focus_payload["lifecycle_status"] = status_label(raw_status)
+            summary = {"focus": focus_payload}
+        result["summary"] = summary
+    else:
+        if getattr(detail, "kind", "task") == "plan":
+            result["plan"] = plan_to_dict(detail, compact=False)
+        else:
+            result["task"] = task_to_dict(detail, include_steps=True, compact=False)
+            result["checkpoint_status"] = _compute_checkpoint_status(detail)
+        # Timeline: expose events if present (already structured)
+        events = list(getattr(detail, "events", []) or [])
+        if events:
+            try:
+                events_sorted = sorted(events, key=lambda e: getattr(e, "timestamp", "") or "", reverse=True)
+            except Exception:
+                events_sorted = events
+            limit = int(data.get("events_limit", 20) or 20)
+            result["timeline"] = [e.to_dict() for e in events_sorted[: max(0, limit)]]
+
     return AIResponse(
         success=True,
         intent="resume",
@@ -5613,17 +5623,21 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     if kind == "task_detail":
         if dry_run:
             key = "plan" if getattr(detail, "kind", "task") == "plan" else "task"
-            include_steps = not compact
-            current = (
-                plan_to_dict(base, compact=compact)
-                if key == "plan"
-                else task_to_dict(base, include_steps=include_steps, compact=compact)
-            )
-            computed = (
-                plan_to_dict(detail, compact=compact)
-                if key == "plan"
-                else task_to_dict(detail, include_steps=include_steps, compact=compact)
-            )
+            if compact:
+                current = {"state": _task_state_snapshot(base)}
+                after = {"state": _task_state_snapshot(detail)}
+            else:
+                include_steps = True
+                current = (
+                    plan_to_dict(base, compact=False)
+                    if key == "plan"
+                    else task_to_dict(base, include_steps=include_steps, compact=False)
+                )
+                after = (
+                    plan_to_dict(detail, compact=False)
+                    if key == "plan"
+                    else task_to_dict(detail, include_steps=include_steps, compact=False)
+                )
             state_diff = _preview_state_diff(_task_state_snapshot(base), _task_state_snapshot(detail))
             field_diffs = _build_patch_field_diffs(
                 kind="task_detail",
@@ -5642,8 +5656,8 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                     "kind": "task_detail",
                     "updated_fields": sorted(set(updated_fields)),
                     "diff": diff,
-                    "current": {key: current},
-                    "computed": {key: computed},
+                    "current": ({key: current} if not compact else current),
+                    "after": ({key: after} if not compact else after),
                 },
                 context={"task_id": task_id},
             )
@@ -5697,8 +5711,8 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         step, _, _ = _find_step_by_path(list(getattr(detail, "steps", []) or []), path)
         if dry_run:
             include_steps = not compact
-            current_task = task_to_dict(base, include_steps=include_steps, compact=compact)
-            computed_task = task_to_dict(detail, include_steps=include_steps, compact=compact)
+            current_task = task_to_dict(base, include_steps=include_steps, compact=compact) if not compact else None
+            after_task = task_to_dict(detail, include_steps=include_steps, compact=compact) if not compact else None
             current_step, _, _ = _find_step_by_path(list(getattr(base, "steps", []) or []), path)
             state_diff = _preview_state_diff(_task_state_snapshot(base), _task_state_snapshot(detail))
             field_diffs = _build_patch_field_diffs(
@@ -5708,6 +5722,16 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 fields=diff_fields_ordered,
             )
             diff = {"state": state_diff, "fields": field_diffs}
+            current_payload: Dict[str, Any] = {"state": _task_state_snapshot(base)}
+            after_payload: Dict[str, Any] = {"state": _task_state_snapshot(detail)}
+            if current_task is not None:
+                current_payload["task"] = current_task
+            if after_task is not None:
+                after_payload["task"] = after_task
+            current_payload["step"] = (
+                step_to_dict(current_step, path=path, compact=compact, include_steps=not compact) if current_step else None
+            )
+            after_payload["step"] = step_to_dict(step, path=path, compact=compact, include_steps=not compact) if step else None
             return AIResponse(
                 success=True,
                 intent="patch",
@@ -5719,18 +5743,8 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                     "path": path,
                     "updated_fields": sorted(set(updated_fields)),
                     "diff": diff,
-                    "current": {
-                        "task": current_task,
-                        "step": step_to_dict(
-                            current_step, path=path, compact=compact, include_steps=not compact
-                        )
-                        if current_step
-                        else None,
-                    },
-                    "computed": {
-                        "task": computed_task,
-                        "step": step_to_dict(step, path=path, compact=compact, include_steps=not compact) if step else None,
-                    },
+                    "current": current_payload,
+                    "after": after_payload,
                 },
                 context={"task_id": task_id},
             )
@@ -5778,8 +5792,8 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     node, _, _ = _find_task_by_path(list(getattr(detail, "steps", []) or []), path)
     if dry_run:
         include_steps = not compact
-        current_task = task_to_dict(base, include_steps=include_steps, compact=compact)
-        computed_task = task_to_dict(detail, include_steps=include_steps, compact=compact)
+        current_task = task_to_dict(base, include_steps=include_steps, compact=compact) if not compact else None
+        after_task = task_to_dict(detail, include_steps=include_steps, compact=compact) if not compact else None
         current_node, _, _ = _find_task_by_path(list(getattr(base, "steps", []) or []), path)
         state_diff = _preview_state_diff(_task_state_snapshot(base), _task_state_snapshot(detail))
         field_diffs = _build_patch_field_diffs(
@@ -5789,6 +5803,18 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             fields=diff_fields_ordered,
         )
         diff = {"state": state_diff, "fields": field_diffs}
+        current_payload: Dict[str, Any] = {"state": _task_state_snapshot(base)}
+        after_payload: Dict[str, Any] = {"state": _task_state_snapshot(detail)}
+        if current_task is not None:
+            current_payload["task"] = current_task
+        if after_task is not None:
+            after_payload["task"] = after_task
+        current_payload["task_node"] = (
+            task_node_to_dict(current_node, path=path, compact=compact, include_steps=not compact) if current_node else None
+        )
+        after_payload["task_node"] = (
+            task_node_to_dict(node, path=path, compact=compact, include_steps=not compact) if node else None
+        )
         return AIResponse(
             success=True,
             intent="patch",
@@ -5800,18 +5826,8 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 "path": path,
                 "updated_fields": sorted(set(updated_fields)),
                 "diff": diff,
-                "current": {
-                    "task": current_task,
-                    "task_node": task_node_to_dict(
-                        current_node, path=path, compact=compact, include_steps=not compact
-                    )
-                    if current_node
-                    else None,
-                },
-                "computed": {
-                    "task": computed_task,
-                    "task_node": task_node_to_dict(node, path=path, compact=compact, include_steps=not compact) if node else None,
-                },
+                "current": current_payload,
+                "after": after_payload,
             },
             context={"task_id": task_id},
         )

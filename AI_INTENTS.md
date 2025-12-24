@@ -236,7 +236,8 @@ Load a specific `plan`/`task` (or `.last` fallback) with optional timeline.
 
 Notes:
 - `compact=true` (default) returns a short summary payload; use `compact=false` for full snapshots.
-- Returns either `result.plan` or `result.task`. For tasks also returns `result.checkpoint_status` (bounded in `compact=true`).
+- With `compact=true` (default) returns `result.summary` (strip: `focus/now/runway/verify`) and skips heavy snapshots/timeline.
+- With `compact=false` returns either `result.plan` or `result.task` (full), plus `result.checkpoint_status` (tasks) and optional `result.timeline`.
 
 ### lint
 
@@ -531,10 +532,12 @@ Dry-run preview (no writes; does not pollute ops history/delta):
 
 Dry-run response is explicit-by-shape:
 - `result.current` — current snapshot
-- `result.computed` — post-preview snapshot (in-memory)
+- `result.after` — post-preview snapshot (in-memory)
 - `result.diff.state` — status/progress/blocked diff (when changed)
 - `result.diff.fields` — before/after for changed fields (trust-by-diff; works even in `compact=true`)
 - `result.would_execute=false` when the patch is a true no-op (no side-effects)
+Notes:
+- In `compact=true` (default), `current/after` are minimal (`state` + target object) to keep previews cognitively cheap; use `compact=false` for full snapshots.
 
 No-op behavior (non-dry-run):
 - If the patch results in no changes, it returns `result.no_op=true`, does not bump revision, and does not write an ops history entry.

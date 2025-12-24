@@ -13,7 +13,7 @@ def _make_completed_step() -> Step:
     return step
 
 
-def test_patch_dry_run_returns_current_and_computed_snapshots(tmp_path):
+def test_patch_dry_run_returns_current_and_after_snapshots(tmp_path):
     tasks_dir = tmp_path / ".tasks"
     tasks_dir.mkdir()
     manager = TaskManager(tasks_dir=tasks_dir)
@@ -36,9 +36,9 @@ def test_patch_dry_run_returns_current_and_computed_snapshots(tmp_path):
     assert result.get("dry_run") is True
     assert result.get("kind") == "task_detail"
     assert "current" in result
-    assert "computed" in result
-    assert result["current"]["task"]["status"] == "ACTIVE"
-    assert result["computed"]["task"]["status"] == "ACTIVE"
+    assert "after" in result
+    assert (result["current"].get("state") or {}).get("status") == "ACTIVE"
+    assert (result["after"].get("state") or {}).get("status") == "ACTIVE"
     diff = result.get("diff") or {}
     assert (diff.get("state") or {}) == {}
     fields = diff.get("fields") or []
