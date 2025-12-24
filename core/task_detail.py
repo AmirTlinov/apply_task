@@ -139,11 +139,12 @@ class TaskDetail:
         # kind == "task"
         # DONE is explicit, but must remain consistent with core invariants.
         if current == "DONE":
+            has_steps = bool(_flatten_step_tree(list(getattr(self, "steps", []) or [])))
             # Minimal DONE invariants (core-only, no app-layer lint):
             # - progress==100 when there are steps
             # - root success_criteria must exist
             has_root_contract = bool(list(getattr(self, "success_criteria", []) or []))
-            if prog < 100 or not has_root_contract:
+            if (has_steps and prog < 100) or not has_root_contract:
                 # Reopen deterministically: a previously closed task that becomes invalid
                 # needs attention, so we wake it up to ACTIVE.
                 self.status = "ACTIVE"

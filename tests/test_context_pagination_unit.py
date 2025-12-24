@@ -18,7 +18,7 @@ def test_handle_context_pagination_and_filters(manager):
     plan = manager.create_plan("Plan")
     manager.save_task(plan)
     t1 = TaskDetail(id="TASK-001", title="One", status="TODO", parent=plan.id, kind="task")
-    t2 = TaskDetail(id="TASK-002", title="Two", status="DONE", parent=plan.id, kind="task")
+    t2 = TaskDetail(id="TASK-002", title="Two", status="DONE", parent=plan.id, kind="task", success_criteria=["ok"])
     manager.save_task(t1)
     manager.save_task(t2)
 
