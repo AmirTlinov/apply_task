@@ -6,6 +6,7 @@ import pytest
 
 from core import Attachment, Step, TaskDetail, VerificationCheck
 from core.desktop.devtools.application.task_manager import TaskManager
+from core.desktop.devtools.application.evidence_contract import MAX_ARTIFACT_BYTES, MAX_EVIDENCE_ITEMS
 from core.desktop.devtools.interface.intent_api import handle_radar, handle_verify
 
 
@@ -143,9 +144,13 @@ def test_handle_radar_includes_task_level_evidence_blackbox(manager: TaskManager
     resp = handle_radar(manager, {"intent": "radar", "task": "TASK-001", "limit": 1})
     assert resp.success is True
     evidence_task = (resp.result.get("verify") or {}).get("evidence_task") or {}
+    evidence_contract = (resp.result.get("verify") or {}).get("evidence_contract") or {}
     assert evidence_task.get("steps_total") == 2
     assert evidence_task.get("checks", {}).get("count") == 2
     assert evidence_task.get("checks", {}).get("kinds", {}).get("ci") == 1
     assert evidence_task.get("checks", {}).get("kinds", {}).get("lint") == 1
     assert evidence_task.get("checks", {}).get("last_observed_at") == "2025-12-22T00:00:02+00:00"
     assert evidence_task.get("attachments", {}).get("count") == 1
+    assert evidence_contract.get("limits", {}).get("max_items") == int(MAX_EVIDENCE_ITEMS)
+    assert evidence_contract.get("limits", {}).get("max_artifact_bytes") == int(MAX_ARTIFACT_BYTES)
+    assert "cmd_output" in (evidence_contract.get("artifact_kinds") or {})

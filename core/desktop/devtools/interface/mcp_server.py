@@ -24,6 +24,11 @@ from typing import Any, Dict, List, Optional
 from contextlib import redirect_stdout
 
 from core.desktop.devtools.application.task_manager import TaskManager
+from core.desktop.devtools.application.evidence_contract import (
+    EVIDENCE_ARTIFACT_KINDS,
+    MAX_ARTIFACT_BYTES,
+    MAX_EVIDENCE_ITEMS,
+)
 from core.desktop.devtools.interface.intent_api import INTENT_HANDLERS, process_intent
 from core.desktop.devtools.interface.tasks_dir_resolver import get_tasks_dir_for_project, resolve_project_root
 
@@ -71,6 +76,78 @@ def _step_path_description() -> str:
 
 def _task_path_description() -> str:
     return "Task path inside a step plan (e.g. 's:0.t:1')."
+
+
+def _verification_check_item_schema() -> Dict[str, Any]:
+    # Matches core.evidence.VerificationCheck.from_dict (strict validation happens in handlers).
+    return {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string"},
+            "spec": {"type": "string"},
+            "outcome": {"type": "string"},
+            "observed_at": {"type": "string"},
+            "digest": {"type": "string"},
+            "preview": {"type": "string"},
+            "details": {"type": "object"},
+        },
+        "required": [],
+    }
+
+
+def _checks_schema() -> Dict[str, Any]:
+    # Strings are normalized to {"kind":"command","spec":<value>,"outcome":"info"}.
+    return {
+        "type": "array",
+        "items": {"anyOf": [{"type": "string"}, _verification_check_item_schema()]},
+    }
+
+
+def _attachment_item_schema() -> Dict[str, Any]:
+    # Matches core.evidence.Attachment.from_dict (strict validation happens in handlers).
+    return {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string"},
+            "path": {"type": "string"},
+            "file_path": {"type": "string"},
+            "uri": {"type": "string"},
+            "external_uri": {"type": "string"},
+            "size": {"type": ["integer", "null"]},
+            "digest": {"type": "string"},
+            "observed_at": {"type": "string"},
+            "meta": {"type": "object"},
+        },
+        "required": [],
+    }
+
+
+def _attachments_schema() -> Dict[str, Any]:
+    # Strings are normalized to {"kind":"file","path":<value>}.
+    return {"type": "array", "items": {"anyOf": [{"type": "string"}, _attachment_item_schema()]}}
+
+
+def _evidence_artifact_item_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string", "enum": sorted(list(EVIDENCE_ARTIFACT_KINDS))},
+            "command": {"type": "string"},
+            "stdout": {"type": "string"},
+            "stderr": {"type": "string"},
+            "exit_code": {"type": ["integer", "null"]},
+            "diff": {"type": "string"},
+            "url": {"type": "string"},
+            "external_uri": {"type": "string"},
+            "content": {"type": "string"},
+            "meta": {"type": "object"},
+        },
+        "required": ["kind"],
+    }
+
+
+def _evidence_artifacts_schema() -> Dict[str, Any]:
+    return {"type": "array", "maxItems": int(MAX_EVIDENCE_ITEMS), "items": _evidence_artifact_item_schema()}
 
 
 _COMMON_REQUEST_PROPERTIES: Dict[str, Any] = {
@@ -401,8 +478,8 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
                         "docs": {"type": "object"},
                     },
                 },
-                "checks": {"type": "array", "description": "Optional verification checks for step targets."},
-                "attachments": {"type": "array", "description": "Optional attachments for checkpoint targets."},
+                "checks": {**_checks_schema(), "description": "Optional verification checks for step targets."},
+                "attachments": {**_attachments_schema(), "description": "Optional attachments for checkpoint targets."},
                 "verification_outcome": {"type": "string", "description": "Optional outcome label for step targets."},
             },
             "required": ["checkpoints"],
@@ -417,27 +494,12 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
                 "path": {"type": "string", "description": _step_path_description()},
                 "step_id": {"type": "string", "description": "Stable step id (STEP-...)."},
                 "artifacts": {
-                    "type": "array",
-                    "description": "Artifacts to capture (kind=cmd_output|diff|url).",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "kind": {"type": "string"},
-                            "command": {"type": "string"},
-                            "stdout": {"type": "string"},
-                            "stderr": {"type": "string"},
-                            "exit_code": {"type": ["integer", "null"]},
-                            "diff": {"type": "string"},
-                            "url": {"type": "string"},
-                            "external_uri": {"type": "string"},
-                            "content": {"type": "string"},
-                            "meta": {"type": "object"},
-                        },
-                    },
+                    **_evidence_artifacts_schema(),
+                    "description": f"Artifacts to capture (kind=cmd_output|diff|url). Limits: max_items={MAX_EVIDENCE_ITEMS}, max_artifact_bytes≈{MAX_ARTIFACT_BYTES} (truncated/redacted).",
                 },
-                "items": {"type": "array", "description": "Alias for artifacts."},
-                "attachments": {"type": "array", "description": "Optional plain attachments (same shape as verify attachments)."},
-                "checks": {"type": "array", "description": "Optional verification checks (same shape as verify checks)."},
+                "items": {**_evidence_artifacts_schema(), "description": "Alias for artifacts."},
+                "attachments": {**_attachments_schema(), "description": "Optional plain attachments (same shape as verify attachments)."},
+                "checks": {**_checks_schema(), "description": "Optional verification checks (same shape as verify checks)."},
                 "verification_outcome": {"type": "string", "description": "Optional outcome label for step targets."},
             },
             "required": [],
@@ -463,8 +525,8 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
                         "docs": {"type": "object"},
                     },
                 },
-                "checks": {"type": "array", "description": "Optional verification checks for auto_verify=true (step only)."},
-                "attachments": {"type": "array", "description": "Optional attachments for auto_verify=true (step only)."},
+                "checks": {**_checks_schema(), "description": "Optional verification checks for auto_verify=true (step only)."},
+                "attachments": {**_attachments_schema(), "description": "Optional attachments for auto_verify=true (step only)."},
                 "verification_outcome": {"type": "string", "description": "Optional outcome label for auto_verify=true (step only)."},
                 "note": {"type": "string", "description": "Optional progress note saved before completion."},
                 "force": {"type": "boolean", "default": False},
@@ -492,8 +554,8 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
                         "docs": {"type": "object"},
                     },
                 },
-                "checks": {"type": "array", "description": "Optional verification checks for step targets."},
-                "attachments": {"type": "array", "description": "Optional attachments for step targets."},
+                "checks": {**_checks_schema(), "description": "Optional verification checks for step targets."},
+                "attachments": {**_attachments_schema(), "description": "Optional attachments for step targets."},
                 "verification_outcome": {"type": "string", "description": "Optional outcome label for step targets."},
                 "note": {"type": "string", "description": "Optional progress note saved before completion."},
                 "force": {"type": "boolean", "default": False},

@@ -44,6 +44,11 @@ from core.desktop.devtools.application.scaffolding import (
     get_template,
     list_templates,
 )
+from core.desktop.devtools.application.evidence_contract import (
+    MAX_ARTIFACT_BYTES,
+    MAX_EVIDENCE_ITEMS,
+    evidence_contract_summary,
+)
 from core.desktop.devtools.application.task_manager import (
     TaskManager,
     _find_step_by_path,
@@ -62,8 +67,6 @@ from core.desktop.devtools.interface.tasks_dir_resolver import resolve_project_r
 MAX_STRING_LENGTH = 500
 MAX_ARRAY_LENGTH = 200
 MAX_NESTING_DEPTH = 24
-MAX_ARTIFACT_BYTES = 256_000
-MAX_EVIDENCE_ITEMS = 20
 
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PATH_PATTERN = re.compile(r"^s:\d+(\.t:\d+\.s:\d+)*(\.t:\d+)?$")
@@ -2533,6 +2536,7 @@ def _build_radar_payload(
     result["open_checkpoints"] = open_checkpoints
     if isinstance(result.get("verify"), dict):
         result["verify"].setdefault("evidence_task", _task_evidence_summary(task))
+        result["verify"].setdefault("evidence_contract", evidence_contract_summary())
 
     deps = [str(d or "").strip() for d in list(getattr(task, "depends_on", []) or []) if str(d or "").strip()]
     unresolved: List[str] = []
