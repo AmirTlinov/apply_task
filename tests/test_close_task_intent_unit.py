@@ -38,7 +38,9 @@ def test_close_task_dry_run_reports_runway_and_recipe(manager: TaskManager):
     diff = resp.result.get("diff") or {}
     patches = diff.get("patches") or []
     assert len(patches) == 1
-    assert (diff.get("patch_results") or []) == []
+    patch_results = diff.get("patch_results") or []
+    assert patch_results and patch_results[0].get("kind") == "task_detail"
+    assert "success_criteria" in list(patch_results[0].get("updated_fields") or [])
     assert patches[0].get("kind") == "task_detail"
     assert patches[0].get("strict_targeting") is True
     assert patches[0].get("expected_target_id") == "TASK-001"
@@ -74,6 +76,9 @@ def test_close_task_dry_run_includes_apply_package_when_autoland_is_possible(man
     assert resp.result.get("dry_run") is True
     diff = resp.result.get("diff") or {}
     assert diff.get("apply_mode") == "autoland"
+    patch_results = diff.get("patch_results") or []
+    assert patch_results and patch_results[0].get("kind") == "task_detail"
+    assert "success_criteria" in list(patch_results[0].get("updated_fields") or [])
     assert (diff.get("complete") or {}).get("status") == {"from": "ACTIVE", "to": "DONE"}
 
     apply_pkg = diff.get("apply") or {}
@@ -266,6 +271,11 @@ def test_close_task_preview_includes_recipe_patch_even_with_user_patches(manager
     assert len(patches) == 2
     fields = [(p.get("ops") or [{}])[0].get("field") for p in patches]
     assert fields == ["next_steps", "success_criteria"]
+    patch_results = diff.get("patch_results") or []
+    assert len(patch_results) == 2
+    updated = [set(r.get("updated_fields") or []) for r in patch_results]
+    assert {"next_steps"} in updated
+    assert {"success_criteria"} in updated
 
 
 def test_close_task_apply_uses_computed_diff_patches_to_land(manager: TaskManager):

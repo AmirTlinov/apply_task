@@ -6780,6 +6780,17 @@ def handle_close_task(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             source_intent="close_task",
         )
 
+    # Previews must not hide what the derived recipe would mutate.
+    # If we computed a deterministic patch recipe and included it in diff.patches,
+    # also expose its patch meta in diff.patch_results (like in autoland apply mode).
+    if not apply and isinstance(autoland_secured_item, dict) and isinstance(autoland_recipe_meta, dict):
+        existing = {_patch_item_signature(p) for p in patch_items if isinstance(p, dict)}
+        sig = _patch_item_signature(autoland_secured_item)
+        if sig not in existing:
+            meta_payload = dict(autoland_recipe_meta)
+            meta_payload.setdefault("index", len(list(patch_results or [])))
+            patch_results.append(meta_payload)
+
     apply_package: Optional[Dict[str, Any]] = None
     apply_mode: Optional[str] = None
     if base_status != "DONE":
