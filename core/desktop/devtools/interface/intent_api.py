@@ -157,7 +157,9 @@ def _secure_suggestion_for_focus(suggestion: Suggestion, focus: Dict[str, Any]) 
     focus_revision = focus.get("revision")
     target_id = str(params.get("task") or params.get("plan") or "").strip()
 
-    if focus_id and target_id == focus_id and str(suggestion.action or "") in _MUTATING_INTENTS:
+    action = str(suggestion.action or "")
+    safe_actions = set(_MUTATING_INTENTS) | {"batch"}
+    if focus_id and target_id == focus_id and action in safe_actions:
         params.setdefault("strict_targeting", True)
         params.setdefault("expected_target_id", focus_id)
         if focus_kind in {"task", "plan"}:
@@ -364,6 +366,31 @@ def _patch_item_from_patch_intent_payload(payload: Any) -> Optional[Dict[str, An
             continue
         item[key] = str(val)
     return item
+
+
+def _secure_patch_item_for_task(patch_item: Any, *, task_id: str, revision: int) -> Optional[Dict[str, Any]]:
+    """Add safe-by-default targeting guards to a patch-item (output-only).
+
+    This is designed for copy/paste UX: previews must carry enough information to be
+    executed safely without the caller inventing expected_* fields.
+    """
+    if not isinstance(patch_item, dict):
+        return None
+    tid = str(task_id or "").strip()
+    if not tid:
+        return None
+    try:
+        rev = int(revision)
+    except Exception:
+        rev = 0
+    if rev < 0:
+        rev = 0
+    secured = dict(patch_item)
+    secured["strict_targeting"] = True
+    secured["expected_target_id"] = tid
+    secured["expected_kind"] = "task"
+    secured["expected_revision"] = rev
+    return secured
 
 
 def _lint_issue_fix_recipe(focus_id: str, *, detail: Any, issue: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -6327,6 +6354,7 @@ def handle_close_task(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     if getattr(base, "kind", "task") != "task":
         return error_response("close_task", "NOT_A_TASK", "close_task применим только к заданиям (TASK-###)")
 
+    base_revision = int(getattr(base, "revision", 0) or 0)
     base_status = str(getattr(base, "status", "") or "").strip().upper()
     if base_status == "DONE" and not raw_patches:
         # Stable no-op (already parked at the gate).
@@ -6436,6 +6464,14 @@ def handle_close_task(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         if derived:
             diff_patches = [derived]
 
+    # Previews must be copy/paste safe: add strict targeting + expected_* guards.
+    secured_patches: List[Dict[str, Any]] = []
+    for item in list(diff_patches or []):
+        secured = _secure_patch_item_for_task(item, task_id=task_id, revision=base_revision)
+        if secured:
+            secured_patches.append(secured)
+    diff_patches = secured_patches
+
     diff = {"patches": diff_patches, "patch_results": patch_results, "complete": complete_diff}
 
     if not apply:
@@ -6457,12 +6493,28 @@ def handle_close_task(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         )
 
     if not runway_open and not force:
+        recipe_payload: Dict[str, Any] = dict(recipe) if isinstance(recipe, dict) else {"intent": "lint", "task": task_id}
+        recipe_payload.setdefault("task", task_id)
+        sug = _suggestion_from_intent_payload(
+            recipe_payload,
+            reason="Полоса закрыта — выполни этот рецепт, затем повтори close_task(apply=true).",
+            priority="high",
+        )
+        if not sug:
+            sug = Suggestion(
+                action="lint",
+                target="tasks_lint",
+                reason="Полоса закрыта — сначала проверь lint, затем исправь ошибки и повтори close_task(apply=true).",
+                priority="high",
+                params={"task": task_id},
+            )
         return error_response(
             "close_task",
             "RUNWAY_CLOSED",
             "Нельзя закрыть: полоса закрыта",
-            recovery="Используй runway.recipe (patch) и повтори close_task(apply=true), либо force=true с override_reason.",
-            result={"task": task_id, "runway": runway_payload, "diff": diff, "lint": report_dict},
+            recovery="Выполни рецепт (top suggestion) и повтори close_task(apply=true).",
+            result={"task_id": task_id},
+            suggestions=[sug],
         )
 
     operations: List[Dict[str, Any]] = []

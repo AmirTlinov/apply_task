@@ -20,6 +20,9 @@ def test_close_task_dry_run_reports_runway_and_recipe(manager: TaskManager):
     task = TaskDetail(id="TASK-001", title="Task", status="ACTIVE", steps=[step])
     task.success_criteria = []
     manager.save_task(task, skip_sync=True)
+    current = manager.load_task("TASK-001", skip_sync=True)
+    assert current is not None
+    expected_revision = int(getattr(current, "revision", 0) or 0)
 
     resp = process_intent(manager, {"intent": "close_task", "task": "TASK-001"})
     assert resp.success is True
@@ -33,6 +36,10 @@ def test_close_task_dry_run_reports_runway_and_recipe(manager: TaskManager):
     assert len(patches) == 1
     assert (diff.get("patch_results") or []) == []
     assert patches[0].get("kind") == "task_detail"
+    assert patches[0].get("strict_targeting") is True
+    assert patches[0].get("expected_target_id") == "TASK-001"
+    assert patches[0].get("expected_kind") == "task"
+    assert patches[0].get("expected_revision") == expected_revision
     ops = patches[0].get("ops") or []
     assert ops and ops[0].get("field") == "success_criteria"
 
@@ -70,3 +77,38 @@ def test_close_task_apply_blocks_when_runway_closed(manager: TaskManager):
     resp = process_intent(manager, {"intent": "close_task", "task": "TASK-001", "apply": True})
     assert resp.success is False
     assert resp.error_code == "RUNWAY_CLOSED"
+    # Atomic safety: no noisy payloads, only a single executable recipe suggestion.
+    assert "diff" not in (resp.result or {})
+    assert "runway" not in (resp.result or {})
+    assert "lint" not in (resp.result or {})
+    assert resp.suggestions and len(resp.suggestions) == 1
+    sug = resp.suggestions[0]
+    assert sug.validated is True
+    assert (sug.params or {}).get("strict_targeting") is True
+    assert (sug.params or {}).get("expected_target_id") == "TASK-001"
+    assert isinstance((sug.params or {}).get("expected_revision"), int)
+
+
+def test_close_task_apply_when_root_lint_blocks_returns_single_patch_recipe(manager: TaskManager):
+    step = Step.new("Ready step title long enough 12345", criteria=["c"], tests=["t"])
+    assert step is not None
+    step.completed = True
+    step.criteria_confirmed = True
+    step.tests_confirmed = True
+
+    task = TaskDetail(id="TASK-001", title="Task", status="ACTIVE", steps=[step], success_criteria=[])
+    manager.save_task(task, skip_sync=True)
+
+    resp = process_intent(manager, {"intent": "close_task", "task": "TASK-001", "apply": True})
+    assert resp.success is False
+    assert resp.error_code == "RUNWAY_CLOSED"
+    assert resp.suggestions and len(resp.suggestions) == 1
+    sug = resp.suggestions[0]
+    assert sug.validated is True
+    assert sug.action == "patch"
+    assert (sug.params or {}).get("strict_targeting") is True
+    assert (sug.params or {}).get("expected_target_id") == "TASK-001"
+    assert isinstance((sug.params or {}).get("expected_revision"), int)
+    assert (sug.params or {}).get("task") == "TASK-001"
+    ops = (sug.params or {}).get("ops") or []
+    assert ops and ops[0].get("field") == "success_criteria"
