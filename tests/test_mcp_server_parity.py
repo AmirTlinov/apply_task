@@ -21,6 +21,18 @@ def test_mcp_returns_text_content(monkeypatch, tmp_path):
     server = MCPServer(tasks_dir=tmp_path, use_global=False)
     _init_server(server)
 
+    tools_resp = server.handle_request(JsonRpcRequest(
+        jsonrpc="2.0",
+        method="tools/list",
+        id=0,
+        params={},
+    ))
+    tools = (tools_resp or {}).get("result", {}).get("tools", [])
+    close_tool = next((t for t in tools if t.get("name") == "tasks_close_task"), None)
+    assert close_tool is not None
+    close_props = ((close_tool.get("inputSchema") or {}).get("properties") or {})
+    assert (close_props.get("compact") or {}).get("default") is True
+
     # create a sample plan + task
     manager = server.manager
     plan = manager.create_plan("Plan")

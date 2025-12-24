@@ -570,6 +570,11 @@ _TOOL_SPECS: Dict[str, Dict[str, Any]] = {
             "type": "object",
             "properties": {
                 "task": {"type": "string", "description": "Task id (TASK-###)."},
+                "compact": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "When true (default), return a compact task snapshot on apply=true; set false to include full task/steps payload.",
+                },
                 "apply": {"type": "boolean", "default": False, "description": "When true, applies patches and completes (DONE) atomically."},
                 "force": {"type": "boolean", "default": False},
                 "override_reason": {"type": "string", "description": "Required when force=true."},

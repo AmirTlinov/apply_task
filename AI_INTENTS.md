@@ -618,6 +618,7 @@ Notes:
 - When `apply=false` (default), `close_task` is always a dry-run (no history side-effects).
 - To record the preview in the audit stream, pass `audit=true` and query `history(stream=\"audit\")` / `delta(stream=\"audit\")`.
 - Returns `runway` + `diff` so you can see exactly what would change.
+- `compact=true` (default) keeps the apply result cognitively cheap; set `compact=false` to include full task/steps payload in the success response.
 - `result.diff.patches[]` is an applyable patch list (same shape as `close_task.patches[]`). When `runway.open=false` and `runway.recipe.intent == "patch"`, `diff.patches[0]` mirrors that recipe in patch-item form (so the loop is: preview → `patch` → `close_task(apply=true)`).
 - When `runway.open=true`, `result.diff.apply` contains a ready-to-run `tasks_batch` argument pack (atomic patches → complete), already guarded by `strict_targeting` + `expected_*`.
 - Previews are copy/paste safe:
@@ -626,6 +627,7 @@ Notes:
 - `result.diff.patch_results[]` is the in-memory simulation metadata for any provided `patches[]` (updated fields + resolved path).
 - If the runway is closed and `force=false`, `apply=true` fails with `RUNWAY_CLOSED` and returns exactly one validated suggestion (the repair recipe) with safety guards; the error payload is intentionally minimal (no `runway`/`diff`/`lint` noise).
 - Auto-land: if `apply=true`, `force=false`, and the runway is closed only due to a patch recipe that would open the runway, `close_task` applies that recipe and completes `DONE` in one atomic batch (guarded by `expected_revision`).
+- Auto-land is transparent: the success response includes the recipe patch entry in `result.diff.patch_results[]` and the executed atomic plan in `result.diff.apply` (so you can audit what was applied even when patches were implicit).
 - `patches[]` use the same shape as `patch` requests but omit the root `task` id (it’s implied by `close_task.task`).
 - Status is explicit: a 100% complete task is not auto-flipped to `DONE` on save/patch; use `close_task(apply=true)` or `complete(status=\"DONE\")`.
 - DONE is not “sticky”: if later mutations violate DONE invariants (e.g., reopening a step or removing root success_criteria), the task deterministically reopens (DONE → ACTIVE) to avoid contradictory UI.

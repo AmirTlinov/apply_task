@@ -131,9 +131,23 @@ def test_close_task_apply_autolands_even_with_template_recipe(manager: TaskManag
 
     task = TaskDetail(id="TASK-001", title="Task", status="ACTIVE", steps=[step], success_criteria=[])
     manager.save_task(task, skip_sync=True)
+    current = manager.load_task("TASK-001", skip_sync=True)
+    assert current is not None
+    expected_revision = int(getattr(current, "revision", 0) or 0)
 
     resp = process_intent(manager, {"intent": "close_task", "task": "TASK-001", "apply": True})
     assert resp.success is True
+    diff = resp.result.get("diff") or {}
+    patch_results = diff.get("patch_results") or []
+    assert patch_results and patch_results[0].get("kind") == "task_detail"
+    assert "success_criteria" in list(patch_results[0].get("updated_fields") or [])
+    apply_pkg = diff.get("apply") or {}
+    assert apply_pkg.get("atomic") is True
+    assert apply_pkg.get("task") == "TASK-001"
+    assert apply_pkg.get("expected_revision") == expected_revision
+    assert apply_pkg.get("strict_targeting") is True
+    ops = apply_pkg.get("operations") or []
+    assert ops and ops[-1].get("intent") == "complete"
     reloaded = manager.load_task("TASK-001", skip_sync=True)
     assert reloaded is not None
     assert str(getattr(reloaded, "status", "") or "").upper() == "DONE"
@@ -150,9 +164,21 @@ def test_close_task_apply_autolands_when_contract_done_can_fill_success_criteria
     task = TaskDetail(id="TASK-001", title="Task", status="ACTIVE", steps=[step], success_criteria=[])
     task.contract_data = {"goal": "Ship", "done": ["All checks green"], "checks": ["pytest -q"]}
     manager.save_task(task, skip_sync=True)
+    current = manager.load_task("TASK-001", skip_sync=True)
+    assert current is not None
+    expected_revision = int(getattr(current, "revision", 0) or 0)
 
     resp = process_intent(manager, {"intent": "close_task", "task": "TASK-001", "apply": True})
     assert resp.success is True
+    diff = resp.result.get("diff") or {}
+    patch_results = diff.get("patch_results") or []
+    assert patch_results and patch_results[0].get("kind") == "task_detail"
+    assert "success_criteria" in list(patch_results[0].get("updated_fields") or [])
+    apply_pkg = diff.get("apply") or {}
+    assert apply_pkg.get("atomic") is True
+    assert apply_pkg.get("task") == "TASK-001"
+    assert apply_pkg.get("expected_revision") == expected_revision
+    assert apply_pkg.get("strict_targeting") is True
     reloaded = manager.load_task("TASK-001", skip_sync=True)
     assert reloaded is not None
     assert str(getattr(reloaded, "status", "") or "").upper() == "DONE"

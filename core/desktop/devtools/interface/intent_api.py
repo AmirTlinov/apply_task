@@ -371,22 +371,6 @@ def _patch_item_from_patch_intent_payload(payload: Any) -> Optional[Dict[str, An
     return item
 
 
-def _ops_contain_placeholder_values(ops: Any) -> bool:
-    """Heuristic: template values look like '<...>' and must not be auto-applied."""
-    if not isinstance(ops, list):
-        return False
-    for op in ops:
-        if not isinstance(op, dict):
-            continue
-        val = op.get("value")
-        if not isinstance(val, str):
-            continue
-        text = val.strip()
-        if len(text) >= 3 and text.startswith("<") and text.endswith(">"):
-            return True
-    return False
-
-
 def _secure_patch_item_for_task(patch_item: Any, *, task_id: str, revision: int) -> Optional[Dict[str, Any]]:
     """Add safe-by-default targeting guards to a patch-item (output-only).
 
@@ -410,6 +394,57 @@ def _secure_patch_item_for_task(patch_item: Any, *, task_id: str, revision: int)
     secured["expected_kind"] = "task"
     secured["expected_revision"] = rev
     return secured
+
+
+def _simulate_runway_after_recipe_patch(
+    manager: TaskManager,
+    *,
+    detail: Any,
+    focus_id: str,
+    recipe: Any,
+    next_suggestions: List["Suggestion"],
+    revision: int,
+    source_intent: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Simulate applying a patch recipe in-memory and recompute runway for the result.
+
+    Returns (secured_patch_item, runway_after, patch_result_meta) or (None, None, None) when the
+    recipe is not a patch or cannot be applied safely in simulation.
+    """
+    if not isinstance(recipe, dict):
+        return None, None, None
+    if str(recipe.get("intent", "") or "").strip().lower() != "patch":
+        return None, None, None
+
+    derived = _patch_item_from_patch_intent_payload(recipe)
+    secured_item = _secure_patch_item_for_task(derived, task_id=focus_id, revision=revision)
+    if not secured_item:
+        return None, None, None
+
+    kind = str(secured_item.get("kind", "") or "").strip()
+    ops = secured_item.get("ops")
+    if kind not in {"task_detail", "step", "task"} or not isinstance(ops, list) or not ops:
+        return None, None, None
+
+    sim = copy.deepcopy(detail)
+    err_resp, meta = _apply_patch_request_inplace(
+        manager,
+        source_intent,
+        task_id=focus_id,
+        detail=sim,
+        kind=kind,
+        ops=list(ops or []),
+        data=dict(secured_item),
+    )
+    if err_resp:
+        return None, None, None
+
+    runway_after = _build_runway_payload(manager, detail=sim, focus_id=focus_id, next_suggestions=next_suggestions)
+    return (
+        secured_item,
+        runway_after if isinstance(runway_after, dict) else None,
+        meta if isinstance(meta, dict) else None,
+    )
 
 
 def _secure_intent_payload_for_focus(payload: Any, *, focus_id: str, focus_kind: str, revision: int) -> Optional[Dict[str, Any]]:
@@ -2433,12 +2468,22 @@ def _build_radar_payload(
         return result, next_suggestions
 
     task = detail
-    items = _mirror_items_from_steps(list(getattr(task, "steps", []) or []))
-    _normalize_mirror_progress(items)
-    now = next((i for i in items if i.get("queue_status") == "in_progress"), None)
-    if not now:
-        now = next((i for i in items if i.get("queue_status") == "pending"), None)
-    all_completed = bool(items) and all(i.get("queue_status") == "completed" for i in items)
+    flat_steps = _flatten_steps(list(getattr(task, "steps", []) or []))
+    # "All steps completed" must match the close_task validator (no drift):
+    # - includes nested steps (step.plan.tasks[].steps)
+    # - vacuous truth: empty step tree means "all steps completed"
+    all_completed = all(bool(getattr(st, "completed", False)) for _p, st in flat_steps)
+    now_step_pair = next(
+        (
+            (p, st)
+            for p, st in flat_steps
+            if not bool(getattr(st, "completed", False)) and bool(getattr(st, "ready_for_completion", lambda: False)())
+        ),
+        None,
+    )
+    if not now_step_pair:
+        now_step_pair = next(((p, st) for p, st in flat_steps if not bool(getattr(st, "completed", False))), None)
+    now_payload: Dict[str, Any] = {}
     queue = _compute_checkpoint_status(task)
     queue_summary = {
         "pending": len(list(queue.get("pending", []) or [])),
@@ -2446,9 +2491,37 @@ def _build_radar_payload(
         "next_pending": (list(queue.get("pending", []) or [])[:1] or [None])[0],
         "next_ready": (list(queue.get("ready", []) or [])[:1] or [None])[0],
     }
-    now_payload = dict(now or {})
-    if now_payload:
-        now_payload.setdefault("queue", queue_summary)
+    if now_step_pair:
+        path, st = now_step_pair
+        plan = getattr(st, "plan", None)
+        tasks = list(getattr(plan, "tasks", []) or []) if plan else []
+        children_total = len(tasks)
+        children_done = sum(1 for t in tasks if getattr(t, "is_done", lambda: False)())
+        if getattr(st, "completed", False):
+            queue_status = "completed"
+            progress = 100
+        elif getattr(st, "ready_for_completion", lambda: False)():
+            queue_status = "in_progress"
+            progress = 100 if children_total == 0 else int((children_done / children_total) * 100)
+        else:
+            queue_status = "pending"
+            progress = 0 if children_total == 0 else int((children_done / children_total) * 100)
+        now_payload = {
+            "kind": "step",
+            "path": path,
+            "id": str(getattr(st, "id", "") or ""),
+            "title": str(getattr(st, "title", "") or ""),
+            "queue_status": queue_status,
+            "progress": progress,
+            "children_done": children_done,
+            "children_total": children_total,
+            "criteria_confirmed": bool(getattr(st, "criteria_confirmed", False)),
+            "tests_confirmed": bool(getattr(st, "tests_confirmed", False)),
+            "criteria_auto_confirmed": bool(getattr(st, "criteria_auto_confirmed", False)),
+            "tests_auto_confirmed": bool(getattr(st, "tests_auto_confirmed", False)),
+            "blocked": bool(getattr(st, "blocked", False)),
+            "queue": queue_summary,
+        }
     elif all_completed:
         now_payload = {"kind": "task", "queue_status": "ready", "queue": queue_summary}
     else:
@@ -2566,40 +2639,23 @@ def _build_radar_payload(
         # that embeds the patch as close_task.patches[] (copy/paste-ready, guarded).
         candidate: Optional[Suggestion] = None
         if all_completed and recipe_intent == "patch":
-            derived = _patch_item_from_patch_intent_payload(recipe)
-            secured_item = _secure_patch_item_for_task(
-                derived,
-                task_id=focus_id,
+            secured_item, runway_after, _meta = _simulate_runway_after_recipe_patch(
+                manager,
+                detail=task,
+                focus_id=focus_id,
+                recipe=recipe,
+                next_suggestions=raw_suggestions,
                 revision=int(focus_payload.get("revision", 0) or 0),
+                source_intent="radar",
             )
-            if secured_item:
-                sim = copy.deepcopy(task)
-                ops = secured_item.get("ops") or []
-                kind = str(secured_item.get("kind", "") or "").strip()
-                err_resp, _meta = _apply_patch_request_inplace(
-                    manager,
-                    "radar",
-                    task_id=focus_id,
-                    detail=sim,
-                    kind=kind,
-                    ops=list(ops or []),
-                    data=dict(secured_item),
+            if secured_item and bool((runway_after or {}).get("open", False)):
+                candidate = Suggestion(
+                    action="close_task",
+                    target="tasks_close_task",
+                    reason="Полоса закрыта — применить рецепт и закрыть задачу атомарно (DONE) одним шагом.",
+                    priority="high",
+                    params={"task": focus_id, "apply": True, "patches": [secured_item]},
                 )
-                if not err_resp:
-                    runway_after = _build_runway_payload(
-                        manager,
-                        detail=sim,
-                        focus_id=focus_id,
-                        next_suggestions=raw_suggestions,
-                    )
-                    if bool(runway_after.get("open", False)):
-                        candidate = Suggestion(
-                            action="close_task",
-                            target="tasks_close_task",
-                            reason="Полоса закрыта — применить рецепт и закрыть задачу атомарно (DONE) одним шагом.",
-                            priority="high",
-                            params={"task": focus_id, "apply": True, "patches": [secured_item]},
-                        )
 
         if not candidate:
             candidate = _suggestion_from_intent_payload(
@@ -6710,94 +6766,81 @@ def handle_close_task(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
     if not runway_open and not force:
         # Auto-land: if recipe is a deterministic patch that opens runway, apply it + complete atomically.
-        if isinstance(recipe, dict) and str(recipe.get("intent", "") or "").strip().lower() == "patch":
-            recipe_ops = recipe.get("ops")
-            if recipe_ops is None:
-                recipe_ops = recipe.get("operations")
-            recipe_kind = _infer_patch_kind(recipe)
-            if (
-                recipe_kind in {"task_detail", "step", "task"}
-                and isinstance(recipe_ops, list)
-                and recipe_ops
-            ):
-                sim2 = copy.deepcopy(sim)
-                err_resp, _meta = _apply_patch_request_inplace(
-                    manager,
+        secured_item, runway_after, recipe_meta = _simulate_runway_after_recipe_patch(
+            manager,
+            detail=sim,
+            focus_id=task_id,
+            recipe=recipe,
+            next_suggestions=[],
+            revision=base_revision,
+            source_intent="close_task",
+        )
+        if secured_item and bool((runway_after or {}).get("open", False)):
+            # Reflect completion in the diff (we are going to close).
+            if base_status != "DONE":
+                diff["complete"] = {
+                    "status": {"from": base_status, "to": "DONE"},
+                    "progress": {"from": int(getattr(base, "progress", 0) or 0), "to": 100},
+                }
+
+            # Make the response fully transparent (as if recipe was an explicit patch):
+            # - diff.patch_results includes the recipe patch meta
+            # - diff.apply is the exact atomic plan executed
+            if isinstance(recipe_meta, dict):
+                meta_payload = dict(recipe_meta)
+                meta_payload.setdefault("index", len(list(patch_results or [])))
+                patch_results.append(meta_payload)
+
+            operations: List[Dict[str, Any]] = []
+            operations.extend(_close_task_patch_ops_from_patch_items(task_id, diff_patches))
+            operations.append(
+                {
+                    "intent": "complete",
+                    "task": task_id,
+                    "status": "DONE",
+                    "force": force,
+                    "override_reason": override_reason,
+                    "strict_targeting": True,
+                    "expected_target_id": task_id,
+                    "expected_kind": "task",
+                }
+            )
+            apply_package = {
+                "atomic": True,
+                "task": task_id,
+                "expected_revision": base_revision,
+                "expected_target_id": task_id,
+                "expected_kind": "task",
+                "strict_targeting": True,
+                "operations": operations,
+            }
+            diff["apply"] = dict(apply_package)
+
+            batch_payload: Dict[str, Any] = {"intent": "batch", **apply_package}
+            batch_resp = handle_batch(manager, batch_payload)
+            if not batch_resp.success:
+                return error_response(
                     "close_task",
-                    task_id=task_id,
-                    detail=sim2,
-                    kind=recipe_kind,
-                    ops=list(recipe_ops or []),
-                    data=dict(recipe),
+                    str(batch_resp.error_code or "BATCH_FAILED"),
+                    str(batch_resp.error_message or "Batch failed"),
+                    result={"task": task_id, "batch": batch_resp.to_dict()},
                 )
-                if not err_resp:
-                    all_items2: List[Any] = []
-                    if list(getattr(sim2, "depends_on", []) or []):
-                        all_items2 = manager.repo.list("", skip_sync=True)
-                    report2 = lint_item(manager, sim2, all_items2)
-                    issues2 = list(report2.to_dict().get("issues", []) or [])
-                    blocking_lint2 = [
-                        i for i in issues2 if str(i.get("severity", "") or "").strip().lower() == "error"
-                    ]
-                    validation_block2: Optional[Dict[str, Any]] = None
-                    ok2, val_err2 = _validate_root_step_ready_for_ok(sim2, manager._t)
-                    if not ok2 and isinstance(val_err2, dict):
-                        validation_block2 = {
-                            "code": str(val_err2.get("code", "validation") or "validation"),
-                            "message": str(val_err2.get("message", "") or ""),
-                        }
-                    if not blocking_lint2 and not validation_block2:
-                        # Reflect completion in the diff (we are going to close).
-                        if base_status != "DONE":
-                            diff["complete"] = {
-                                "status": {"from": base_status, "to": "DONE"},
-                                "progress": {"from": int(getattr(base, "progress", 0) or 0), "to": 100},
-                            }
-                        operations: List[Dict[str, Any]] = []
-                        operations.extend(_close_task_patch_ops_from_patch_items(task_id, diff_patches))
-                        operations.append(
-                            {
-                                "intent": "complete",
-                                "task": task_id,
-                                "status": "DONE",
-                                "force": force,
-                                "override_reason": override_reason,
-                            }
-                        )
-                        batch_payload: Dict[str, Any] = {
-                            "intent": "batch",
-                            "atomic": True,
-                            "task": task_id,
-                            "expected_revision": base_revision,
-                            "expected_target_id": task_id,
-                            "expected_kind": "task",
-                            "strict_targeting": True,
-                            "operations": operations,
-                        }
-                        batch_resp = handle_batch(manager, batch_payload)
-                        if not batch_resp.success:
-                            return error_response(
-                                "close_task",
-                                str(batch_resp.error_code or "BATCH_FAILED"),
-                                str(batch_resp.error_message or "Batch failed"),
-                                result={"task": task_id, "batch": batch_resp.to_dict()},
-                            )
-                        reloaded = manager.load_task(task_id, skip_sync=True)
-                        compact = _parse_compact(data.get("compact"), default=True)
-                        include_steps = compact is not True
-                        return AIResponse(
-                            success=True,
-                            intent="close_task",
-                            result={
-                                "task_id": task_id,
-                                "dry_run": False,
-                                "apply": True,
-                                "diff": diff,
-                                "batch": batch_resp.result,
-                                "task": task_to_dict(reloaded, include_steps=include_steps, compact=compact) if reloaded else None,
-                            },
-                            context={"task_id": task_id},
-                        )
+            reloaded = manager.load_task(task_id, skip_sync=True)
+            compact = _parse_compact(data.get("compact"), default=True)
+            include_steps = compact is not True
+            return AIResponse(
+                success=True,
+                intent="close_task",
+                result={
+                    "task_id": task_id,
+                    "dry_run": False,
+                    "apply": True,
+                    "diff": diff,
+                    "batch": batch_resp.result,
+                    "task": task_to_dict(reloaded, include_steps=include_steps, compact=compact) if reloaded else None,
+                },
+                context={"task_id": task_id},
+            )
 
         recipe_payload: Dict[str, Any] = dict(recipe) if isinstance(recipe, dict) else {"intent": "lint", "task": task_id}
         recipe_payload.setdefault("task", task_id)
