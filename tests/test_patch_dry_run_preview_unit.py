@@ -37,8 +37,8 @@ def test_patch_dry_run_returns_current_and_after_snapshots(tmp_path):
     assert result.get("kind") == "task_detail"
     assert "current" in result
     assert "after" in result
-    assert (result["current"].get("state") or {}).get("status") == "ACTIVE"
-    assert (result["after"].get("state") or {}).get("status") == "ACTIVE"
+    assert (result["current"].get("state") or {}).get("lifecycle_status") == "ACTIVE"
+    assert (result["after"].get("state") or {}).get("lifecycle_status") == "ACTIVE"
     diff = result.get("diff") or {}
     assert (diff.get("state") or {}) == {}
     fields = diff.get("fields") or []
@@ -70,4 +70,4 @@ def test_patch_dry_run_exposes_status_diff_when_blocked_changes(tmp_path):
     state = diff.get("state") or {}
 
     assert state.get("blocked") == {"from": False, "to": True}
-    assert state.get("status") == {"from": "ACTIVE", "to": "TODO"}
+    assert state.get("lifecycle_status") == {"from": "ACTIVE", "to": "TODO"}

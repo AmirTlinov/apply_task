@@ -157,7 +157,7 @@ class Step:
         - plan tasks: all must be done
         - blocked: blocked steps are never ready
         """
-        if self.blocked:
+        if bool(getattr(self, "blocked", False)):
             return False
         plan_ready = True
         if self.plan and getattr(self.plan, "tasks", None):
@@ -177,23 +177,23 @@ class Step:
 
     @property
     def computed_status(self) -> str:
-        if self.completed:
+        if bool(getattr(self, "completed", False)):
             return "completed"
-        if self.blocked:
+        if bool(getattr(self, "blocked", False)):
             return "blocked"
         if (
-            self.progress_notes
-            or self.started_at
-            or self.criteria_confirmed
-            or self.tests_confirmed
-            or self.security_confirmed
-            or self.perf_confirmed
-            or self.docs_confirmed
-            or self.criteria_notes
-            or self.tests_notes
-            or self.security_notes
-            or self.perf_notes
-            or self.docs_notes
+            list(getattr(self, "progress_notes", []) or [])
+            or getattr(self, "started_at", None)
+            or bool(getattr(self, "criteria_confirmed", False))
+            or bool(getattr(self, "tests_confirmed", False))
+            or bool(getattr(self, "security_confirmed", False))
+            or bool(getattr(self, "perf_confirmed", False))
+            or bool(getattr(self, "docs_confirmed", False))
+            or list(getattr(self, "criteria_notes", []) or [])
+            or list(getattr(self, "tests_notes", []) or [])
+            or list(getattr(self, "security_notes", []) or [])
+            or list(getattr(self, "perf_notes", []) or [])
+            or list(getattr(self, "docs_notes", []) or [])
         ):
             return "in_progress"
         return "pending"
@@ -215,15 +215,15 @@ class Step:
     def _checkpoint_ok(self, checkpoint: str) -> bool:
         name = str(checkpoint or "").strip().lower()
         if name == "criteria":
-            return bool(self.criteria_confirmed)
+            return bool(getattr(self, "criteria_confirmed", False))
         if name == "tests":
-            return bool(self.tests_confirmed or self.tests_auto_confirmed)
+            return bool(getattr(self, "tests_confirmed", False) or getattr(self, "tests_auto_confirmed", False))
         if name == "security":
-            return bool(self.security_confirmed)
+            return bool(getattr(self, "security_confirmed", False))
         if name == "perf":
-            return bool(self.perf_confirmed)
+            return bool(getattr(self, "perf_confirmed", False))
         if name == "docs":
-            return bool(self.docs_confirmed)
+            return bool(getattr(self, "docs_confirmed", False))
         return False
 
     def is_valid_flagship(self) -> tuple[bool, list[str]]:

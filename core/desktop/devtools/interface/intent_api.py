@@ -665,7 +665,7 @@ def _preview_state_diff(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[s
     surface it explicitly so clients don't have to infer it from full snapshots.
     """
     diff: Dict[str, Any] = {}
-    for field in ("status", "progress", "blocked"):
+    for field in ("lifecycle_status", "progress", "blocked"):
         if before.get(field) != after.get(field):
             diff[field] = {"from": before.get(field), "to": after.get(field)}
     return diff
@@ -678,7 +678,7 @@ def _task_state_snapshot(detail: Any) -> Dict[str, Any]:
     except Exception:
         progress = int(getattr(detail, "progress", 0) or 0)
     return {
-        "status": status_label(raw_status) if raw_status else "",
+        "lifecycle_status": status_label(raw_status) if raw_status else "",
         "progress": progress,
         "blocked": bool(getattr(detail, "blocked", False)),
     }
@@ -1760,15 +1760,15 @@ def _count_step_tree(nodes: List[Step]) -> Tuple[int, int]:
 def _normalize_mirror_progress(items: List[Dict[str, Any]]) -> None:
     first_active: Optional[int] = None
     for idx, item in enumerate(items):
-        if item.get("status") == "in_progress":
+        if item.get("queue_status") == "in_progress":
             if first_active is None:
                 first_active = idx
             else:
-                item["status"] = "pending"
+                item["queue_status"] = "pending"
     if first_active is None:
         for item in items:
-            if item.get("status") == "pending":
-                item["status"] = "in_progress"
+            if item.get("queue_status") == "pending":
+                item["queue_status"] = "in_progress"
                 break
 
 
@@ -1781,13 +1781,13 @@ def _mirror_items_from_steps(steps: List[Step], *, prefix: str = "") -> List[Dic
         children_total = len(tasks)
         children_done = sum(1 for task in tasks if getattr(task, "is_done", lambda: False)())
         if getattr(st, "completed", False):
-            status = "completed"
+            queue_status = "completed"
             progress = 100
         elif getattr(st, "ready_for_completion", lambda: False)():
-            status = "in_progress"
+            queue_status = "in_progress"
             progress = 100 if children_total == 0 else int((children_done / children_total) * 100)
         else:
-            status = "pending"
+            queue_status = "pending"
             progress = 0 if children_total == 0 else int((children_done / children_total) * 100)
         items.append(
             {
@@ -1795,7 +1795,7 @@ def _mirror_items_from_steps(steps: List[Step], *, prefix: str = "") -> List[Dic
                 "path": path,
                 "id": str(getattr(st, "id", "") or ""),
                 "title": str(getattr(st, "title", "") or ""),
-                "status": status,
+                "queue_status": queue_status,
                 "progress": progress,
                 "children_done": children_done,
                 "children_total": children_total,
@@ -1817,18 +1817,18 @@ def _mirror_items_from_task_nodes(nodes: List[TaskNode], *, prefix: str) -> List
         progress = int((done / total) * 100) if total else 0
         status_raw = str(getattr(node, "status", "") or "TODO").strip().upper()
         if bool(getattr(node, "is_done", lambda: False)()) or (status_raw == "DONE" and not getattr(node, "blocked", False)):
-            status = "completed"
+            queue_status = "completed"
         elif status_raw == "ACTIVE":
-            status = "in_progress"
+            queue_status = "in_progress"
         else:
-            status = "pending"
+            queue_status = "pending"
         items.append(
             {
                 "kind": "task",
                 "path": path,
                 "id": str(getattr(node, "id", "") or ""),
                 "title": str(getattr(node, "title", "") or ""),
-                "status": status,
+                "queue_status": queue_status,
                 "progress": progress,
                 "children_done": done,
                 "children_total": total,
@@ -1850,19 +1850,19 @@ def _mirror_items_from_tasks(tasks: List[TaskDetail]) -> List[Dict[str, Any]]:
         status_raw = str(getattr(task, "status", "") or "TODO").strip().upper()
         blocked = bool(getattr(task, "blocked", False))
         if progress >= 100 and not blocked:
-            status = "completed"
+            queue_status = "completed"
         elif status_raw == "ACTIVE":
-            status = "in_progress"
+            queue_status = "in_progress"
         elif status_raw == "DONE":
-            status = "completed"
+            queue_status = "completed"
         else:
-            status = "pending"
+            queue_status = "pending"
         items.append(
             {
                 "kind": "task",
                 "task_id": str(getattr(task, "id", "") or ""),
                 "title": str(getattr(task, "title", "") or ""),
-                "status": status,
+                "queue_status": queue_status,
                 "progress": progress,
                 "children_done": done,
                 "children_total": total,
@@ -1963,12 +1963,30 @@ def generate_suggestions(manager: TaskManager, focus_id: Optional[str] = None) -
         if task and task.steps:
             items = _mirror_items_from_steps(list(getattr(task, "steps", []) or []))
             _normalize_mirror_progress(items)
-            now = next((i for i in items if i.get("status") == "in_progress"), None)
+            now = next((i for i in items if i.get("queue_status") == "in_progress"), None)
             if not now:
-                now = next((i for i in items if i.get("status") == "pending"), None)
+                now = next((i for i in items if i.get("queue_status") == "pending"), None)
             if not now or not now.get("path"):
                 # All steps are completed (or there is no actionable step). Next safe action is task closure.
                 if str(getattr(task, "status", "") or "").strip().upper() != "DONE":
+                    # Keep suggestions runway-gated: if the runway is closed, offer exactly one fix recipe.
+                    try:
+                        runway = _build_runway_payload(
+                            manager,
+                            detail=task,
+                            focus_id=focus_id,
+                            next_suggestions=[],
+                        )
+                    except Exception:
+                        runway = {}
+                    if not bool((runway or {}).get("open", True)) and isinstance((runway or {}).get("recipe"), dict):
+                        candidate = _suggestion_from_intent_payload(
+                            (runway or {}).get("recipe"),
+                            reason="Полоса закрыта — открой её этим рецептом.",
+                            priority="high",
+                        )
+                        if candidate:
+                            return [candidate]
                     return [
                         Suggestion(
                             action="close_task",
@@ -2428,10 +2446,10 @@ def _build_radar_payload(
     task = detail
     items = _mirror_items_from_steps(list(getattr(task, "steps", []) or []))
     _normalize_mirror_progress(items)
-    now = next((i for i in items if i.get("status") == "in_progress"), None)
+    now = next((i for i in items if i.get("queue_status") == "in_progress"), None)
     if not now:
-        now = next((i for i in items if i.get("status") == "pending"), None)
-    all_completed = bool(items) and all(i.get("status") == "completed" for i in items)
+        now = next((i for i in items if i.get("queue_status") == "pending"), None)
+    all_completed = bool(items) and all(i.get("queue_status") == "completed" for i in items)
     queue = _compute_checkpoint_status(task)
     queue_summary = {
         "pending": len(list(queue.get("pending", []) or [])),
@@ -2441,8 +2459,6 @@ def _build_radar_payload(
     }
     now_payload = dict(now or {})
     if now_payload:
-        if "status" in now_payload:
-            now_payload["queue_status"] = now_payload.pop("status")
         now_payload.setdefault("queue", queue_summary)
     elif all_completed:
         now_payload = {"kind": "task", "queue_status": "ready", "queue": queue_summary}
@@ -6348,9 +6364,9 @@ def handle_mirror(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     _normalize_mirror_progress(items)
     summary = {
         "total": len(items),
-        "completed": sum(1 for i in items if i.get("status") == "completed"),
-        "in_progress": sum(1 for i in items if i.get("status") == "in_progress"),
-        "pending": sum(1 for i in items if i.get("status") == "pending"),
+        "completed": sum(1 for i in items if i.get("queue_status") == "completed"),
+        "in_progress": sum(1 for i in items if i.get("queue_status") == "in_progress"),
+        "pending": sum(1 for i in items if i.get("queue_status") == "pending"),
     }
 
     return AIResponse(
@@ -6613,7 +6629,33 @@ def handle_close_task(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             secured_patches.append(secured)
     diff_patches = secured_patches
 
-    diff = {"patches": diff_patches, "patch_results": patch_results, "complete": complete_diff}
+    apply_package: Optional[Dict[str, Any]] = None
+    if runway_open and base_status != "DONE":
+        operations: List[Dict[str, Any]] = []
+        operations.extend(_close_task_patch_ops_from_patch_items(task_id, diff_patches))
+        operations.append(
+            {
+                "intent": "complete",
+                "task": task_id,
+                "status": "DONE",
+                "force": force,
+                "override_reason": override_reason,
+                "strict_targeting": True,
+                "expected_target_id": task_id,
+                "expected_kind": "task",
+            }
+        )
+        apply_package = {
+            "atomic": True,
+            "task": task_id,
+            "expected_revision": base_revision,
+            "expected_target_id": task_id,
+            "expected_kind": "task",
+            "strict_targeting": True,
+            "operations": operations,
+        }
+
+    diff = {"patches": diff_patches, "patch_results": patch_results, "complete": complete_diff, "apply": apply_package}
 
     if not apply:
         return AIResponse(

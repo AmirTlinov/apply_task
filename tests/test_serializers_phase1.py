@@ -61,9 +61,7 @@ class TestStepSerializerPhase1:
 
         result = step_to_dict(step, path="0", compact=True)
 
-        # Should have status field
-        assert "status" in result
-        assert result["status"] == "in_progress"
+        assert result["computed_status"] == "in_progress"
 
     def test_compact_mode_blocked_flag(self):
         """Compact mode should include blocked flag when true."""
@@ -79,7 +77,7 @@ class TestStepSerializerPhase1:
         # Should have blocked fields
         assert result["blocked"] is True
         assert result["block_reason"] == "Waiting for review"
-        assert result["status"] == "blocked"
+        assert result["computed_status"] == "blocked"
 
     def test_compact_mode_blocked_without_reason(self):
         """Compact mode should include blocked flag even without reason."""
@@ -113,11 +111,11 @@ class TestStepSerializerPhase1:
         """Test computed_status reflects correct priority: completed > blocked > in_progress > pending."""
         # Pending
         step = Step(completed=False, title="Test")
-        assert step_to_dict(step, compact=True)["status"] == "pending"
+        assert step_to_dict(step, compact=True)["computed_status"] == "pending"
 
         # In progress (has progress_notes)
         step = Step(completed=False, title="Test", progress_notes=["note"])
-        assert step_to_dict(step, compact=True)["status"] == "in_progress"
+        assert step_to_dict(step, compact=True)["computed_status"] == "in_progress"
 
         # Blocked (takes priority over in_progress)
         step = Step(
@@ -126,7 +124,7 @@ class TestStepSerializerPhase1:
             progress_notes=["note"],
             blocked=True,
         )
-        assert step_to_dict(step, compact=True)["status"] == "blocked"
+        assert step_to_dict(step, compact=True)["computed_status"] == "blocked"
 
         # Completed (takes priority over all)
         step = Step(
@@ -135,7 +133,7 @@ class TestStepSerializerPhase1:
             progress_notes=["note"],
             blocked=True,
         )
-        assert step_to_dict(step, compact=True)["status"] == "completed"
+        assert step_to_dict(step, compact=True)["computed_status"] == "completed"
 
     def test_backward_compatibility_with_getattr(self):
         """Serializer should handle missing fields gracefully."""
@@ -161,7 +159,7 @@ class TestStepSerializerPhase1:
 
         # Compact mode should not crash
         result_compact = step_to_dict(step, compact=True)
-        assert result_compact["status"] == "pending"
+        assert result_compact["computed_status"] == "pending"
 
     def test_in_progress_detection_by_started_at(self):
         """Subtask should be in_progress if started_at is set."""
@@ -172,7 +170,7 @@ class TestStepSerializerPhase1:
         )
 
         result = step_to_dict(step, compact=True)
-        assert result["status"] == "in_progress"
+        assert result["computed_status"] == "in_progress"
 
     def test_in_progress_detection_by_criteria_confirmed(self):
         """Subtask should be in_progress if criteria_confirmed is set."""
@@ -183,7 +181,7 @@ class TestStepSerializerPhase1:
         )
 
         result = step_to_dict(step, compact=True)
-        assert result["status"] == "in_progress"
+        assert result["computed_status"] == "in_progress"
 
     def test_progress_notes_as_list(self):
         """Progress notes should be serialized as list."""
@@ -228,12 +226,12 @@ class TestTaskSerializerPhase1:
         assert len(result["steps"]) == 2
 
         # First subtask should be blocked
-        assert result["steps"][0]["status"] == "blocked"
+        assert result["steps"][0]["computed_status"] == "blocked"
         assert result["steps"][0]["blocked"] is True
         assert result["steps"][0]["block_reason"] == "Waiting"
 
         # Second subtask should be in_progress
-        assert result["steps"][1]["status"] == "in_progress"
+        assert result["steps"][1]["computed_status"] == "in_progress"
 
     def test_task_with_phase1_subtasks_full(self):
         """Task with Phase 1 subtasks should serialize correctly in full mode."""

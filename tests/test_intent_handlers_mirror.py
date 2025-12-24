@@ -35,7 +35,7 @@ def test_handle_mirror_task_steps(manager: TaskManager):
     assert resp.success is True
     items = resp.result.get("items", [])
     assert [item.get("path") for item in items] == ["s:0", "s:1"]
-    assert sum(1 for item in items if item.get("status") == "in_progress") == 1
+    assert sum(1 for item in items if item.get("queue_status") == "in_progress") == 1
 
 
 def test_handle_mirror_plan_tasks(manager: TaskManager):

@@ -63,8 +63,8 @@ def step_to_dict(
                     blocking.append("docs")
                 if blocking:
                     d["needs"] = blocking
-        # Phase 1: Add status and blocked info
-        d["status"] = getattr(step, "computed_status", "pending")
+        # Phase 1: Add status and blocked info (naming aligned with full mode)
+        d["computed_status"] = getattr(step, "computed_status", "pending")
         if getattr(step, "blocked", False):
             d["blocked"] = True
             if getattr(step, "block_reason", ""):

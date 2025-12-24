@@ -72,6 +72,35 @@ def test_close_task_apply_completes_when_ready(manager: TaskManager):
     assert str(getattr(reloaded, "status", "") or "").upper() == "DONE"
 
 
+def test_close_task_dry_run_includes_apply_package_when_runway_open(manager: TaskManager):
+    step = Step.new("Ready step title long enough 12345", criteria=["c"], tests=["pytest -q"])
+    assert step is not None
+    step.completed = True
+    step.criteria_confirmed = True
+    step.tests_confirmed = True
+
+    task = TaskDetail(id="TASK-001", title="Task", status="ACTIVE", steps=[step], success_criteria=["done"])
+    manager.save_task(task, skip_sync=True)
+    current = manager.load_task("TASK-001", skip_sync=True)
+    assert current is not None
+    expected_revision = int(getattr(current, "revision", 0) or 0)
+
+    resp = process_intent(manager, {"intent": "close_task", "task": "TASK-001"})
+    assert resp.success is True
+    assert resp.result.get("dry_run") is True
+    diff = resp.result.get("diff") or {}
+    apply_pkg = diff.get("apply") or {}
+    assert apply_pkg.get("atomic") is True
+    assert apply_pkg.get("task") == "TASK-001"
+    assert apply_pkg.get("strict_targeting") is True
+    assert apply_pkg.get("expected_target_id") == "TASK-001"
+    assert apply_pkg.get("expected_kind") == "task"
+    assert apply_pkg.get("expected_revision") == expected_revision
+
+    ops = apply_pkg.get("operations") or []
+    assert ops and ops[-1].get("intent") == "complete"
+
+
 def test_close_task_apply_blocks_when_runway_closed(manager: TaskManager):
     step = Step.new("Pending step title long enough 12345", criteria=["c"], tests=["t"])
     assert step is not None

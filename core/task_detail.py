@@ -109,24 +109,25 @@ class TaskDetail:
 
         State machine invariant (tasks):
         - Status becomes DONE only via explicit intents (close_task/complete).
-        - Automatic recalculation may move TODO↔ACTIVE based on progress/blocked,
-          but never auto-flips to DONE.
+        - DONE must remain truthful: if later mutations violate DONE invariants
+          (e.g., reopening a step or removing root success_criteria), the task is
+          deterministically reopened (DONE → ACTIVE) to avoid contradictory UI.
+        - Automatic recalculation may move TODO→ACTIVE based on progress/blocked,
+          but never auto-flips to DONE for tasks.
         """
         prog = self.calculate_progress()
         self.progress = prog
 
-        # DONE is explicit: never auto-reopen or auto-close.
-        if str(self.status or "").upper() == "DONE":
-            return
-        if self.status_manual:
-            return
+        kind = str(getattr(self, "kind", "task") or "task")
+        current = str(self.status or "").upper()
 
+        # Blocked dominates status: blocked items are never ACTIVE/DONE.
         if self.blocked:
             self.status = "TODO"
             return
 
-        kind = str(getattr(self, "kind", "task") or "task")
         if kind == "plan":
+            # Plans are lifecycle-derived from checklist progress (no nested checkpoint gating).
             if prog == 100:
                 self.status = "DONE"
             elif prog > 0:
@@ -136,11 +137,25 @@ class TaskDetail:
             return
 
         # kind == "task"
-        #
+        # DONE is explicit, but must remain consistent with core invariants.
+        if current == "DONE":
+            # Minimal DONE invariants (core-only, no app-layer lint):
+            # - progress==100 when there are steps
+            # - root success_criteria must exist
+            has_root_contract = bool(list(getattr(self, "success_criteria", []) or []))
+            if prog < 100 or not has_root_contract:
+                # Reopen deterministically: a previously closed task that becomes invalid
+                # needs attention, so we wake it up to ACTIVE.
+                self.status = "ACTIVE"
+            return
+
+        # Respect manual status for TODO/ACTIVE, but never allow it to keep an invalid DONE.
+        if self.status_manual:
+            return
+
         # Status is primarily explicit. We only "wake up" TODO tasks when progress appears,
         # but we never auto-demote ACTIVE→TODO purely because progress is 0 (that would be
         # surprising and breaks focus/safety heuristics).
-        current = str(self.status or "").upper()
         if current in {"", "TODO"}:
             self.status = "ACTIVE" if prog > 0 else "TODO"
 
