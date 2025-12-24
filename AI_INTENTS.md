@@ -180,6 +180,7 @@ Notes:
 - `result.links` contains small “expand” payloads (resume/mirror/context/history/handoff).
 - For tasks, `result.verify.evidence` is the “black box” summary for the active step (counts + kinds + last observed timestamps).
 - For tasks, `result.verify.evidence_task` aggregates evidence across **all** steps (task-level black box).
+- For tasks, `result.verify.evidence_contract` describes the standard evidence artifact contract (allowed kinds + limits).
 - `result.next[]` is always a single suggestion and mirrors `AIResponse.suggestions[0]` (same payload, `validated` flag, and safe-write defaults when applicable).
 - `result.runway` is the “runway status” for safe closure:
   - `open: bool` — whether closing is allowed right now
@@ -533,7 +534,7 @@ Dry-run preview (no writes; does not pollute ops history/delta):
 Dry-run response is explicit-by-shape:
 - `result.current` — current snapshot
 - `result.after` — post-preview snapshot (in-memory)
-- `result.diff.state` — status/progress/blocked diff (when changed)
+- `result.diff.state` — lifecycle_status/progress/blocked diff (when changed)
 - `result.diff.fields` — before/after for changed fields (trust-by-diff; works even in `compact=true`)
 - `result.would_execute=false` when the patch is a true no-op (no side-effects)
 Notes:
@@ -578,7 +579,7 @@ Optional subtree targeting:
 
 Result fields:
 - `scope`: `{task_id, kind, path?}`
-- `items[]`: `{kind, path?, id?, task_id?, title, status, progress, children_done, children_total}`
+- `items[]`: `{kind, path?, id?, task_id?, title, queue_status, progress, children_done, children_total}`
 - `summary`: `{total, completed, in_progress, pending}`
 
 ### complete
@@ -616,6 +617,7 @@ Notes:
 - To record the preview in the audit stream, pass `audit=true` and query `history(stream=\"audit\")` / `delta(stream=\"audit\")`.
 - Returns `runway` + `diff` so you can see exactly what would change.
 - `result.diff.patches[]` is an applyable patch list (same shape as `close_task.patches[]`). When `runway.open=false` and `runway.recipe.intent == "patch"`, `diff.patches[0]` mirrors that recipe in patch-item form (so the loop is: preview → `patch` → `close_task(apply=true)`).
+- When `runway.open=true`, `result.diff.apply` contains a ready-to-run `tasks_batch` argument pack (atomic patches → complete), already guarded by `strict_targeting` + `expected_*`.
 - Previews are copy/paste safe:
   - every `diff.patches[]` item includes `strict_targeting=true` + `expected_target_id/kind/revision` guards (so the caller never has to invent safety fields).
   - `runway.recipe` is also guarded when it targets the current task/plan and is a mutating intent (`patch/plan/complete/batch`).
@@ -624,6 +626,7 @@ Notes:
 - Auto-land: if `apply=true`, `force=false`, and the runway is closed only due to a deterministic patch recipe (no template values like `<...>`) that would open the runway, `close_task` applies that recipe and completes `DONE` in one atomic batch (guarded by `expected_revision`).
 - `patches[]` use the same shape as `patch` requests but omit the root `task` id (it’s implied by `close_task.task`).
 - Status is explicit: a 100% complete task is not auto-flipped to `DONE` on save/patch; use `close_task(apply=true)` or `complete(status=\"DONE\")`.
+- DONE is not “sticky”: if later mutations violate DONE invariants (e.g., reopening a step or removing root success_criteria), the task deterministically reopens (DONE → ACTIVE) to avoid contradictory UI.
 
 ### delete
 
