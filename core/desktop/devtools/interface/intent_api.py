@@ -393,6 +393,53 @@ def _secure_patch_item_for_task(patch_item: Any, *, task_id: str, revision: int)
     return secured
 
 
+def _secure_intent_payload_for_focus(payload: Any, *, focus_id: str, focus_kind: str, revision: int) -> Optional[Dict[str, Any]]:
+    """Add safe-by-default guards to a raw intent payload (output-only).
+
+    Used for copy/paste UX: runway.recipe must be executable without the caller inventing
+    strict_targeting/expected_* fields.
+    """
+    if not isinstance(payload, dict):
+        return None
+    intent = str(payload.get("intent", "") or "").strip().lower()
+    if not intent:
+        return dict(payload)
+
+    safe_intents = set(_MUTATING_INTENTS) | {"batch"}
+    if intent not in safe_intents:
+        return dict(payload)
+
+    fid = str(focus_id or "").strip()
+    if not fid:
+        return dict(payload)
+    fkind = str(focus_kind or "").strip().lower()
+    if fkind not in {"task", "plan"}:
+        return dict(payload)
+    try:
+        rev = int(revision)
+    except Exception:
+        rev = 0
+    if rev < 0:
+        rev = 0
+
+    secured = dict(payload)
+    target_id = str(secured.get("task") or secured.get("plan") or "").strip()
+    if not target_id or target_id != fid:
+        return secured
+
+    secured.setdefault("strict_targeting", True)
+    secured.setdefault("expected_target_id", fid)
+    secured.setdefault("expected_kind", fkind)
+    secured.setdefault("expected_revision", rev)
+
+    args = dict(secured)
+    args.pop("intent", None)
+    if not _validate_tool_args(intent, args):
+        # If schema rejects safe guards, fall back to the original payload.
+        return dict(payload)
+    return secured
+
+
 def _lint_issue_fix_recipe(focus_id: str, *, detail: Any, issue: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     code = str(issue.get("code", "") or "").strip()
     target = issue.get("target")
@@ -500,6 +547,15 @@ def _build_runway_payload(
         # Plan-only fallback: advance checklist (explicit user action).
         if not recipe and validation_block and kind == "plan":
             recipe = {"intent": "plan", "plan": focus_id, "advance": True}
+
+    if recipe:
+        secured = _secure_intent_payload_for_focus(
+            recipe,
+            focus_id=focus_id,
+            focus_kind=kind,
+            revision=int(getattr(detail, "revision", 0) or 0),
+        )
+        recipe = secured if isinstance(secured, dict) else recipe
 
     return {
         "open": bool(open_runway),
@@ -6457,6 +6513,10 @@ def handle_close_task(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             recipe = _suggestion_to_intent_payload((generate_suggestions(manager, task_id)[:1] or [None])[0])
         if not recipe:
             recipe = {"intent": "lint", "task": task_id}
+
+    if recipe:
+        secured = _secure_intent_payload_for_focus(recipe, focus_id=task_id, focus_kind="task", revision=base_revision)
+        recipe = secured if isinstance(secured, dict) else recipe
 
     runway_payload = {
         "open": bool(runway_open),

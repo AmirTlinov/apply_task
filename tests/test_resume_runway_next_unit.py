@@ -23,6 +23,15 @@ def test_resume_prefers_runway_recipe_over_close_task_when_runway_closed(tmp_pat
     assert resp.success is True
     assert resp.suggestions, "resume should provide a runway-fix suggestion"
 
+    summary = resp.result.get("summary") or {}
+    runway = summary.get("runway") or {}
+    recipe = runway.get("recipe") or {}
+    assert recipe.get("intent") == "patch"
+    assert recipe.get("strict_targeting") is True
+    assert recipe.get("expected_target_id") == "TASK-001"
+    assert recipe.get("expected_kind") == "task"
+    assert isinstance(recipe.get("expected_revision"), int)
+
     top = resp.suggestions[0]
     assert top.action == "patch"
     assert top.validated is True
@@ -37,4 +46,3 @@ def test_resume_prefers_runway_recipe_over_close_task_when_runway_closed(tmp_pat
 
     ops = params.get("ops") or []
     assert ops and ops[0].get("field") == "success_criteria"
-

@@ -31,6 +31,10 @@ def test_close_task_dry_run_reports_runway_and_recipe(manager: TaskManager):
     assert runway.get("open") is False
     recipe = runway.get("recipe") or {}
     assert recipe.get("intent") == "patch"
+    assert recipe.get("strict_targeting") is True
+    assert recipe.get("expected_target_id") == "TASK-001"
+    assert recipe.get("expected_kind") == "task"
+    assert recipe.get("expected_revision") == expected_revision
     diff = resp.result.get("diff") or {}
     patches = diff.get("patches") or []
     assert len(patches) == 1
