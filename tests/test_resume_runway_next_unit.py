@@ -33,16 +33,24 @@ def test_resume_prefers_runway_recipe_over_close_task_when_runway_closed(tmp_pat
     assert isinstance(recipe.get("expected_revision"), int)
 
     top = resp.suggestions[0]
-    assert top.action == "patch"
+    assert top.action == "close_task"
     assert top.validated is True
 
     params = top.params or {}
     assert params.get("task") == "TASK-001"
-    assert params.get("kind") == "task_detail"
     assert params.get("strict_targeting") is True
     assert params.get("expected_target_id") == "TASK-001"
     assert params.get("expected_kind") == "task"
     assert isinstance(params.get("expected_revision"), int)
+    assert params.get("apply") is True
 
-    ops = params.get("ops") or []
+    patches = params.get("patches") or []
+    assert isinstance(patches, list) and len(patches) == 1
+    assert patches[0].get("kind") == "task_detail"
+    assert patches[0].get("strict_targeting") is True
+    assert patches[0].get("expected_target_id") == "TASK-001"
+    assert patches[0].get("expected_kind") == "task"
+    assert isinstance(patches[0].get("expected_revision"), int)
+
+    ops = patches[0].get("ops") or []
     assert ops and ops[0].get("field") == "success_criteria"
