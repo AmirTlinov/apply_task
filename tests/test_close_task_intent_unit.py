@@ -116,3 +116,22 @@ def test_close_task_apply_when_root_lint_blocks_returns_single_patch_recipe(mana
     assert (sug.params or {}).get("task") == "TASK-001"
     ops = (sug.params or {}).get("ops") or []
     assert ops and ops[0].get("field") == "success_criteria"
+
+
+def test_close_task_apply_autolands_when_contract_done_can_fill_success_criteria(manager: TaskManager):
+    step = Step.new("Ready step title long enough 12345", criteria=["c"], tests=["t"])
+    assert step is not None
+    step.completed = True
+    step.criteria_confirmed = True
+    step.tests_confirmed = True
+
+    task = TaskDetail(id="TASK-001", title="Task", status="ACTIVE", steps=[step], success_criteria=[])
+    task.contract_data = {"goal": "Ship", "done": ["All checks green"], "checks": ["pytest -q"]}
+    manager.save_task(task, skip_sync=True)
+
+    resp = process_intent(manager, {"intent": "close_task", "task": "TASK-001", "apply": True})
+    assert resp.success is True
+    reloaded = manager.load_task("TASK-001", skip_sync=True)
+    assert reloaded is not None
+    assert str(getattr(reloaded, "status", "") or "").upper() == "DONE"
+    assert "All checks green" in list(getattr(reloaded, "success_criteria", []) or [])
