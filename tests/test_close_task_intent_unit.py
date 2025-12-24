@@ -220,3 +220,63 @@ def test_close_task_apply_uses_computed_diff_patches_to_land(manager: TaskManage
     assert str(getattr(reloaded, "status", "") or "").upper() == "DONE"
     assert "x" in list(getattr(reloaded, "next_steps", []) or [])
     assert "All checks green" in list(getattr(reloaded, "success_criteria", []) or [])
+
+
+def test_close_task_apply_rejects_expected_revision_mismatch(manager: TaskManager):
+    step = Step.new("Ready step title long enough 12345", criteria=["c"], tests=["t"])
+    assert step is not None
+    step.completed = True
+    step.criteria_confirmed = True
+    step.tests_confirmed = True
+
+    task = TaskDetail(id="TASK-001", title="Task", status="ACTIVE", steps=[step], success_criteria=["done"])
+    manager.save_task(task, skip_sync=True)
+    current = manager.load_task("TASK-001", skip_sync=True)
+    assert current is not None
+    current_rev = int(getattr(current, "revision", 0) or 0)
+
+    resp = process_intent(
+        manager,
+        {
+            "intent": "close_task",
+            "task": "TASK-001",
+            "apply": True,
+            "expected_revision": current_rev + 1,
+            "strict_targeting": True,
+            "expected_target_id": "TASK-001",
+            "expected_kind": "task",
+        },
+    )
+    assert resp.success is False
+    assert resp.error_code == "REVISION_MISMATCH"
+    reloaded = manager.load_task("TASK-001", skip_sync=True)
+    assert reloaded is not None
+    assert str(getattr(reloaded, "status", "") or "").upper() != "DONE"
+
+
+def test_close_task_apply_rejects_expected_target_mismatch(manager: TaskManager):
+    step = Step.new("Ready step title long enough 12345", criteria=["c"], tests=["t"])
+    assert step is not None
+    step.completed = True
+    step.criteria_confirmed = True
+    step.tests_confirmed = True
+
+    task = TaskDetail(id="TASK-001", title="Task", status="ACTIVE", steps=[step], success_criteria=["done"])
+    manager.save_task(task, skip_sync=True)
+
+    resp = process_intent(
+        manager,
+        {
+            "intent": "close_task",
+            "task": "TASK-001",
+            "apply": True,
+            "strict_targeting": True,
+            "expected_target_id": "TASK-999",
+            "expected_kind": "task",
+        },
+    )
+    assert resp.success is False
+    assert resp.error_code == "EXPECTED_TARGET_MISMATCH"
+    reloaded = manager.load_task("TASK-001", skip_sync=True)
+    assert reloaded is not None
+    assert str(getattr(reloaded, "status", "") or "").upper() != "DONE"

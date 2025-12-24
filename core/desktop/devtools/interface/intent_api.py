@@ -2569,11 +2569,55 @@ def _build_radar_payload(
 
     runway = result.get("runway") if isinstance(result.get("runway"), dict) else {}
     if not bool(runway.get("open", True)) and isinstance(runway.get("recipe"), dict):
-        candidate = _suggestion_from_intent_payload(
-            runway.get("recipe"),
-            reason="Полоса закрыта — открой её этим рецептом.",
-            priority="high",
-        )
+        recipe = dict(runway.get("recipe") or {})
+        recipe_intent = str(recipe.get("intent", "") or "").strip().lower()
+
+        # One-shot landing: if the runway is closed only due to a deterministic patch recipe
+        # and all steps are already completed, offer a single close_task(apply=true) call
+        # that embeds the patch as close_task.patches[] (copy/paste-ready, guarded).
+        candidate: Optional[Suggestion] = None
+        if all_completed and recipe_intent == "patch":
+            derived = _patch_item_from_patch_intent_payload(recipe)
+            secured_item = _secure_patch_item_for_task(
+                derived,
+                task_id=focus_id,
+                revision=int(focus_payload.get("revision", 0) or 0),
+            )
+            if secured_item:
+                sim = copy.deepcopy(task)
+                ops = secured_item.get("ops") or []
+                kind = str(secured_item.get("kind", "") or "").strip()
+                err_resp, _meta = _apply_patch_request_inplace(
+                    manager,
+                    "radar",
+                    task_id=focus_id,
+                    detail=sim,
+                    kind=kind,
+                    ops=list(ops or []),
+                    data=dict(secured_item),
+                )
+                if not err_resp:
+                    runway_after = _build_runway_payload(
+                        manager,
+                        detail=sim,
+                        focus_id=focus_id,
+                        next_suggestions=raw_suggestions,
+                    )
+                    if bool(runway_after.get("open", False)):
+                        candidate = Suggestion(
+                            action="close_task",
+                            target="tasks_close_task",
+                            reason="Полоса закрыта — применить рецепт и закрыть задачу атомарно (DONE) одним шагом.",
+                            priority="high",
+                            params={"task": focus_id, "apply": True, "patches": [secured_item]},
+                        )
+
+        if not candidate:
+            candidate = _suggestion_from_intent_payload(
+                recipe,
+                reason="Полоса закрыта — открой её этим рецептом.",
+                priority="high",
+            )
         next_suggestions = [candidate] if candidate else []
     else:
         status = str(getattr(task, "status", "") or "").strip().upper()

@@ -187,7 +187,9 @@ Notes:
   - `blocking.lint` — top lint errors (severity=error) + summary counters
   - `blocking.validation` — structural gating (e.g., task not complete / step not ready / plan checklist not finished)
   - `recipe` — one executable, schema-correct fix payload (usually `patch`, sometimes `batch`/`close_step` or `plan(advance=true)`).
-  - When `runway.open=false`, `result.next[0]` prioritizes `runway.recipe` (fix first, closure later).
+  - When `runway.open=false`, radar prioritizes opening the runway:
+    - default: `result.next[0]` mirrors `runway.recipe` (fix first, closure later)
+    - one-shot landing (tasks only): if all steps are completed and `runway.recipe.intent=="patch"` would open the runway, `result.next[0]` may be `close_task(apply=true, patches=[<recipe-as-patch-item>])` so the loop is `radar → close_task → DONE`.
 
 ### handoff
 

@@ -30,11 +30,19 @@ def test_radar_now_ready_prioritizes_runway_recipe_when_runway_closed(tmp_path):
 
     suggestions = list(resp.result.get("next") or [])
     assert len(suggestions) == 1
-    assert suggestions[0].get("action") == "patch"
+    assert suggestions[0].get("action") == "close_task"
     params = suggestions[0].get("params") or {}
     assert params.get("task") == "TASK-001"
+    assert params.get("apply") is True
     assert params.get("expected_target_id") == "TASK-001"
     assert isinstance(params.get("expected_revision"), int)
+    patches = params.get("patches") or []
+    assert isinstance(patches, list) and len(patches) == 1
+    assert patches[0].get("kind") == "task_detail"
+    assert patches[0].get("strict_targeting") is True
+    assert patches[0].get("expected_target_id") == "TASK-001"
+    assert patches[0].get("expected_kind") == "task"
+    assert isinstance(patches[0].get("expected_revision"), int)
     assert suggestions[0].get("validated") is True
 
 
