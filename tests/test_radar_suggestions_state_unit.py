@@ -22,7 +22,7 @@ def test_radar_now_ready_prioritizes_runway_recipe_when_runway_closed(tmp_path):
     resp = handle_radar(manager, {"intent": "radar", "task": "TASK-001"})
     assert resp.success is True
     assert (resp.result.get("now") or {}).get("kind") == "task"
-    assert (resp.result.get("now") or {}).get("queue_status") == "ready"
+    assert (resp.result.get("now") or {}).get("queue_status") == "blocked"
 
     runway = resp.result.get("runway") or {}
     assert runway.get("open") is False
@@ -78,7 +78,7 @@ def test_radar_treats_empty_step_tree_as_ready_and_offers_one_shot_landing(tmp_p
     resp = handle_radar(manager, {"intent": "radar", "task": "TASK-001"})
     assert resp.success is True
     assert (resp.result.get("now") or {}).get("kind") == "task"
-    assert (resp.result.get("now") or {}).get("queue_status") == "ready"
+    assert (resp.result.get("now") or {}).get("queue_status") == "blocked"
 
     runway = resp.result.get("runway") or {}
     assert runway.get("open") is False

@@ -2567,9 +2567,10 @@ def _build_radar_payload(
         }
     elif all_completed:
         status = str(getattr(task, "status", "") or "").strip().upper()
+        runway_open = bool(((result.get("runway") or {}) if isinstance(result.get("runway"), dict) else {}).get("open", True))
         now_payload = {
             "kind": "task",
-            "queue_status": ("completed" if status == "DONE" else "ready"),
+            "queue_status": ("completed" if status == "DONE" else ("ready" if runway_open else "blocked")),
             "queue": queue_summary,
         }
     else:
