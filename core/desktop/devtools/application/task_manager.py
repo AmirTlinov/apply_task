@@ -193,34 +193,49 @@ def _attach_step(steps: List[Step], parent_path: Optional[str], new_step: Step) 
     return True
 
 
-def _validate_step_requirements(step: Step, idx: int, translator) -> Optional[Dict[str, str]]:
+def _validate_step_requirements(step: Step, idx: int, translator) -> Optional[Dict[str, Any]]:
     if not step.success_criteria:
         return {
-            "code": "validation",
+            "code": "STEP_SUCCESS_CRITERIA_MISSING",
             "message": translator("ERR_SUBTASK_NO_CRITERIA").format(idx=idx, title=step.title),
         }
     if not step.tests:
         return {
-            "code": "validation",
+            "code": "STEP_TESTS_MISSING",
             "message": translator("ERR_SUBTASK_NO_TESTS").format(idx=idx, title=step.title),
         }
     return None
 
 
-def _validate_root_step_ready_for_ok(task: TaskDetail, translator) -> Tuple[bool, Optional[Dict[str, str]]]:
+def _validate_root_step_ready_for_ok(task: TaskDetail, translator) -> Tuple[bool, Optional[Dict[str, Any]]]:
     flat = _flatten_steps(list(task.steps or []))
     if flat and task.calculate_progress() < 100:
-        return False, {"code": "validation", "message": translator("ERR_TASK_NOT_COMPLETE")}
+        first_open = next(((path, st) for path, st in flat if not bool(getattr(st, "completed", False))), None)
+        target: Optional[Dict[str, Any]] = None
+        if first_open:
+            path, st = first_open
+            target = {"kind": "step", "path": path, "step_id": str(getattr(st, "id", "") or "")}
+        err: Dict[str, Any] = {"code": "TASK_NOT_COMPLETE", "message": translator("ERR_TASK_NOT_COMPLETE")}
+        if target:
+            err["target"] = target
+        return False, err
     if not task.success_criteria:
-        return False, {"code": "validation", "message": translator("ERR_TASK_NO_CRITERIA_TESTS")}
-    for idx, (_, st) in enumerate(flat, 1):
+        return False, {
+            "code": "TASK_SUCCESS_CRITERIA_MISSING",
+            "message": translator("ERR_TASK_NO_CRITERIA_TESTS"),
+            "target": {"kind": "task_detail"},
+        }
+    for idx, (path, st) in enumerate(flat, 1):
         err = _validate_step_requirements(st, idx, translator)
         if err:
+            err = dict(err)
+            err.setdefault("target", {"kind": "step", "path": path, "step_id": str(getattr(st, "id", "") or "")})
             return False, err
         if not bool(getattr(st, "ready_for_completion", lambda: False)()):
             return False, {
-                "code": "validation",
+                "code": "STEP_NOT_READY",
                 "message": translator("ERR_TASK_STEP_NOT_READY").format(idx=idx, title=st.title),
+                "target": {"kind": "step", "path": path, "step_id": str(getattr(st, "id", "") or "")},
             }
     return True, None
 

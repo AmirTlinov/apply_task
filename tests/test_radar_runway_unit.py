@@ -44,6 +44,11 @@ def test_radar_runway_uses_next_suggestion_when_validation_blocks(tmp_path):
     assert resp.success is True
     runway = resp.result.get("runway") or {}
     assert runway.get("open") is False
+    blocking = runway.get("blocking") or {}
+    validation = blocking.get("validation") or {}
+    assert validation.get("code") == "TASK_NOT_COMPLETE"
+    target = validation.get("target") or {}
+    assert target.get("path") == "s:0"
     recipe = runway.get("recipe") or {}
     # Not ready to complete; runway should suggest progressing the current step (batch close_step).
     assert recipe.get("intent") in {"batch", "close_step"}

@@ -138,6 +138,24 @@ def test_close_task_dry_run_includes_apply_package_when_runway_open(manager: Tas
     assert ops and ops[-1].get("intent") == "complete"
 
 
+def test_close_task_dry_run_includes_validation_target_when_not_complete(manager: TaskManager):
+    step = Step.new("Pending step title long enough 12345", criteria=["c"], tests=["t"])
+    assert step is not None
+    task = TaskDetail(id="TASK-001", title="Task", status="ACTIVE", steps=[step], success_criteria=["done"])
+    manager.save_task(task, skip_sync=True)
+
+    resp = process_intent(manager, {"intent": "close_task", "task": "TASK-001"})
+    assert resp.success is True
+    assert resp.result.get("dry_run") is True
+    runway = resp.result.get("runway") or {}
+    blocking = runway.get("blocking") or {}
+    validation = blocking.get("validation") or {}
+    assert validation.get("code") == "TASK_NOT_COMPLETE"
+    target = validation.get("target") or {}
+    assert target.get("kind") == "step"
+    assert target.get("path") == "s:0"
+
+
 def test_close_task_apply_blocks_when_runway_closed(manager: TaskManager):
     step = Step.new("Pending step title long enough 12345", criteria=["c"], tests=["t"])
     assert step is not None

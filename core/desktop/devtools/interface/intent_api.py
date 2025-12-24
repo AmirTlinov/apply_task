@@ -657,6 +657,8 @@ def _build_runway_payload(
                 "code": str(err.get("code", "validation") or "validation"),
                 "message": str(err.get("message", "") or ""),
             }
+            if isinstance(err.get("target"), dict):
+                validation_block["target"] = dict(err.get("target") or {})
     elif kind == "plan":
         steps = list(getattr(detail, "plan_steps", []) or [])
         current = int(getattr(detail, "plan_current", 0) or 0)
@@ -6711,7 +6713,12 @@ def handle_close_task(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     if not force:
         ok, val_err = _validate_root_step_ready_for_ok(sim, manager._t)
         if not ok and isinstance(val_err, dict):
-            validation_block = {"code": str(val_err.get("code", "validation") or "validation"), "message": str(val_err.get("message", "") or "")}
+            validation_block = {
+                "code": str(val_err.get("code", "validation") or "validation"),
+                "message": str(val_err.get("message", "") or ""),
+            }
+            if isinstance(val_err.get("target"), dict):
+                validation_block["target"] = dict(val_err.get("target") or {})
 
     runway_open = not blocking_lint and not validation_block
 
