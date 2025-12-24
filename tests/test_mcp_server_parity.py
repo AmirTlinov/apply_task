@@ -51,3 +51,46 @@ def test_mcp_returns_text_content(monkeypatch, tmp_path):
     assert resume_content["type"] == "text"
     resume_data = _parse_content(resume_content)
     assert resume_data["result"]["task"]["id"] == task.id
+    # compact=true is the default: nested trees are omitted unless explicitly requested
+    assert "steps" not in (resume_data["result"]["task"] or {})
+
+    # patch(dry_run) preview must include trust-by-diff fields and current/computed snapshots
+    patch_resp = server.handle_request(JsonRpcRequest(
+        jsonrpc="2.0",
+        method="tools/call",
+        id=4,
+        params={
+            "name": "tasks_patch",
+            "arguments": {
+                "task": task.id,
+                "dry_run": True,
+                "ops": [{"op": "append", "field": "success_criteria", "value": "done"}],
+            },
+        },
+    ))
+    patch_content = patch_resp["result"]["content"][0]
+    assert patch_content["type"] == "text"
+    patch_data = _parse_content(patch_content)
+    result = patch_data["result"]
+    assert result.get("dry_run") is True
+    assert result.get("kind") == "task_detail"
+    assert "diff" in result
+    assert (result.get("diff") or {}).get("fields"), "patch(dry_run) must return non-empty diff.fields for changes"
+    assert "current" in result and "computed" in result
+    assert "steps" not in (result["current"]["task"] or {})
+    assert "steps" not in (result["computed"]["task"] or {})
+
+    # close_task(dry_run) preview must return applyable diff.patches derived from runway.recipe
+    close_resp = server.handle_request(JsonRpcRequest(
+        jsonrpc="2.0",
+        method="tools/call",
+        id=5,
+        params={"name": "tasks_close_task", "arguments": {"task": task.id, "apply": False}},
+    ))
+    close_content = close_resp["result"]["content"][0]
+    assert close_content["type"] == "text"
+    close_data = _parse_content(close_content)
+    diff = ((close_data.get("result") or {}).get("diff") or {})
+    patches = diff.get("patches") or []
+    assert len(patches) == 1
+    assert patches[0].get("kind") == "task_detail"

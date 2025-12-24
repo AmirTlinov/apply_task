@@ -2751,18 +2751,15 @@ def handle_resume(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             suggestions=_missing_target_suggestions(manager, want="PLAN-" if focus_id.startswith("PLAN-") else "TASK-"),
             result={"task": focus_id},
         )
-    compact = data.get("compact")
-    if compact is None:
-        compact = True
-    compact = bool(compact)
+    compact = _parse_compact(data.get("compact"), default=True)
     result: Dict[str, Any] = {}
     if getattr(detail, "kind", "task") == "plan":
-        result["plan"] = plan_to_dict(detail, compact=compact is True)
+        result["plan"] = plan_to_dict(detail, compact=compact)
     else:
-        include_steps = compact is not True
-        result["task"] = task_to_dict(detail, include_steps=include_steps, compact=compact is True)
+        include_steps = not compact
+        result["task"] = task_to_dict(detail, include_steps=include_steps, compact=compact)
         checkpoint_status = _compute_checkpoint_status(detail)
-        if compact is True:
+        if compact:
             pending = list(checkpoint_status.get("pending", []) or [])
             ready = list(checkpoint_status.get("ready", []) or [])
             pending_ids = list(checkpoint_status.get("pending_ids", []) or [])
@@ -5554,10 +5551,7 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         )
 
     dry_run = bool(data.get("dry_run", False))
-    compact = data.get("compact")
-    if compact is None:
-        compact = True
-    compact = bool(compact)
+    compact = _parse_compact(data.get("compact"), default=True)
     detail = copy.deepcopy(base) if dry_run else base
 
     if kind != "task_detail" and getattr(detail, "kind", "task") != "task":
@@ -5592,16 +5586,16 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
     if kind == "task_detail":
         if dry_run:
             key = "plan" if getattr(detail, "kind", "task") == "plan" else "task"
-            include_steps = compact is not True
+            include_steps = not compact
             current = (
-                plan_to_dict(base, compact=compact is True)
+                plan_to_dict(base, compact=compact)
                 if key == "plan"
-                else task_to_dict(base, include_steps=include_steps, compact=compact is True)
+                else task_to_dict(base, include_steps=include_steps, compact=compact)
             )
             computed = (
-                plan_to_dict(detail, compact=compact is True)
+                plan_to_dict(detail, compact=compact)
                 if key == "plan"
-                else task_to_dict(detail, include_steps=include_steps, compact=compact is True)
+                else task_to_dict(detail, include_steps=include_steps, compact=compact)
             )
             state_diff = _preview_state_diff(_task_state_snapshot(base), _task_state_snapshot(detail))
             field_diffs = _build_patch_field_diffs(
@@ -5629,11 +5623,11 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
 
         if not updated_fields:
             key = "plan" if getattr(detail, "kind", "task") == "plan" else "task"
-            include_steps = compact is not True
+            include_steps = not compact
             snapshot = (
-                plan_to_dict(base, compact=compact is True)
+                plan_to_dict(base, compact=compact)
                 if key == "plan"
-                else task_to_dict(base, include_steps=include_steps, compact=compact is True)
+                else task_to_dict(base, include_steps=include_steps, compact=compact)
             )
             return AIResponse(
                 success=True,
@@ -5657,11 +5651,11 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         manager.save_task(detail, skip_sync=True)
         reloaded = manager.load_task(task_id, getattr(detail, "domain", ""), skip_sync=True) or detail
         key = "plan" if getattr(reloaded, "kind", "task") == "plan" else "task"
-        include_steps = compact is not True
+        include_steps = not compact
         snapshot = (
-            plan_to_dict(reloaded, compact=compact is True)
+            plan_to_dict(reloaded, compact=compact)
             if key == "plan"
-            else task_to_dict(reloaded, include_steps=include_steps, compact=compact is True)
+            else task_to_dict(reloaded, include_steps=include_steps, compact=compact)
         )
         return AIResponse(
             success=True,
@@ -5675,9 +5669,9 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             return error_response("patch", "PATH_NOT_FOUND", "path не найден после применения patch")
         step, _, _ = _find_step_by_path(list(getattr(detail, "steps", []) or []), path)
         if dry_run:
-            include_steps = compact is not True
-            current_task = task_to_dict(base, include_steps=include_steps, compact=compact is True)
-            computed_task = task_to_dict(detail, include_steps=include_steps, compact=compact is True)
+            include_steps = not compact
+            current_task = task_to_dict(base, include_steps=include_steps, compact=compact)
+            computed_task = task_to_dict(detail, include_steps=include_steps, compact=compact)
             current_step, _, _ = _find_step_by_path(list(getattr(base, "steps", []) or []), path)
             state_diff = _preview_state_diff(_task_state_snapshot(base), _task_state_snapshot(detail))
             field_diffs = _build_patch_field_diffs(
@@ -5701,14 +5695,14 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                     "current": {
                         "task": current_task,
                         "step": step_to_dict(
-                            current_step, path=path, compact=compact is True, include_steps=compact is not True
+                            current_step, path=path, compact=compact, include_steps=not compact
                         )
                         if current_step
                         else None,
                     },
                     "computed": {
                         "task": computed_task,
-                        "step": step_to_dict(step, path=path, compact=compact is True, include_steps=compact is not True) if step else None,
+                        "step": step_to_dict(step, path=path, compact=compact, include_steps=not compact) if step else None,
                     },
                 },
                 context={"task_id": task_id},
@@ -5725,10 +5719,10 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                     "path": path,
                     "updated_fields": [],
                     "no_op": True,
-                    "step": step_to_dict(st_before, path=path, compact=compact is True, include_steps=compact is not True)
+                    "step": step_to_dict(st_before, path=path, compact=compact, include_steps=not compact)
                     if st_before
                     else None,
-                    "task": task_to_dict(base, include_steps=compact is not True, compact=compact is True),
+                    "task": task_to_dict(base, include_steps=not compact, compact=compact),
                 },
                 context={"task_id": task_id},
                 meta={"no_op": True},
@@ -5745,8 +5739,8 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 "kind": "step",
                 "path": path,
                 "updated_fields": sorted(set(updated_fields)),
-                "step": step_to_dict(st, path=path, compact=compact is True, include_steps=compact is not True) if st else None,
-                "task": task_to_dict(reloaded, include_steps=compact is not True, compact=compact is True),
+                "step": step_to_dict(st, path=path, compact=compact, include_steps=not compact) if st else None,
+                "task": task_to_dict(reloaded, include_steps=not compact, compact=compact),
             },
             context={"task_id": task_id},
         )
@@ -5756,9 +5750,9 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
         return error_response("patch", "PATH_NOT_FOUND", "path не найден после применения patch")
     node, _, _ = _find_task_by_path(list(getattr(detail, "steps", []) or []), path)
     if dry_run:
-        include_steps = compact is not True
-        current_task = task_to_dict(base, include_steps=include_steps, compact=compact is True)
-        computed_task = task_to_dict(detail, include_steps=include_steps, compact=compact is True)
+        include_steps = not compact
+        current_task = task_to_dict(base, include_steps=include_steps, compact=compact)
+        computed_task = task_to_dict(detail, include_steps=include_steps, compact=compact)
         current_node, _, _ = _find_task_by_path(list(getattr(base, "steps", []) or []), path)
         state_diff = _preview_state_diff(_task_state_snapshot(base), _task_state_snapshot(detail))
         field_diffs = _build_patch_field_diffs(
@@ -5782,14 +5776,14 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 "current": {
                     "task": current_task,
                     "task_node": task_node_to_dict(
-                        current_node, path=path, compact=compact is True, include_steps=compact is not True
+                        current_node, path=path, compact=compact, include_steps=not compact
                     )
                     if current_node
                     else None,
                 },
                 "computed": {
                     "task": computed_task,
-                    "task_node": task_node_to_dict(node, path=path, compact=compact is True, include_steps=compact is not True) if node else None,
+                    "task_node": task_node_to_dict(node, path=path, compact=compact, include_steps=not compact) if node else None,
                 },
             },
             context={"task_id": task_id},
@@ -5806,10 +5800,10 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
                 "path": path,
                 "updated_fields": [],
                 "no_op": True,
-                "task_node": task_node_to_dict(current_node, path=path, compact=compact is True, include_steps=compact is not True)
+                "task_node": task_node_to_dict(current_node, path=path, compact=compact, include_steps=not compact)
                 if current_node
                 else None,
-                "task": task_to_dict(base, include_steps=compact is not True, compact=compact is True),
+                "task": task_to_dict(base, include_steps=not compact, compact=compact),
             },
             context={"task_id": task_id},
             meta={"no_op": True},
@@ -5826,8 +5820,8 @@ def handle_patch(manager: TaskManager, data: Dict[str, Any]) -> AIResponse:
             "kind": "task",
             "path": path,
             "updated_fields": sorted(set(updated_fields)),
-            "task_node": task_node_to_dict(patched, path=path, compact=compact is True, include_steps=compact is not True) if patched else None,
-            "task": task_to_dict(reloaded, include_steps=compact is not True, compact=compact is True),
+            "task_node": task_node_to_dict(patched, path=path, compact=compact, include_steps=not compact) if patched else None,
+            "task": task_to_dict(reloaded, include_steps=not compact, compact=compact),
         },
         context={"task_id": task_id},
     )
